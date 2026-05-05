@@ -1,0 +1,28 @@
+# .gitignore
+
+# Environment variables (NEVER commit!)
+.env
+.env.local
+.env.production
+
+# Node modules
+node_modules/
+netlify/functions/node_modules/
+
+# Netlify local state
+.netlify/
+.netlify-state.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*

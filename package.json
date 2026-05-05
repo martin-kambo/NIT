@@ -1,0 +1,13 @@
+{
+  "name": "ngoliba-infotrack-functions",
+  "version": "1.0.0",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "@upstash/redis": "^1.28.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "africastalking": "^0.7.0",
+    "crypto": "^1.0.1"
+  }
+}

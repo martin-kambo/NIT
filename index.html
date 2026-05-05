@@ -1,0 +1,1835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ngoliba InfoTrack · Ward Opinion Poll</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+:root {
+  --forest: #0d2818;
+  --forest-mid: #1a3f28;
+  --forest-light: #2d6a4f;
+  --emerald: #40c27a;
+  --emerald-bright: #5ddb96;
+  --gold: #e9c46a;
+  --gold-dark: #c9a027;
+  --cream: #faf7f0;
+  --cream-dark: #f0e8d4;
+  --sand: #e8d5b7;
+  --charcoal: #1c1c1e;
+  --mid-gray: #6b7280;
+  --light-gray: #f3f4f6;
+  --red-accent: #e63946;
+  --blue-accent: #4361ee;
+  --text-dark: #111827;
+  --text-mid: #374151;
+  --glass: rgba(255,255,255,0.07);
+  --glass-border: rgba(255,255,255,0.12);
+  --shadow-deep: 0 32px 80px -12px rgba(0,0,0,0.35);
+  --shadow-card: 0 8px 30px -8px rgba(0,0,0,0.15);
+  --radius-xl: 2rem;
+  --radius-lg: 1.25rem;
+  --radius-md: 0.875rem;
+}
+
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--cream);
+  color: var(--text-dark);
+  overflow-x: hidden;
+  cursor: none;
+}
+
+/* ═══ CUSTOM CURSOR ═══ */
+#cursor {
+  position: fixed; top: 0; left: 0; width: 12px; height: 12px;
+  background: var(--emerald); border-radius: 50%; pointer-events: none;
+  z-index: 9999; transition: transform 0.15s, background 0.2s;
+  mix-blend-mode: multiply;
+}
+#cursor-ring {
+  position: fixed; top: 0; left: 0; width: 40px; height: 40px;
+  border: 2px solid var(--gold); border-radius: 50%; pointer-events: none;
+  z-index: 9998; transition: transform 0.4s cubic-bezier(0.16,1,0.3,1), width 0.3s, height 0.3s, opacity 0.3s;
+  opacity: 0.6;
+}
+body:hover #cursor { transform: translate(-50%,-50%); }
+
+/* ═══ SCROLLBAR ═══ */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--cream-dark); }
+::-webkit-scrollbar-thumb { background: var(--forest-light); border-radius: 3px; }
+
+/* ═══ NOISE TEXTURE OVERLAY ═══ */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  opacity: 0.4;
+}
+
+/* ═══ AMBIENT ORBS ═══ */
+.ambient-orb {
+  position: fixed; border-radius: 50%; pointer-events: none; z-index: 0;
+  filter: blur(80px); opacity: 0.12; animation: drift 20s ease-in-out infinite alternate;
+}
+.orb-1 { width: 600px; height: 600px; background: var(--emerald); top: -200px; right: -200px; animation-duration: 25s; }
+.orb-2 { width: 400px; height: 400px; background: var(--gold); bottom: -100px; left: -100px; animation-duration: 30s; animation-delay: -10s; }
+.orb-3 { width: 300px; height: 300px; background: var(--blue-accent); top: 40%; left: 30%; animation-duration: 20s; animation-delay: -5s; }
+@keyframes drift {
+  0% { transform: translate(0,0) scale(1); }
+  100% { transform: translate(40px,30px) scale(1.1); }
+}
+
+/* ═══ LAYOUT ═══ */
+.app-shell { position: relative; z-index: 1; }
+.container { max-width: 1280px; margin: 0 auto; padding: 0 1.5rem; }
+
+/* ═══ HEADER ═══ */
+.site-header {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(250,247,240,0.8); backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  padding: 1rem 0;
+  transition: all 0.3s;
+}
+.site-header.scrolled {
+  background: rgba(13,40,24,0.95); backdrop-filter: blur(20px);
+  border-bottom-color: rgba(255,255,255,0.08);
+}
+.site-header.scrolled .header-inner .logo-text { color: white; }
+.site-header.scrolled .header-inner .logo-sub { color: rgba(255,255,255,0.6); }
+.site-header.scrolled .header-inner .nav-pill { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); }
+.site-header.scrolled .header-inner .nav-pill.active { background: var(--gold); color: var(--forest); }
+.header-inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.logo-block { display: flex; align-items: center; gap: 0.75rem; }
+.logo-mark {
+  width: 42px; height: 42px; border-radius: 12px;
+  background: linear-gradient(135deg, var(--forest-light), var(--emerald));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem; box-shadow: 0 4px 12px rgba(64,194,122,0.3);
+}
+.logo-text { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.25rem; color: var(--forest); line-height: 1; }
+.logo-sub { font-size: 0.65rem; font-weight: 500; color: var(--mid-gray); letter-spacing: 0.12em; text-transform: uppercase; }
+.header-nav { display: flex; align-items: center; gap: 0.5rem; }
+.nav-pill {
+  padding: 0.45rem 1rem; border-radius: 50px; font-size: 0.8rem; font-weight: 600;
+  background: transparent; border: none; cursor: none;
+  color: var(--text-mid); transition: all 0.2s; letter-spacing: 0.02em;
+}
+.nav-pill:hover { background: var(--forest-light); color: white; }
+.nav-pill.active { background: var(--forest); color: var(--gold); }
+.header-actions { display: flex; align-items: center; gap: 0.75rem; }
+.avatar-wrap {
+  position: relative; cursor: none;
+  transition: transform 0.2s;
+}
+.avatar-wrap:hover { transform: scale(1.05); }
+.avatar-wrap img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 2px solid var(--gold); }
+.voter-badge-dot {
+  position: absolute; bottom: -2px; right: -2px;
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 700;
+}
+.logout-btn {
+  padding: 0.45rem 1rem; background: var(--cream-dark); border: 1px solid var(--sand);
+  border-radius: 50px; font-size: 0.8rem; font-weight: 600; cursor: none;
+  transition: all 0.2s; color: var(--text-mid);
+}
+.logout-btn:hover { background: var(--red-accent); color: white; border-color: transparent; }
+
+/* ═══ HERO BAND ═══ */
+.hero-band {
+  background: var(--forest);
+  padding: 3rem 0 2rem;
+  position: relative; overflow: hidden;
+}
+.hero-band::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 80% 60% at 60% 50%, rgba(64,194,122,0.08) 0%, transparent 70%);
+}
+.hero-band-inner { position: relative; z-index: 1; }
+.ward-chip {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+  padding: 0.35rem 1rem; border-radius: 50px;
+  font-size: 0.75rem; font-weight: 600; color: var(--emerald);
+  letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 1rem;
+}
+.hero-title {
+  font-family: 'Syne', sans-serif; font-weight: 800;
+  font-size: clamp(2.5rem, 6vw, 4.5rem); color: white; line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.hero-title .accent { color: var(--gold); position: relative; display: inline-block; }
+.hero-title .accent::after {
+  content: '';
+  position: absolute; bottom: -4px; left: 0; width: 100%; height: 3px;
+  background: linear-gradient(90deg, var(--gold), transparent);
+  border-radius: 2px;
+}
+.hero-sub { color: rgba(255,255,255,0.55); font-size: 1rem; margin-top: 0.75rem; font-weight: 400; }
+.cycle-badge {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: rgba(233,196,106,0.15); border: 1px solid rgba(233,196,106,0.3);
+  padding: 0.5rem 1.25rem; border-radius: 50px;
+  font-size: 0.8rem; color: var(--gold); font-family: 'JetBrains Mono', monospace;
+  margin-top: 1.5rem;
+}
+.cycle-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--emerald); animation: pulse-dot 2s infinite; }
+@keyframes pulse-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.8); } }
+#heroCountdown { font-weight: 600; }
+
+/* ═══ COUNTDOWN STRIP ═══ */
+.countdown-strip {
+  background: linear-gradient(90deg, var(--forest-mid), var(--forest-light));
+  padding: 0.75rem 0;
+}
+.countdown-inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.countdown-label { color: rgba(255,255,255,0.6); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; }
+.countdown-time { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: var(--gold); font-weight: 600; }
+.voter-stats-row { display: flex; gap: 1.5rem; }
+.voter-stat-item { text-align: center; }
+.voter-stat-num { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; color: var(--emerald); }
+.voter-stat-label { font-size: 0.65rem; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* ═══ FACE-OFF ═══ */
+.faceoff-section {
+  background: var(--charcoal);
+  position: relative; overflow: hidden;
+  margin: 2rem 0;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-deep);
+}
+.faceoff-bg {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 60% 100% at 25% 50%, rgba(67,97,238,0.15) 0%, transparent 60%),
+              radial-gradient(ellipse 60% 100% at 75% 50%, rgba(230,57,70,0.15) 0%, transparent 60%);
+}
+.faceoff-grid-lines {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+.faceoff-inner { position: relative; z-index: 2; display: flex; min-height: 50vh; flex-wrap: wrap; }
+.fo-candidate {
+  flex: 1; min-width: 260px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; padding: 3rem 2rem;
+  position: relative;
+}
+.fo-left { background: linear-gradient(135deg, rgba(67,97,238,0.12), transparent); }
+.fo-right { background: linear-gradient(225deg, rgba(230,57,70,0.12), transparent); }
+.fo-vs-divider {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 2rem 0; position: relative; z-index: 3;
+}
+.fo-vs-line {
+  flex: 1; width: 2px;
+  background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.2), transparent);
+}
+.fo-vs-badge {
+  width: 60px; height: 60px; border-radius: 50%;
+  background: radial-gradient(circle, #333, #1a1a1a);
+  border: 2px solid rgba(255,255,255,0.15);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Syne', sans-serif; font-size: 0.9rem; font-weight: 800;
+  color: white; letter-spacing: 0.05em; box-shadow: 0 0 30px rgba(0,0,0,0.5);
+  animation: vs-pulse 3s ease-in-out infinite;
+}
+@keyframes vs-pulse { 0%,100% { box-shadow: 0 0 30px rgba(0,0,0,0.5); } 50% { box-shadow: 0 0 50px rgba(255,255,255,0.1), 0 0 30px rgba(0,0,0,0.5); } }
+.fo-portrait-ring {
+  width: 130px; height: 130px; border-radius: 50%; padding: 4px;
+  position: relative; cursor: none; margin-bottom: 1rem;
+  transition: transform 0.3s;
+}
+.fo-portrait-ring:hover { transform: scale(1.06); }
+.fo-left .fo-portrait-ring { background: linear-gradient(135deg, #4361ee, #3a0ca3); }
+.fo-right .fo-portrait-ring { background: linear-gradient(135deg, #e63946, #9d0208); }
+.fo-portrait-ring img {
+  width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 3px solid #1a1a1a;
+}
+.fo-name {
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.3rem;
+  color: white; text-align: center; margin-bottom: 0.25rem;
+}
+.fo-party { font-size: 0.75rem; color: rgba(255,255,255,0.4); margin-bottom: 1rem; }
+.fo-votes {
+  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 4rem;
+  line-height: 1; text-align: center;
+  transition: all 0.3s;
+}
+.fo-left .fo-votes { color: #4361ee; filter: drop-shadow(0 0 20px rgba(67,97,238,0.5)); }
+.fo-right .fo-votes { color: #e63946; filter: drop-shadow(0 0 20px rgba(230,57,70,0.5)); }
+.fo-votes-label { font-size: 0.7rem; color: rgba(255,255,255,0.3); letter-spacing: 0.15em; text-transform: uppercase; margin-top: 0.25rem; }
+.fo-footer {
+  background: rgba(0,0,0,0.4); border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 1rem;
+}
+.fo-progress-wrap { flex: 1; min-width: 200px; }
+.fo-progress-labels { display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.7rem; color: rgba(255,255,255,0.4); }
+.fo-progress-bar {
+  height: 6px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden;
+}
+.fo-progress-fill {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, #4361ee, #e63946);
+  transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1);
+}
+.fo-total-chip {
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 50px; padding: 0.4rem 1rem;
+  font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 0.5rem;
+}
+.fo-winner-chip {
+  background: linear-gradient(135deg, rgba(233,196,106,0.2), rgba(233,196,106,0.05));
+  border: 1px solid rgba(233,196,106,0.3);
+  border-radius: 50px; padding: 0.4rem 1rem;
+  font-size: 0.8rem; color: var(--gold);
+}
+.vote-flash { animation: vote-flash-anim 0.5s ease-out; }
+@keyframes vote-flash-anim { 0% { transform: scale(1); } 50% { transform: scale(1.15); filter: brightness(1.5); } 100% { transform: scale(1); } }
+
+/* ═══ AUTH SECTION ═══ */
+.auth-wrap {
+  max-width: 900px; margin: 2.5rem auto; padding: 0 1rem;
+}
+.auth-card {
+  border-radius: var(--radius-xl); overflow: hidden;
+  box-shadow: var(--shadow-deep);
+  display: grid; grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 700px) { .auth-card { grid-template-columns: 1fr; } }
+.auth-visual {
+  background: var(--forest);
+  padding: 3rem 2.5rem;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  position: relative; overflow: hidden; min-height: 300px;
+}
+.auth-visual-bg {
+  position: absolute; inset: 0;
+  background: url('https://images.pexels.com/photos/5699479/pexels-photo-5699479.jpeg?auto=compress&cs=tinysrgb&w=600') center/cover;
+  opacity: 0.3;
+}
+.auth-visual-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(to top, var(--forest) 30%, rgba(13,40,24,0.4) 100%);
+}
+.auth-visual-content { position: relative; z-index: 1; }
+.auth-visual-title {
+  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 2rem;
+  color: white; line-height: 1.1; margin-bottom: 0.75rem;
+}
+.auth-visual-sub { color: rgba(255,255,255,0.5); font-size: 0.875rem; line-height: 1.5; }
+.auth-visual-dots { display: flex; gap: 0.4rem; margin-top: 1.5rem; }
+.auth-visual-dots span { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.3); }
+.auth-visual-dots span:first-child { background: var(--emerald); width: 20px; border-radius: 3px; }
+.auth-form-pane {
+  background: white; padding: 2.5rem 2rem; display: flex; flex-direction: column;
+}
+.auth-tabs { display: flex; gap: 0; border-bottom: 2px solid var(--light-gray); margin-bottom: 1.75rem; }
+.auth-tab-btn {
+  flex: 1; padding: 0.75rem; background: none; border: none; cursor: none;
+  font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 0.9rem;
+  color: var(--mid-gray); position: relative; transition: color 0.2s;
+}
+.auth-tab-btn::after {
+  content: ''; position: absolute; bottom: -2px; left: 0; width: 100%; height: 2px;
+  background: var(--forest); transform: scaleX(0); transition: transform 0.25s;
+}
+.auth-tab-btn.active { color: var(--forest); }
+.auth-tab-btn.active::after { transform: scaleX(1); }
+
+/* Form fields */
+.field-group { margin-bottom: 1.25rem; }
+.field-label { font-size: 0.75rem; font-weight: 600; color: var(--mid-gray); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.4rem; display: block; }
+.field-input {
+  width: 100%; padding: 0.8rem 1rem; border: 1.5px solid #e5e7eb;
+  border-radius: var(--radius-md); font-family: 'Outfit', sans-serif; font-size: 0.9rem;
+  color: var(--text-dark); background: var(--light-gray);
+  transition: all 0.2s; outline: none;
+}
+.field-input:focus { border-color: var(--forest-light); background: white; box-shadow: 0 0 0 4px rgba(45,106,79,0.08); }
+.field-input.error { border-color: var(--red-accent); background: #fff5f5; }
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+@media (max-width: 480px) { .field-grid { grid-template-columns: 1fr; } }
+.error-msg {
+  background: #fff5f5; border: 1px solid #fecaca; color: #dc2626;
+  padding: 0.6rem 1rem; border-radius: var(--radius-md);
+  font-size: 0.8rem; margin-bottom: 1rem; display: none;
+}
+.error-msg.show { display: block; }
+.strength-wrap { height: 4px; background: #e5e7eb; border-radius: 2px; margin-top: 0.4rem; overflow: hidden; }
+.strength-bar { height: 100%; width: 0%; transition: width 0.2s, background 0.2s; border-radius: 2px; }
+.auth-extras { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem; }
+.remember-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--mid-gray); cursor: none; }
+.forgot-btn { background: none; border: none; font-size: 0.8rem; color: var(--forest-light); cursor: none; text-decoration: underline; font-family: 'Outfit', sans-serif; }
+
+/* Buttons */
+.btn-primary {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  width: 100%; padding: 0.9rem 1.5rem;
+  background: var(--forest); color: white;
+  border: none; border-radius: var(--radius-md);
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem;
+  cursor: none; transition: all 0.25s; letter-spacing: 0.02em;
+  position: relative; overflow: hidden;
+}
+.btn-primary::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, var(--emerald), var(--forest-light));
+  opacity: 0; transition: opacity 0.25s;
+}
+.btn-primary:hover::before { opacity: 1; }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(13,40,24,0.3); }
+.btn-primary:active { transform: translateY(0); }
+.btn-primary span { position: relative; z-index: 1; }
+.btn-gold {
+  background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+  color: var(--forest); font-family: 'Syne', sans-serif; font-weight: 700;
+}
+.btn-gold::before { background: linear-gradient(135deg, var(--gold), #f5d78c); }
+.btn-sm { padding: 0.55rem 1.2rem; width: auto; font-size: 0.8rem; border-radius: 50px; }
+.btn-ghost {
+  background: transparent; border: 1.5px solid var(--sand); color: var(--text-mid);
+  border-radius: 50px; padding: 0.55rem 1.2rem; font-family: 'Outfit', sans-serif;
+  font-weight: 600; font-size: 0.8rem; cursor: none; transition: all 0.2s;
+}
+.btn-ghost:hover { background: var(--cream-dark); border-color: var(--mid-gray); }
+.btn-danger { background: var(--red-accent); color: white; border: none; border-radius: 50px; padding: 0.55rem 1.2rem; font-family: 'Outfit', sans-serif; font-size: 0.8rem; cursor: none; transition: all 0.2s; }
+.btn-danger:hover { background: #c1121f; }
+
+/* ═══ DASHBOARD ═══ */
+.dashboard-wrap { padding: 2rem 0; }
+.section-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.75rem; }
+.section-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.6rem; color: var(--text-dark); }
+.section-sub { font-size: 0.85rem; color: var(--mid-gray); margin-top: 0.15rem; }
+.section-action { font-size: 0.8rem; color: var(--forest-light); font-weight: 600; cursor: none; background: none; border: none; text-decoration: underline; font-family: 'Outfit', sans-serif; }
+
+/* CANDIDATES GRID */
+.candidates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.25rem; margin-bottom: 2.5rem; }
+.candidate-card {
+  background: white; border-radius: var(--radius-xl); overflow: hidden;
+  box-shadow: var(--shadow-card); border: 1px solid rgba(0,0,0,0.04);
+  transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s;
+  display: flex; flex-direction: column; cursor: none;
+  opacity: 0; transform: translateY(30px);
+  animation: card-reveal 0.5s forwards;
+}
+.candidate-card:hover { transform: translateY(-8px) scale(1.01); box-shadow: 0 24px 60px -12px rgba(0,0,0,0.2); }
+@keyframes card-reveal { to { opacity: 1; transform: translateY(0); } }
+.card-img-wrap { position: relative; height: 160px; background: var(--light-gray); overflow: hidden; }
+.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; object-position: top; transition: transform 0.5s; }
+.candidate-card:hover .card-img-wrap img { transform: scale(1.08); }
+.card-rank-badge {
+  position: absolute; top: 0.75rem; left: 0.75rem;
+  width: 28px; height: 28px; border-radius: 50%; border: 2px solid white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; font-weight: 800; font-family: 'Syne', sans-serif;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.rank-1 { background: var(--gold); color: var(--forest); }
+.rank-2 { background: #9ca3af; color: white; }
+.rank-3 { background: #cd7f32; color: white; }
+.rank-other { background: rgba(0,0,0,0.5); color: white; }
+.card-votes-chip {
+  position: absolute; bottom: 0.75rem; right: 0.75rem;
+  background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+  color: white; font-size: 0.7rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;
+  padding: 0.25rem 0.6rem; border-radius: 50px; border: 1px solid rgba(255,255,255,0.1);
+}
+.card-body { padding: 1rem 1.1rem; flex: 1; display: flex; flex-direction: column; }
+.card-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; color: var(--text-dark); margin-bottom: 0.15rem; }
+.card-party { font-size: 0.72rem; color: var(--mid-gray); margin-bottom: 0.6rem; }
+.card-bio { font-size: 0.78rem; color: var(--text-mid); line-height: 1.5; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-vote-btn {
+  display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+  width: 100%; margin-top: 0.9rem; padding: 0.65rem;
+  background: var(--forest); color: white; border: none; border-radius: var(--radius-md);
+  font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 0.82rem;
+  cursor: none; transition: all 0.2s; letter-spacing: 0.02em;
+}
+.card-vote-btn:hover { background: var(--forest-light); transform: scale(1.02); }
+.card-voted { width: 100%; margin-top: 0.9rem; padding: 0.65rem; background: var(--light-gray); border-radius: var(--radius-md); text-align: center; font-size: 0.8rem; color: var(--mid-gray); font-weight: 600; }
+
+/* ALREADY VOTED MSG */
+.voted-banner {
+  background: linear-gradient(135deg, rgba(64,194,122,0.08), rgba(64,194,122,0.04));
+  border: 1px solid rgba(64,194,122,0.25); border-radius: var(--radius-lg);
+  padding: 1rem 1.5rem; text-align: center; color: var(--forest-light);
+  font-weight: 600; font-size: 0.9rem; margin-bottom: 1.5rem;
+}
+
+/* GLASS PANEL */
+.glass-panel {
+  background: white; border-radius: var(--radius-xl);
+  border: 1px solid rgba(0,0,0,0.05);
+  box-shadow: var(--shadow-card); padding: 1.75rem;
+  margin-bottom: 1.75rem;
+}
+.panel-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem; color: var(--text-dark); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+.panel-title .icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; flex-shrink: 0; }
+.icon-green { background: rgba(64,194,122,0.12); color: var(--forest-light); }
+.icon-gold { background: rgba(233,196,106,0.15); color: var(--gold-dark); }
+.icon-blue { background: rgba(67,97,238,0.1); color: var(--blue-accent); }
+.icon-red { background: rgba(230,57,70,0.1); color: var(--red-accent); }
+
+/* PERIOD SUMMARY TABLE */
+.period-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.period-table thead tr { border-bottom: 2px solid var(--light-gray); }
+.period-table th { padding: 0.5rem 0.75rem; text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mid-gray); font-weight: 700; }
+.period-table td { padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--light-gray); }
+.period-table tr:last-child td { border-bottom: none; }
+.period-table tr:hover td { background: var(--light-gray); }
+.td-candidate { display: flex; align-items: center; gap: 0.5rem; }
+.td-cand-img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+.td-cand-name { font-weight: 600; color: var(--text-dark); }
+.diff-up { color: #16a34a; font-weight: 700; }
+.diff-down { color: var(--red-accent); font-weight: 700; }
+.diff-flat { color: var(--mid-gray); }
+
+/* TURNOUT GRID */
+.turnout-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 0.75rem; margin-bottom: 1.75rem; }
+@media (min-width: 640px) { .turnout-grid { grid-template-columns: repeat(4,1fr); } }
+.turnout-card {
+  background: white; border-radius: var(--radius-lg); padding: 1rem;
+  box-shadow: var(--shadow-card); border: 1px solid rgba(0,0,0,0.04);
+  text-align: center;
+}
+.turnout-sub { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.9rem; color: var(--text-dark); margin-bottom: 0.25rem; }
+.turnout-fraction { font-size: 0.7rem; color: var(--mid-gray); }
+.turnout-pct { font-family: 'JetBrains Mono', monospace; font-size: 1.3rem; font-weight: 700; color: var(--forest-light); }
+
+/* SUBLOCATION RANKING */
+.sub-rank-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.65rem 0; border-bottom: 1px solid var(--light-gray); }
+.sub-rank-item:last-child { border-bottom: none; }
+.sub-rank-medal { font-size: 1.2rem; width: 28px; flex-shrink: 0; }
+.sub-rank-bar-wrap { flex: 1; }
+.sub-rank-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem; }
+.sub-rank-name { font-weight: 600; font-size: 0.85rem; }
+.sub-rank-count { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--mid-gray); }
+.sub-rank-bar { height: 6px; background: var(--light-gray); border-radius: 3px; overflow: hidden; }
+.sub-rank-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--forest-light), var(--emerald)); transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1); }
+
+/* VOTER STATS STRIP */
+.voter-registry-panel {
+  background: var(--forest); border-radius: var(--radius-xl); padding: 1.25rem 1.75rem;
+  margin-bottom: 1.75rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;
+}
+.vr-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.85rem; color: rgba(255,255,255,0.6); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.2rem; }
+.vr-num { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 2rem; color: var(--emerald); }
+.vr-subs { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.vr-sub-item { text-align: center; }
+.vr-sub-num { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: var(--gold); }
+.vr-sub-label { font-size: 0.65rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* PROFILE */
+.profile-hero {
+  background: linear-gradient(135deg, var(--forest), var(--forest-mid));
+  border-radius: var(--radius-xl); padding: 2.5rem; margin-bottom: 1.75rem;
+  position: relative; overflow: hidden;
+}
+.profile-hero::before {
+  content: ''; position: absolute; top: -60px; right: -60px; width: 300px; height: 300px;
+  border-radius: 50%; border: 80px solid rgba(255,255,255,0.04);
+}
+.profile-hero::after {
+  content: ''; position: absolute; bottom: -30px; left: 100px; width: 200px; height: 200px;
+  border-radius: 50%; border: 50px solid rgba(64,194,122,0.06);
+}
+.profile-hero-inner { position: relative; z-index: 1; display: flex; align-items: center; gap: 2rem; flex-wrap: wrap; }
+.profile-avatar-wrap { position: relative; flex-shrink: 0; }
+.profile-avatar-img { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 4px solid rgba(255,255,255,0.2); }
+.profile-avatar-edit {
+  position: absolute; bottom: 2px; right: 2px; width: 28px; height: 28px;
+  border-radius: 50%; background: var(--gold); border: 2px solid var(--forest);
+  display: flex; align-items: center; justify-content: center; cursor: none;
+  font-size: 0.65rem; color: var(--forest); transition: transform 0.2s;
+}
+.profile-avatar-edit:hover { transform: scale(1.1); }
+.profile-hero-info { flex: 1; }
+.profile-hero-name { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.8rem; color: white; margin-bottom: 0.25rem; }
+.profile-hero-sub { color: rgba(255,255,255,0.5); font-size: 0.85rem; }
+.profile-hero-chips { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+.profile-chip {
+  padding: 0.3rem 0.75rem; border-radius: 50px; font-size: 0.72rem; font-weight: 600;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); color: rgba(255,255,255,0.7);
+}
+.profile-chip.gold { background: rgba(233,196,106,0.15); border-color: rgba(233,196,106,0.3); color: var(--gold); }
+.profile-stat-row { display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; }
+.profile-stat { text-align: center; }
+.profile-stat-num { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.4rem; color: var(--emerald); }
+.profile-stat-label { font-size: 0.65rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.08em; }
+
+.profile-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 600px) { .profile-form-grid { grid-template-columns: 1fr; } }
+.profile-section-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.9rem; color: var(--text-dark); margin: 1.5rem 0 0.75rem; padding-bottom: 0.5rem; border-bottom: 2px solid var(--light-gray); display: flex; align-items: center; gap: 0.5rem; }
+.profile-section-title i { color: var(--forest-light); }
+
+/* MODALS */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px); z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 1rem;
+  opacity: 0; visibility: hidden; transition: all 0.3s;
+}
+.modal-backdrop.open { opacity: 1; visibility: visible; }
+.modal-box {
+  background: white; border-radius: var(--radius-xl); max-width: 480px; width: 100%;
+  padding: 2rem; box-shadow: 0 40px 80px rgba(0,0,0,0.3);
+  transform: scale(0.9) translateY(20px); transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+}
+.modal-backdrop.open .modal-box { transform: scale(1) translateY(0); }
+.modal-box.wide { max-width: 700px; }
+.modal-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.3rem; color: var(--text-dark); margin-bottom: 1rem; }
+.modal-close { float: right; background: var(--light-gray); border: none; width: 30px; height: 30px; border-radius: 50%; cursor: none; font-size: 1rem; color: var(--mid-gray); transition: all 0.2s; }
+.modal-close:hover { background: var(--red-accent); color: white; }
+.confirm-candidate { font-weight: 700; color: var(--forest); }
+.modal-btns { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+
+/* PROFILE MODAL (candidate) */
+.cand-modal-header { display: flex; gap: 1.5rem; align-items: flex-start; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.cand-modal-img { width: 90px; height: 90px; border-radius: var(--radius-md); object-fit: cover; flex-shrink: 0; }
+.cand-modal-name { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.3rem; color: var(--text-dark); }
+.cand-modal-party { font-size: 0.8rem; color: var(--mid-gray); margin-top: 0.25rem; }
+.cand-modal-section { margin-top: 1rem; }
+.cand-modal-section h4 { font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--forest-light); margin-bottom: 0.35rem; }
+.cand-modal-section p { font-size: 0.875rem; color: var(--text-mid); line-height: 1.6; }
+
+/* TOAST */
+.toast-container { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; pointer-events: none; }
+.toast-item {
+  background: var(--charcoal); color: white; padding: 0.7rem 1.5rem;
+  border-radius: 50px; font-size: 0.85rem; font-weight: 500;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+  display: flex; align-items: center; gap: 0.5rem;
+  animation: toast-in 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards;
+  border-left: 3px solid var(--emerald);
+}
+.toast-item.error { border-left-color: var(--red-accent); }
+.toast-item.success { border-left-color: var(--emerald); }
+.toast-item.info { border-left-color: var(--blue-accent); }
+.toast-item.exiting { animation: toast-out 0.3s ease forwards; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(20px) scale(0.8); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-10px) scale(0.9); } }
+
+/* COMPARE PANEL */
+.compare-selects { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+.compare-result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+.compare-card { background: var(--light-gray); border-radius: var(--radius-md); padding: 1rem; }
+.compare-card h4 { font-weight: 700; margin-bottom: 0.5rem; }
+.compare-diff { text-align: center; font-size: 0.85rem; color: var(--mid-gray); margin-top: 0.75rem; }
+
+/* OTP MODAL */
+.otp-steps { }
+.otp-step { display: none; }
+.otp-step.active { display: block; }
+
+/* SCROLL ANIMATIONS */
+.scroll-reveal {
+  opacity: 0; transform: translateY(30px);
+  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.16,1,0.3,1);
+}
+.scroll-reveal.revealed { opacity: 1; transform: translateY(0); }
+.scroll-reveal-left { opacity: 0; transform: translateX(-30px); transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.16,1,0.3,1); }
+.scroll-reveal-left.revealed { opacity: 1; transform: translateX(0); }
+.scroll-reveal-right { opacity: 0; transform: translateX(30px); transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.16,1,0.3,1); }
+.scroll-reveal-right.revealed { opacity: 1; transform: translateX(0); }
+
+/* PARALLAX */
+.parallax-slow { will-change: transform; }
+
+/* HIDDEN */
+.hidden { display: none !important; }
+
+/* COMPARE SELECTS */
+select.field-input { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b7280' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 1rem center; padding-right: 2.5rem; }
+
+/* RIPPLE */
+.ripple-wrap { position: relative; overflow: hidden; }
+.ripple-wave { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.3); pointer-events: none; animation: ripple-anim 0.6s ease-out forwards; }
+@keyframes ripple-anim { from { transform: scale(0); opacity: 1; } to { transform: scale(4); opacity: 0; } }
+
+/* LOADING SPINNER */
+.btn-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* CHART CONTAINER */
+.chart-wrap { position: relative; height: 250px; }
+
+/* TAG */
+.tag {
+  display: inline-flex; align-items: center; padding: 0.25rem 0.65rem;
+  border-radius: 50px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
+}
+.tag-green { background: rgba(64,194,122,0.12); color: var(--forest-light); }
+.tag-gold { background: rgba(233,196,106,0.15); color: var(--gold-dark); }
+
+/* INCUMBENT BADGE */
+.incumbent-badge { position: absolute; top: 0.75rem; right: 0.75rem; }
+
+/* ANIMATED NUMBERS */
+@keyframes count-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* MOBILE RESPONSIVE */
+@media (max-width: 768px) {
+  .fo-vs-divider { display: none; }
+  .faceoff-inner { flex-direction: column; }
+  .fo-votes { font-size: 2.5rem; }
+  .fo-portrait-ring { width: 90px; height: 90px; }
+  .fo-candidate { padding: 2rem 1.5rem; }
+  .auth-visual { display: none; }
+  .auth-card { max-width: 100%; }
+  .site-header { padding: 0.75rem 0; }
+  .hero-title { font-size: 2rem; }
+}
+
+/* WELCOME POPUP */
+.welcome-popup {
+  position: fixed; top: 5rem; right: 1.5rem; z-index: 500;
+  background: white; border-radius: var(--radius-lg); padding: 1.25rem;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.15); border-left: 4px solid var(--emerald);
+  max-width: 300px; width: 100%;
+  transform: translateX(120%); transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
+  display: flex; align-items: flex-start; gap: 0.75rem;
+}
+.welcome-popup.visible { transform: translateX(0); }
+.welcome-popup-icon { font-size: 1.3rem; flex-shrink: 0; }
+.welcome-popup-text h4 { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.2rem; }
+.welcome-popup-text p { font-size: 0.78rem; color: var(--mid-gray); line-height: 1.4; }
+.welcome-close { position: absolute; top: 0.5rem; right: 0.5rem; background: none; border: none; color: var(--mid-gray); cursor: none; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+
+<!-- AMBIENT -->
+<div class="ambient-orb orb-1"></div>
+<div class="ambient-orb orb-2"></div>
+<div class="ambient-orb orb-3"></div>
+
+<!-- CUSTOM CURSOR -->
+<div id="cursor"></div>
+<div id="cursor-ring"></div>
+
+<!-- HEADER -->
+<header class="site-header" id="siteHeader">
+  <div class="container">
+    <div class="header-inner">
+      <div class="logo-block">
+        <div class="logo-mark">🗳️</div>
+        <div>
+          <div class="logo-text">Ngoliba InfoTrack</div>
+          <div class="logo-sub">Kiambu County · Ward Poll</div>
+        </div>
+      </div>
+      <nav class="header-nav hidden" id="headerNav">
+        <button class="nav-pill active" id="navDashboard">Dashboard</button>
+        <button class="nav-pill" id="navProfile">My Profile</button>
+      </nav>
+      <div class="header-actions">
+        <div id="avatarWrap" class="avatar-wrap hidden">
+          <img id="headerAvatar" src="" alt="avatar">
+          <div id="headerBadge" class="voter-badge-dot hidden"></div>
+        </div>
+        <button id="logoutBtn" class="logout-btn hidden"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- HERO BAND (logged in) -->
+<div class="hero-band hidden" id="heroBand">
+  <div class="container hero-band-inner">
+    <div class="ward-chip"><span>📍</span> Kiambu County · Ngoliba Ward</div>
+    <h1 class="hero-title">Opinion Poll <span class="accent">Live</span><br>Tracking</h1>
+    <p class="hero-sub">Real-time ward polling · Every vote shapes the future</p>
+    <div class="cycle-badge">
+      <div class="dot"></div>
+      <span>Next cycle reset: </span>
+      <span id="heroCountdown">00:00</span>
+      &nbsp;<span id="periodBadge" style="color:rgba(255,255,255,0.4);font-size:0.75rem;"></span>
+    </div>
+  </div>
+</div>
+
+<!-- COUNTDOWN STRIP -->
+<div class="countdown-strip hidden" id="countdownStrip">
+  <div class="container">
+    <div class="countdown-inner">
+      <div>
+        <div class="countdown-label">⏱ Cycle Timer</div>
+        <div class="countdown-time" id="countdownDisplay">00:00:000</div>
+      </div>
+      <div class="voter-stats-row" id="voterStatsRow">
+        <!-- filled dynamically -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- APP SHELL -->
+<div class="app-shell" id="appShell">
+  <div class="container">
+
+    <!-- ═══ AUTH ═══ -->
+    <div class="auth-wrap" id="authContainer">
+      <div class="auth-card">
+        <div class="auth-visual">
+          <div class="auth-visual-bg"></div>
+          <div class="auth-visual-overlay"></div>
+          <div class="auth-visual-content">
+            <div class="auth-visual-title">Your Voice,<br>Your Ward.</div>
+            <p class="auth-visual-sub">Track candidates, cast your preference, and watch Ngoliba shape its future — one vote at a time.</p>
+            <div class="auth-visual-dots"><span></span><span></span><span></span></div>
+          </div>
+        </div>
+        <div class="auth-form-pane">
+          <div class="auth-tabs">
+            <button class="auth-tab-btn active" id="showLoginTab">🔐 Login</button>
+            <button class="auth-tab-btn" id="showRegisterTab">📝 Register</button>
+          </div>
+
+          <!-- LOGIN -->
+          <div id="loginForm">
+            <div class="error-msg" id="loginErrorMsg"></div>
+            <div class="field-group">
+              <label class="field-label">Phone Number</label>
+              <input type="tel" id="loginPhone" class="field-input" placeholder="0712 345 678">
+            </div>
+            <div class="field-group">
+              <label class="field-label">Password</label>
+              <input type="password" id="loginPassword" class="field-input" placeholder="Your password">
+            </div>
+            <div class="auth-extras">
+              <label class="remember-label"><input type="checkbox" id="rememberMe"> Remember me 30 days</label>
+              <button class="forgot-btn" id="forgotPasswordBtn">Forgot password?</button>
+            </div>
+            <button class="btn-primary btn-gold ripple-wrap" id="doLoginBtn">
+              <span class="btn-spinner hidden" id="loginSpinner"></span>
+              <span>Sign In</span> <i class="fas fa-arrow-right"></i>
+            </button>
+          </div>
+
+          <!-- REGISTER -->
+          <div id="registerForm" class="hidden">
+            <div class="error-msg" id="regErrorMsg"></div>
+            <div class="field-grid">
+              <div class="field-group"><label class="field-label">First Name *</label><input type="text" id="regFirstName" class="field-input" placeholder="John"></div>
+              <div class="field-group"><label class="field-label">Surname *</label><input type="text" id="regSurname" class="field-input" placeholder="Mwangi"></div>
+              <div class="field-group"><label class="field-label">Date of Birth</label><input type="date" id="regDob" class="field-input"></div>
+              <div class="field-group"><label class="field-label">Phone *</label><input type="tel" id="regPhone" class="field-input" placeholder="0712345678"></div>
+              <div class="field-group"><label class="field-label">Sublocation</label><select id="regSublocation" class="field-input"><option value="">Select…</option><option>Ngoliba</option><option>Gatiiguru</option><option>Kilimambogo</option><option>Magogoni</option></select></div>
+              <div class="field-group"><label class="field-label">Email (optional)</label><input type="email" id="regEmail" class="field-input" placeholder="you@example.com"></div>
+              <div class="field-group"><label class="field-label">National ID (optional)</label><input type="text" id="regNationalId" class="field-input" placeholder="12345678"></div>
+              <div class="field-group"><label class="field-label">Language</label><select id="regLanguage" class="field-input"><option value="en">English</option><option value="sw">Kiswahili</option></select></div>
+            </div>
+            <div class="field-grid">
+              <div class="field-group"><label class="field-label">Password (min 6) *</label><input type="password" id="regPassword" class="field-input" placeholder="••••••"><div class="strength-wrap"><div class="strength-bar" id="strengthBar"></div></div></div>
+              <div class="field-group"><label class="field-label">Confirm Password *</label><input type="password" id="regConfirmPassword" class="field-input" placeholder="••••••"></div>
+            </div>
+            <button class="btn-primary ripple-wrap" id="doRegisterBtn"><span>Create Account</span> <i class="fas fa-user-plus"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ DASHBOARD ═══ -->
+    <div id="dashboardContent" class="hidden dashboard-wrap">
+
+      <!-- Face-Off -->
+      <div class="faceoff-section scroll-reveal" id="faceoffSection">
+        <div class="faceoff-bg"></div>
+        <div class="faceoff-grid-lines"></div>
+        <div class="faceoff-inner">
+          <div class="fo-candidate fo-left">
+            <div class="fo-portrait-ring">
+              <img id="foLeftImg" src="" alt="">
+            </div>
+            <div class="fo-name" id="foLeftName">—</div>
+            <div class="fo-party" id="foLeftParty">—</div>
+            <div class="fo-votes" id="foLeftVotes">0</div>
+            <div class="fo-votes-label">Electoral Votes</div>
+          </div>
+          <div class="fo-vs-divider">
+            <div class="fo-vs-line"></div>
+            <div class="fo-vs-badge">VS</div>
+            <div class="fo-vs-line"></div>
+          </div>
+          <div class="fo-candidate fo-right">
+            <div class="fo-portrait-ring">
+              <img id="foRightImg" src="" alt="">
+            </div>
+            <div class="fo-name" id="foRightName">—</div>
+            <div class="fo-party" id="foRightParty">—</div>
+            <div class="fo-votes" id="foRightVotes">0</div>
+            <div class="fo-votes-label">Electoral Votes</div>
+          </div>
+        </div>
+        <div class="fo-footer">
+          <div class="fo-winner-chip" id="foWinnerChip">⏳ No winner yet</div>
+          <div class="fo-progress-wrap">
+            <div class="fo-progress-labels"><span id="foLeftPct">0%</span><span>📊 Progress</span><span id="foRightPct">0%</span></div>
+            <div class="fo-progress-bar"><div class="fo-progress-fill" id="foProgressFill" style="width:0%"></div></div>
+          </div>
+          <div class="fo-total-chip">📈 Total: <strong id="foTotalVotes">0</strong></div>
+        </div>
+      </div>
+
+      <!-- Voter Registry -->
+      <div class="voter-registry-panel scroll-reveal">
+        <div>
+          <div class="vr-title">Registered Voters</div>
+          <div class="vr-num" id="totalVoters">0</div>
+        </div>
+        <div class="vr-subs" id="vrSubsContainer">
+          <!-- filled -->
+        </div>
+      </div>
+
+      <!-- Turnout -->
+      <div class="turnout-grid scroll-reveal" id="turnoutGrid"></div>
+
+      <!-- Already voted -->
+      <div class="voted-banner hidden" id="alreadyVotedMsg">✅ You've voted in this cycle. Results update every 5 minutes.</div>
+
+      <!-- Candidates -->
+      <div class="section-header scroll-reveal-left">
+        <div>
+          <div class="section-title">Cast Your Vote</div>
+          <div class="section-sub">Click a candidate card to read their full profile</div>
+        </div>
+        <button class="section-action" id="compareCandidatesBtn"><i class="fas fa-chart-simple"></i> Compare</button>
+      </div>
+      <div class="candidates-grid" id="candidatesGrid"></div>
+
+      <!-- Period Summary -->
+      <div class="glass-panel scroll-reveal">
+        <div class="panel-title"><div class="icon icon-gold"><i class="fas fa-table"></i></div> Cycle Performance</div>
+        <div class="flex" style="display:flex;justify-content:flex-end;margin-bottom:0.5rem;font-size:0.75rem;color:var(--mid-gray)">Ends: <strong id="currentPeriodEnd" style="margin-left:0.3rem">—</strong></div>
+        <div class="overflow-x-auto" id="periodSummaryTable"></div>
+      </div>
+
+      <!-- Sublocation Ranking -->
+      <div class="glass-panel scroll-reveal">
+        <div class="panel-title" style="justify-content:space-between;flex-wrap:wrap;gap:0.5rem;">
+          <span style="display:flex;align-items:center;gap:0.5rem;"><div class="icon icon-green"><i class="fas fa-map-marker-alt"></i></div> Sublocation Ranking</span>
+          <select id="sublocationFilter" class="field-input" style="width:auto;padding:0.4rem 2rem 0.4rem 0.75rem;font-size:0.8rem;">
+            <option>Ngoliba</option><option>Gatiiguru</option><option>Kilimambogo</option><option>Magogoni</option>
+          </select>
+        </div>
+        <div id="sublocationRanking"></div>
+      </div>
+
+      <!-- Historical Chart -->
+      <div class="glass-panel scroll-reveal">
+        <div class="panel-title" style="justify-content:space-between;">
+          <span style="display:flex;align-items:center;gap:0.5rem;"><div class="icon icon-blue"><i class="fas fa-chart-line"></i></div> Historical Trends</span>
+          <button class="section-action" id="refreshHistoryBtn">Refresh</button>
+        </div>
+        <div class="chart-wrap"><canvas id="historicalChart"></canvas></div>
+      </div>
+
+    </div>
+
+    <!-- ═══ PROFILE ═══ -->
+    <div id="profileContent" class="hidden dashboard-wrap">
+      <div class="profile-hero">
+        <div class="profile-hero-inner">
+          <div class="profile-avatar-wrap">
+            <img id="profileAvatar" class="profile-avatar-img" src="" alt="avatar">
+            <label class="profile-avatar-edit" for="profilePhotoUpload"><i class="fas fa-camera"></i></label>
+            <input type="file" id="profilePhotoUpload" accept="image/jpeg,image/png" class="hidden">
+          </div>
+          <div class="profile-hero-info">
+            <div class="profile-hero-name" id="profileName">Your Name</div>
+            <div class="profile-hero-sub" id="profileSub">Ngoliba Ward · Voter</div>
+            <div class="profile-hero-chips">
+              <span class="profile-chip" id="profileVoterNum">Voter #—</span>
+              <span class="profile-chip" id="profileSublocationChip">—</span>
+              <span class="profile-chip gold" id="profileCycleBadge"></span>
+            </div>
+            <div class="profile-stat-row">
+              <div class="profile-stat"><div class="profile-stat-num" id="profileTotalVotes">0</div><div class="profile-stat-label">Votes Cast</div></div>
+              <div class="profile-stat"><div class="profile-stat-num" id="profileCurrentRank">—</div><div class="profile-stat-label">Cycle Rank</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-panel">
+        <div class="profile-section-title"><i class="fas fa-user"></i> Personal Details</div>
+        <div class="profile-form-grid">
+          <div class="field-group"><label class="field-label">First Name</label><input type="text" id="profFirstName" class="field-input" placeholder="First Name"></div>
+          <div class="field-group"><label class="field-label">Surname</label><input type="text" id="profSurname" class="field-input" placeholder="Surname"></div>
+          <div class="field-group"><label class="field-label">Phone (read-only)</label><input type="tel" id="profPhone" class="field-input" readonly disabled style="background:#f9fafb;"></div>
+          <div class="field-group"><label class="field-label">Date of Birth</label><input type="date" id="profDob" class="field-input" readonly disabled style="background:#f9fafb;"></div>
+          <div class="field-group"><label class="field-label">Sublocation</label><select id="profSublocation" class="field-input"><option>Ngoliba</option><option>Gatiiguru</option><option>Kilimambogo</option><option>Magogoni</option></select></div>
+          <div class="field-group"><label class="field-label">Language</label><select id="profLanguage" class="field-input"><option value="en">English</option><option value="sw">Kiswahili</option></select></div>
+          <div class="field-group"><label class="field-label">Email</label><input type="email" id="profEmail" class="field-input" placeholder="you@example.com"></div>
+          <div class="field-group"><label class="field-label">National ID</label><input type="text" id="profNationalId" class="field-input" placeholder="12345678"></div>
+        </div>
+        <div style="display:flex;gap:0.75rem;margin-top:1rem;flex-wrap:wrap;">
+          <button class="btn-primary btn-sm ripple-wrap" id="saveProfileDetailsBtn" style="width:auto;padding:0.6rem 1.5rem;border-radius:var(--radius-md);"><span>Save Changes</span></button>
+          <button class="btn-ghost" id="exportDataBtn"><i class="fas fa-download"></i> Export My Data</button>
+          <button class="btn-danger" id="removePhotoBtn"><i class="fas fa-trash"></i> Remove Photo</button>
+        </div>
+      </div>
+
+      <div class="glass-panel">
+        <div class="profile-section-title"><i class="fas fa-lock"></i> Change Password</div>
+        <div class="profile-form-grid">
+          <div class="field-group"><label class="field-label">Current Password</label><input type="password" id="currentPassword" class="field-input" placeholder="Current password"></div>
+          <div class="field-group"><label class="field-label">New Password (min 6)</label><input type="password" id="newPassword1" class="field-input" placeholder="New password"></div>
+        </div>
+        <div class="field-group" style="max-width:320px;"><label class="field-label">Confirm New Password</label><input type="password" id="newPassword2" class="field-input" placeholder="Confirm new password"></div>
+        <div class="error-msg" id="profilePwdError" style="max-width:400px;margin-top:0.5rem;"></div>
+        <button class="btn-primary btn-sm ripple-wrap" id="changePasswordBtn" style="margin-top:1rem;width:auto;padding:0.65rem 1.5rem;border-radius:var(--radius-md);"><span>Update Password</span></button>
+      </div>
+    </div>
+
+  </div><!-- end container -->
+</div><!-- end app-shell -->
+
+<!-- ═══ MODALS ═══ -->
+<!-- Vote Confirm -->
+<div class="modal-backdrop" id="voteConfirmModal">
+  <div class="modal-box">
+    <button class="modal-close" id="closeVoteConfirm">&times;</button>
+    <div class="modal-title">Confirm Your Vote</div>
+    <p style="color:var(--mid-gray);font-size:0.9rem;margin-bottom:0.5rem;">You're about to vote for:</p>
+    <p style="font-size:1.1rem;font-weight:700;color:var(--forest);" id="confirmCandidateName">—</p>
+    <p style="font-size:0.8rem;color:var(--mid-gray);margin-top:0.5rem;">This counts as your vote for this cycle. You can vote again next cycle.</p>
+    <div class="modal-btns">
+      <button class="btn-primary ripple-wrap" id="confirmVoteYes" style="flex:1;"><span>Yes, Vote!</span></button>
+      <button class="btn-ghost" id="confirmVoteNo" style="flex:1;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Candidate Profile -->
+<div class="modal-backdrop" id="candidateProfileModal">
+  <div class="modal-box" id="candidateModalContent" style="max-width:560px;"></div>
+</div>
+
+<!-- Compare -->
+<div class="modal-backdrop" id="compareModal">
+  <div class="modal-box wide">
+    <button class="modal-close" id="closeCompareBtn">&times;</button>
+    <div class="modal-title"><i class="fas fa-chart-simple" style="color:var(--blue-accent);"></i> Compare Candidates</div>
+    <div class="compare-selects">
+      <div class="field-group"><label class="field-label">Candidate A</label><select id="compareCandA" class="field-input"></select></div>
+      <div class="field-group"><label class="field-label">Candidate B</label><select id="compareCandB" class="field-input"></select></div>
+    </div>
+    <button class="btn-primary btn-sm ripple-wrap" id="refreshCompareBtn" style="width:auto;margin-bottom:0.5rem;"><span>Compare Now</span></button>
+    <div id="comparisonResult"></div>
+  </div>
+</div>
+
+<!-- OTP Modal -->
+<div class="modal-backdrop" id="otpModal">
+  <div class="modal-box">
+    <button class="modal-close" id="closeOtpModal">&times;</button>
+    <div class="modal-title">🔑 Reset Password</div>
+    <div class="field-group"><label class="field-label">Phone Number</label><input type="tel" id="otpPhone" class="field-input" placeholder="0712345678"></div>
+    <div class="otp-step active" id="otpStep1">
+      <button class="btn-primary ripple-wrap" id="sendOtpBtn"><span>Send OTP</span></button>
+    </div>
+    <div class="otp-step" id="otpStep2">
+      <div class="field-group"><label class="field-label">6-digit OTP</label><input type="text" id="otpCode" class="field-input" placeholder="123456"></div>
+      <div class="field-group"><label class="field-label">New Password</label><input type="password" id="newPassword" class="field-input" placeholder="Min 6 characters"></div>
+      <button class="btn-ghost" id="resendOtpBtn" style="margin-bottom:0.75rem;" disabled>Resend OTP (<span id="resendTimer">60</span>s)</button>
+      <button class="btn-primary ripple-wrap" id="resetPasswordConfirmBtn"><span>Reset Password</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Welcome Popup -->
+<div class="welcome-popup" id="welcomePopup">
+  <div class="welcome-popup-icon">🎉</div>
+  <div class="welcome-popup-text">
+    <h4 id="welcomePopupTitle">Welcome back!</h4>
+    <p id="welcomePopupFact">Loading…</p>
+  </div>
+  <button class="welcome-close" id="closeWelcomePopup">&times;</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// CONSTANTS & DATA
+// ═══════════════════════════════════════════════
+const PERIOD_MS = 5 * 60 * 1000;
+const CANDIDATES = [
+  { id:0, name:"Hon. James Mwangi", party:"UDA (Incumbent)", bio:"Two-term MCA, water projects.", img:"https://randomuser.me/api/portraits/men/32.jpg", incumbent:true, fullBio:"Two-term MCA with a track record in water projects & youth empowerment across Ngoliba sublocation.", vision:"Complete water pipeline project, tarmac roads, and expand bursary fund.", track:"Bursary fund for 200+ students; 3 ECD classrooms constructed." },
+  { id:1, name:"Grace Wanjiku", party:"Independent", bio:"Teacher & community organizer.", img:"https://randomuser.me/api/portraits/women/68.jpg", fullBio:"15 years teaching, runs a thriving women's cooperative group with 300+ members.", vision:"Digital hub for youth, women enterprise loan program.", track:"Free tuition campaign; Clean water initiative for 5 villages." },
+  { id:2, name:"Peter Kimani", party:"Jubilee", bio:"Agri-business entrepreneur.", img:"https://randomuser.me/api/portraits/men/45.jpg", fullBio:"Agri-business owner employing 50+ people. Advocate for modern farming.", vision:"Modern abattoir, tarmac link road, farmer training center.", track:"Cooperative loan facilitated for 100 farmers; market linkages." },
+  { id:3, name:"Sarah Nduati", party:"Wiper", bio:"Public health expert.", img:"https://randomuser.me/api/portraits/women/22.jpg", fullBio:"Public Health degree, worked with WHO on vaccination programs.", vision:"24hr dispensaries, waste management system, nutrition programs.", track:"Vaccination drive reaching 2,000 people; mosquito net distribution." },
+  { id:4, name:"John Otieno", party:"Independent", bio:"Farmer cooperative leader.", img:"https://randomuser.me/api/portraits/men/89.jpg", fullBio:"Chairman of farmers co-op with 500+ members. Food security advocate.", vision:"Fertilizer subsidy, milk cooling plant, rural credit access.", track:"Negotiated subsidized inputs for 500 farmers; milk pricing reform." },
+  { id:5, name:"Mary Wambui", party:"Maendeleo", bio:"ICT & agribusiness graduate.", img:"https://randomuser.me/api/portraits/women/54.jpg", fullBio:"ICT graduate and digital trainer. Bridges technology and agriculture.", vision:"Free Wi-Fi hotspots, solar irrigation, e-commerce for farmers.", track:"Community library; phone repair training for 80 youth." },
+  { id:6, name:"David Kiprotich", party:"Roots", bio:"Governance activist.", img:"https://randomuser.me/api/portraits/men/99.jpg", fullBio:"Paralegal and governance activist. Advocates for public accountability.", vision:"Public finance watchdog, road safety, disability inclusion.", track:"Petitioned for road project; organized 10 public budget forums." }
+];
+const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
+const KEYS = { USERS:"ngoliba_users", SESSION:"ngoliba_session", CURRENT_PERIOD:"ngoliba_current_period", PERIOD_ARCHIVE:"ngoliba_period_archive", OTP_STORE:"ngoliba_otp", LOGIN_ATTEMPTS:"login_attempts", VOTER_COUNTER:"ngoliba_voter_counter" };
+
+// ═══════════════════════════════════════════════
+// CRYPTO HELPERS
+// ═══════════════════════════════════════════════
+async function hashPassword(p,s){ const enc=new TextEncoder(); const buf=await crypto.subtle.digest('SHA-256',enc.encode(p+s)); return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join(''); }
+async function createUserHash(pwd){ const salt=Math.random().toString(36).substring(2,10); const hash=await hashPassword(pwd,salt); return{hash,salt}; }
+async function verifyPassword(pwd,hash,salt){ return await hashPassword(pwd,salt)===hash; }
+
+// ═══════════════════════════════════════════════
+// PERIOD MANAGEMENT
+// ═══════════════════════════════════════════════
+function getCurrentPeriodStart(){ const now=Date.now(); return new Date(Math.floor(now/PERIOD_MS)*PERIOD_MS).toISOString(); }
+function getNextPeriodStart(){ return new Date(Date.parse(getCurrentPeriodStart())+PERIOD_MS).toISOString(); }
+
+function checkAndResetPeriod(){
+  let cur=localStorage.getItem(KEYS.CURRENT_PERIOD);
+  const expected=getCurrentPeriodStart();
+  if(!cur){ localStorage.setItem(KEYS.CURRENT_PERIOD,JSON.stringify({periodStart:expected,votes:[],firstVoter:null,secondVoter:null,thirdVoter:null})); return; }
+  const parsed=JSON.parse(cur);
+  if(parsed.periodStart!==expected){
+    let archive=localStorage.getItem(KEYS.PERIOD_ARCHIVE);
+    let list=archive?JSON.parse(archive):[];
+    const agg={}; CANDIDATES.forEach(c=>{ agg[c.id]={total:0,sublocations:{}}; SUBLOCATIONS.forEach(s=>agg[c.id].sublocations[s]=0); });
+    for(let v of parsed.votes){ agg[v.candidateId].total++; agg[v.candidateId].sublocations[v.sublocation]++; }
+    list.push({periodStart:parsed.periodStart,periodEnd:new Date(Date.parse(parsed.periodStart)+PERIOD_MS).toISOString(),votesByCandidate:agg});
+    if(list.length>30) list.shift();
+    localStorage.setItem(KEYS.PERIOD_ARCHIVE,JSON.stringify(list));
+    localStorage.setItem(KEYS.CURRENT_PERIOD,JSON.stringify({periodStart:expected,votes:[],firstVoter:null,secondVoter:null,thirdVoter:null}));
+    showToast("🔄 New voting cycle started!","info");
+  }
+}
+
+function getCurrentPeriodAggregated(){
+  const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}');
+  const agg={}; CANDIDATES.forEach(c=>{ agg[c.id]={total:0,sublocations:{}}; SUBLOCATIONS.forEach(s=>agg[c.id].sublocations[s]=0); });
+  for(let v of cur.votes){ agg[v.candidateId].total++; agg[v.candidateId].sublocations[v.sublocation]++; }
+  return agg;
+}
+
+function hasUserVotedInPeriod(phone){ const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}'); return cur.votes.some(v=>v.userId===phone); }
+
+function recordVote(cid,uid,sub){
+  if(hasUserVotedInPeriod(uid)) return false;
+  let cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}');
+  cur.votes.push({candidateId:cid,sublocation:sub,userId:uid,timestamp:Date.now()});
+  if(!cur.firstVoter) cur.firstVoter=uid;
+  else if(!cur.secondVoter) cur.secondVoter=uid;
+  else if(!cur.thirdVoter) cur.thirdVoter=uid;
+  localStorage.setItem(KEYS.CURRENT_PERIOD,JSON.stringify(cur)); return true;
+}
+
+function getUserVoterBadge(uid){ const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}'); if(cur.firstVoter===uid) return '1st'; if(cur.secondVoter===uid) return '2nd'; if(cur.thirdVoter===uid) return '3rd'; return null; }
+
+function getNextVoterNumber(){ let n=localStorage.getItem(KEYS.VOTER_COUNTER); if(!n){localStorage.setItem(KEYS.VOTER_COUNTER,"1");return 1;} let num=parseInt(n); localStorage.setItem(KEYS.VOTER_COUNTER,(num+1).toString()); return num; }
+
+function getPreviousPeriodStats(){ const a=localStorage.getItem(KEYS.PERIOD_ARCHIVE); if(!a) return null; const weeks=JSON.parse(a); return weeks.length?weeks[weeks.length-1]:null; }
+
+// ═══════════════════════════════════════════════
+// VALIDATION
+// ═══════════════════════════════════════════════
+function isValidPhone(p){ return /^[0-9]{10,12}$/.test(p)&&(p.startsWith('07')||p.startsWith('01')||p.startsWith('254')); }
+function isValidName(n){ return /^[A-Za-z\s]{2,30}$/.test(n); }
+function isValidEmail(e){ if(!e) return true; return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
+function isValidNationalId(id){ if(!id) return true; return /^[0-9]{7,8}$/.test(id); }
+
+// ═══════════════════════════════════════════════
+// AUTH & SESSION
+// ═══════════════════════════════════════════════
+let currentUser=null;
+function saveSession(user,remember=false){ const expiry=remember?Date.now()+30*24*3600000:Date.now()+7*24*3600000; localStorage.setItem(KEYS.SESSION,JSON.stringify({phone:user.phone,expiry})); }
+function loadSession(){ const sess=localStorage.getItem(KEYS.SESSION); if(!sess) return null; const {phone,expiry}=JSON.parse(sess); if(Date.now()>expiry){localStorage.removeItem(KEYS.SESSION);return null;} const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]"); return users.find(u=>u.phone===phone)||null; }
+function clearSession(){ localStorage.removeItem(KEYS.SESSION); currentUser=null; }
+
+function getLoginAttempts(phone){ const att=JSON.parse(localStorage.getItem(KEYS.LOGIN_ATTEMPTS)||"{}"); const rec=att[phone]; if(!rec) return{count:0,blockedUntil:0}; if(Date.now()>rec.blockedUntil){delete att[phone];localStorage.setItem(KEYS.LOGIN_ATTEMPTS,JSON.stringify(att));return{count:0,blockedUntil:0};} return rec; }
+function recordFailedAttempt(phone){ let att=JSON.parse(localStorage.getItem(KEYS.LOGIN_ATTEMPTS)||"{}"); let rec=att[phone]||{count:0,blockedUntil:0}; if(Date.now()>rec.blockedUntil) rec={count:0,blockedUntil:0}; rec.count++; if(rec.count>=5) rec.blockedUntil=Date.now()+5*60*1000; att[phone]=rec; localStorage.setItem(KEYS.LOGIN_ATTEMPTS,JSON.stringify(att)); return rec; }
+function resetLoginAttempts(phone){ let att=JSON.parse(localStorage.getItem(KEYS.LOGIN_ATTEMPTS)||"{}"); delete att[phone]; localStorage.setItem(KEYS.LOGIN_ATTEMPTS,JSON.stringify(att)); }
+
+async function registerUser(){
+  const fn=document.getElementById("regFirstName").value.trim();
+  const sn=document.getElementById("regSurname").value.trim();
+  const dob=document.getElementById("regDob").value;
+  const phone=document.getElementById("regPhone").value.trim();
+  const sub=document.getElementById("regSublocation").value;
+  const email=document.getElementById("regEmail").value.trim();
+  const nationalId=document.getElementById("regNationalId").value.trim();
+  const lang=document.getElementById("regLanguage").value;
+  const pwd=document.getElementById("regPassword").value;
+  const confirm=document.getElementById("regConfirmPassword").value;
+  const errorDiv=document.getElementById("regErrorMsg");
+
+  if(!isValidName(fn)||!isValidName(sn)){ showFormError(errorDiv,"First and last name must be 2–30 letters"); return; }
+  if(!dob){ showFormError(errorDiv,"Date of birth is required"); return; }
+  if(!isValidPhone(phone)){ showFormError(errorDiv,"Valid phone required (07xx or 01xx)"); return; }
+  if(email&&!isValidEmail(email)){ showFormError(errorDiv,"Invalid email address"); return; }
+  if(nationalId&&!isValidNationalId(nationalId)){ showFormError(errorDiv,"National ID must be 7–8 digits"); return; }
+  if(pwd.length<6){ showFormError(errorDiv,"Password minimum 6 characters"); return; }
+  if(pwd!==confirm){ showFormError(errorDiv,"Passwords do not match"); return; }
+
+  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+  if(users.find(u=>u.phone===phone)){ showFormError(errorDiv,"Phone already registered"); return; }
+
+  const voterNumber=getNextVoterNumber();
+  const {hash,salt}=await createUserHash(pwd);
+  users.push({firstName:fn,surname:sn,dob,phone,sublocation:sub,email,nationalId,language:lang,passwordHash:hash,salt,profilePhoto:null,voterNumber,registeredAt:Date.now()});
+  localStorage.setItem(KEYS.USERS,JSON.stringify(users));
+  errorDiv.classList.remove("show");
+  showToast(`🎉 Registration successful! Voter No. ${voterNumber}`,"success");
+  document.getElementById("showLoginTab").click();
+}
+
+async function loginUser(){
+  const phone=document.getElementById("loginPhone").value.trim();
+  const pwd=document.getElementById("loginPassword").value;
+  const remember=document.getElementById("rememberMe").checked;
+  const errorDiv=document.getElementById("loginErrorMsg");
+  const btn=document.getElementById("doLoginBtn");
+
+  setButtonLoading(btn,true,"loginSpinner");
+
+  const attempts=getLoginAttempts(phone);
+  if(attempts.blockedUntil>Date.now()){ showFormError(errorDiv,"Too many failed attempts. Try again in 5 minutes."); setButtonLoading(btn,false,"loginSpinner"); return; }
+
+  await new Promise(r=>setTimeout(r,600));
+  const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+  const user=users.find(u=>u.phone===phone);
+  if(!user){ recordFailedAttempt(phone); showFormError(errorDiv,"Invalid phone or password"); shakeEl("authContainer"); setButtonLoading(btn,false,"loginSpinner"); return; }
+  const valid=await verifyPassword(pwd,user.passwordHash,user.salt);
+  if(!valid){ recordFailedAttempt(phone); showFormError(errorDiv,"Invalid phone or password"); shakeEl("authContainer"); setButtonLoading(btn,false,"loginSpinner"); return; }
+
+  resetLoginAttempts(phone);
+  currentUser=user;
+  saveSession(user,remember);
+  setButtonLoading(btn,false,"loginSpinner");
+  enterDashboard();
+}
+
+function logout(){ clearSession(); if(faceoffInterval) clearInterval(faceoffInterval); if(countdownInterval) clearInterval(countdownInterval); location.reload(); }
+
+// ═══════════════════════════════════════════════
+// UI ENTRY POINT
+// ═══════════════════════════════════════════════
+function enterDashboard(){
+  document.getElementById("authContainer").classList.add("hidden");
+  document.getElementById("heroBand").classList.remove("hidden");
+  document.getElementById("countdownStrip").classList.remove("hidden");
+  document.getElementById("headerNav").classList.remove("hidden");
+  document.getElementById("avatarWrap").classList.remove("hidden");
+  document.getElementById("logoutBtn").classList.remove("hidden");
+  showPane("dashboardContent");
+  renderDashboard();
+  showWelcomePopup();
+  if(faceoffInterval) clearInterval(faceoffInterval);
+  faceoffInterval=setInterval(()=>{ checkAndResetPeriod(); updateFaceoff(); },2000);
+  startCountdown();
+  showToast(`Welcome back, ${currentUser.firstName}! 👋`,"success");
+}
+
+function showPane(id){
+  ["dashboardContent","profileContent"].forEach(p=>document.getElementById(p).classList.add("hidden"));
+  document.getElementById(id).classList.remove("hidden");
+  ["navDashboard","navProfile"].forEach(b=>document.getElementById(b)?.classList.remove("active"));
+  if(id==="dashboardContent") document.getElementById("navDashboard")?.classList.add("active");
+  if(id==="profileContent"){ document.getElementById("navProfile")?.classList.add("active"); loadProfileData(); }
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+// ═══════════════════════════════════════════════
+// RENDER DASHBOARD
+// ═══════════════════════════════════════════════
+function renderDashboard(){
+  if(!currentUser) return;
+  const hasVoted=hasUserVotedInPeriod(currentUser.phone);
+  document.getElementById("alreadyVotedMsg").classList.toggle("hidden",!hasVoted);
+  renderFaceoff();
+  renderCandidatesGrid(hasVoted);
+  renderVoterRegistry();
+  renderTurnout();
+  renderPeriodSummary();
+  renderSublocationRanking();
+  renderHistoricalChart();
+  const end=new Date(Date.parse(getCurrentPeriodStart())+PERIOD_MS);
+  document.getElementById("currentPeriodEnd").innerText=end.toLocaleTimeString();
+  document.getElementById("periodBadge").innerHTML=`${new Date(getCurrentPeriodStart()).toLocaleTimeString()} – ${end.toLocaleTimeString()}`;
+  updateHeaderAvatar();
+  updateHeaderBadge();
+  initScrollReveal();
+}
+
+function renderVoterRegistry(){
+  const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+  document.getElementById("totalVoters").innerText=users.length;
+  const counts={Ngoliba:0,Gatiiguru:0,Kilimambogo:0,Magogoni:0};
+  users.forEach(u=>{ if(counts[u.sublocation]!==undefined) counts[u.sublocation]++; });
+  const container=document.getElementById("vrSubsContainer");
+  container.innerHTML=SUBLOCATIONS.map(s=>`<div class="vr-sub-item"><div class="vr-sub-num">${counts[s]}</div><div class="vr-sub-label">${s}</div></div>`).join('');
+  // Countdown strip
+  const stripContainer=document.getElementById("voterStatsRow");
+  stripContainer.innerHTML=`<div class="voter-stat-item"><div class="voter-stat-num">${users.length}</div><div class="voter-stat-label">Voters</div></div>`+SUBLOCATIONS.map(s=>`<div class="voter-stat-item" style="display:none" class="md-show"><div class="voter-stat-num">${counts[s]}</div><div class="voter-stat-label">${s}</div></div>`).join('');
+}
+
+function renderTurnout(){
+  const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+  const currentVotes=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes;
+  const grid=document.getElementById("turnoutGrid"); grid.innerHTML="";
+  for(let sub of SUBLOCATIONS){
+    const total=users.filter(u=>u.sublocation===sub).length;
+    const voted=currentVotes.filter(v=>v.sublocation===sub).length;
+    const pct=total===0?0:Math.round((voted/total)*100);
+    grid.innerHTML+=`<div class="turnout-card scroll-reveal"><div class="turnout-sub">${sub}</div><div class="turnout-fraction">${voted} / ${total} voters</div><div class="turnout-pct">${pct}%</div></div>`;
+  }
+}
+
+function renderCandidatesGrid(disableVote){
+  const container=document.getElementById("candidatesGrid"); if(!container) return;
+  const agg=getCurrentPeriodAggregated();
+  let sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
+  container.innerHTML="";
+  sorted.forEach((cand,idx)=>{
+    const rankClass=idx===0?"rank-1":idx===1?"rank-2":idx===2?"rank-3":"rank-other";
+    const rankLabel=idx===0?"1":idx===1?"2":idx===2?"3":`${idx+1}`;
+    const card=document.createElement("div");
+    card.className="candidate-card";
+    card.style.animationDelay=`${idx*0.07}s`;
+    card.innerHTML=`
+      <div class="card-img-wrap">
+        <img src="${cand.img}" alt="${cand.name}" loading="lazy">
+        <div class="card-rank-badge ${rankClass}">${rankLabel}</div>
+        ${cand.incumbent?'<div class="incumbent-badge"><span class="tag tag-gold">Incumbent</span></div>':''}
+        <div class="card-votes-chip">${cand.votes} votes</div>
+      </div>
+      <div class="card-body">
+        <div class="card-name">${cand.name}</div>
+        <div class="card-party">${cand.party}</div>
+        <div class="card-bio">${cand.bio}</div>
+        ${disableVote
+          ?'<div class="card-voted">✅ Voted this cycle</div>'
+          :`<button class="card-vote-btn ripple-wrap vote-btn" data-id="${cand.id}"><i class="fas fa-vote-yea"></i> <span>Cast Vote</span></button>`
+        }
+      </div>`;
+    card.querySelector(".vote-btn")?.addEventListener("click",e=>{ e.stopPropagation(); showVoteConfirm(cand.id,card.querySelector(".vote-btn")); });
+    card.addEventListener("click",e=>{ if(!e.target.closest(".vote-btn")) showCandidateProfile(cand); });
+    container.appendChild(card);
+  });
+}
+
+function renderPeriodSummary(){
+  const curr=getCurrentPeriodAggregated(); const prev=getPreviousPeriodStats();
+  let html=`<table class="period-table"><thead><tr><th>Candidate</th><th>Votes</th><th>Δ Prev</th><th>Top Subloc</th></tr></thead><tbody>`;
+  for(let cand of CANDIDATES){
+    const currV=curr[cand.id]?.total||0;
+    const prevV=prev?.votesByCandidate?.[cand.id]?.total||0;
+    const diff=currV-prevV;
+    const diffHtml=diff>0?`<span class="diff-up">▲ +${diff}</span>`:diff<0?`<span class="diff-down">▼ ${diff}</span>`:`<span class="diff-flat">—</span>`;
+    let topSub="—";
+    if(curr[cand.id]){ const best=Object.entries(curr[cand.id].sublocations).reduce((a,b)=>a[1]>b[1]?a:b,["",0]); if(best[1]>0) topSub=`${best[0]} (${best[1]})`; }
+    html+=`<tr><td><div class="td-candidate"><img class="td-cand-img" src="${cand.img}"><span class="td-cand-name">${cand.name}</span></div></td><td style="font-family:'JetBrains Mono',monospace;font-weight:700;">${currV}</td><td>${diffHtml}</td><td style="font-size:0.78rem;">${topSub}</td></tr>`;
+  }
+  html+="</tbody></table>";
+  document.getElementById("periodSummaryTable").innerHTML=html;
+}
+
+function renderSublocationRanking(){
+  const filter=document.getElementById("sublocationFilter").value;
+  const agg=getCurrentPeriodAggregated();
+  let scores=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.sublocations[filter]||0})).sort((a,b)=>b.votes-a.votes);
+  const maxV=scores[0]?.votes||1;
+  const medals=["🥇","🥈","🥉","📌","📌","📌","📌"];
+  document.getElementById("sublocationRanking").innerHTML=scores.map((cand,idx)=>`
+    <div class="sub-rank-item">
+      <div class="sub-rank-medal">${medals[idx]||"📌"}</div>
+      <div class="sub-rank-bar-wrap">
+        <div class="sub-rank-info"><span class="sub-rank-name">${cand.name}</span><span class="sub-rank-count">${cand.votes}</span></div>
+        <div class="sub-rank-bar"><div class="sub-rank-fill" style="width:${maxV?Math.round((cand.votes/maxV)*100):0}%"></div></div>
+      </div>
+    </div>`).join('');
+}
+
+let historyChart=null;
+function renderHistoricalChart(){
+  const archive=localStorage.getItem(KEYS.PERIOD_ARCHIVE);
+  let periods=archive?JSON.parse(archive):[];
+  const labels=periods.map(p=>new Date(p.periodStart).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
+  const colors=["#4361ee","#e63946","#40c27a","#e9c46a","#f4a261","#9b5de5","#f15bb5"];
+  const datasets=CANDIDATES.map((cand,i)=>({label:cand.name.split(" ")[0],data:periods.map(p=>p.votesByCandidate[cand.id]?.total||0),borderColor:colors[i],backgroundColor:colors[i]+"22",tension:0.4,fill:false,pointRadius:4,pointHoverRadius:7}));
+  const ctx=document.getElementById('historicalChart').getContext('2d');
+  if(historyChart) historyChart.destroy();
+  historyChart=new Chart(ctx,{type:'line',data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{beginAtZero:true,grid:{color:"rgba(0,0,0,0.04)"}},x:{grid:{display:false}}}}});
+}
+
+// ═══════════════════════════════════════════════
+// FACE-OFF
+// ═══════════════════════════════════════════════
+let faceoffInterval=null;
+function renderFaceoff(){ updateFaceoff(); }
+function updateFaceoff(){
+  if(!currentUser) return;
+  const agg=getCurrentPeriodAggregated();
+  let sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
+  if(sorted.length<2) return;
+  const right=sorted[0], left=sorted[1];
+  const setEl=(id,val)=>{ const el=document.getElementById(id); if(el&&el.innerText!==String(val)){el.innerText=val;el.classList.add("vote-flash");setTimeout(()=>el.classList.remove("vote-flash"),400);} };
+  document.getElementById("foLeftImg").src=left.img;
+  document.getElementById("foLeftName").innerText=left.name;
+  document.getElementById("foLeftParty").innerText=left.party;
+  setEl("foLeftVotes",left.votes);
+  document.getElementById("foRightImg").src=right.img;
+  document.getElementById("foRightName").innerText=right.name;
+  document.getElementById("foRightParty").innerText=right.party;
+  setEl("foRightVotes",right.votes);
+  const total=left.votes+right.votes;
+  document.getElementById("foTotalVotes").innerText=total;
+  const pct=Math.min(100,Math.floor((total/540)*100));
+  document.getElementById("foProgressFill").style.width=`${pct}%`;
+  const leftPct=total?Math.round((left.votes/total)*100):0;
+  const rightPct=total?Math.round((right.votes/total)*100):0;
+  document.getElementById("foLeftPct").innerText=`${leftPct}%`;
+  document.getElementById("foRightPct").innerText=`${rightPct}%`;
+  const winner=document.getElementById("foWinnerChip");
+  if(right.votes>=270||left.votes>=270) winner.innerHTML="🏆 WINNER DECLARED!";
+  else winner.innerHTML="⏳ Race in progress";
+}
+
+// ═══════════════════════════════════════════════
+// CANDIDATE PROFILE MODAL
+// ═══════════════════════════════════════════════
+function showCandidateProfile(cand){
+  const agg=getCurrentPeriodAggregated();
+  const votes=agg[cand.id]?.total||0;
+  document.getElementById("candidateModalContent").innerHTML=`
+    <button class="modal-close" id="closeProfileModal">&times;</button>
+    <div class="cand-modal-header">
+      <img class="cand-modal-img" src="${cand.img}" alt="${cand.name}">
+      <div>
+        <div class="cand-modal-name">${cand.name}</div>
+        <div class="cand-modal-party">${cand.party}</div>
+        ${cand.incumbent?'<span class="tag tag-gold" style="margin-top:0.4rem">Incumbent MCA</span>':''}
+        <div style="margin-top:0.6rem;font-family:\'JetBrains Mono\',monospace;font-size:0.85rem;color:var(--forest-light);font-weight:700;">${votes} votes this cycle</div>
+      </div>
+    </div>
+    <div class="cand-modal-section"><h4>Biography</h4><p>${cand.fullBio}</p></div>
+    <div class="cand-modal-section"><h4>Vision</h4><p>${cand.vision}</p></div>
+    <div class="cand-modal-section"><h4>Track Record</h4><p>${cand.track}</p></div>`;
+  openModal("candidateProfileModal");
+  document.getElementById("closeProfileModal").onclick=()=>closeModal("candidateProfileModal");
+}
+
+// ═══════════════════════════════════════════════
+// VOTE
+// ═══════════════════════════════════════════════
+let pendingVote=null;
+function showVoteConfirm(cid,btn){
+  const cand=CANDIDATES.find(c=>c.id===cid);
+  document.getElementById("confirmCandidateName").innerText=cand.name;
+  pendingVote={candidateId:cid,button:btn};
+  openModal("voteConfirmModal");
+}
+async function executeVote(){
+  if(!pendingVote) return;
+  const {candidateId,button}=pendingVote;
+  const cand=CANDIDATES.find(c=>c.id===candidateId);
+  closeModal("voteConfirmModal");
+  button.disabled=true;
+  button.innerHTML='<div class="btn-spinner"></div> Voting…';
+  await new Promise(r=>setTimeout(r,900));
+  const success=recordVote(candidateId,currentUser.phone,currentUser.sublocation);
+  button.disabled=false;
+  if(success){
+    button.innerHTML='<i class="fas fa-check-circle"></i> Voted!';
+    showToast(`✅ Voted for ${cand.name}!`,"success");
+    renderDashboard();
+  } else {
+    button.innerHTML='<i class="fas fa-vote-yea"></i> Cast Vote';
+    showToast("Already voted this cycle","error");
+  }
+  pendingVote=null;
+}
+function cancelVote(){ closeModal("voteConfirmModal"); pendingVote=null; }
+
+// ═══════════════════════════════════════════════
+// PROFILE
+// ═══════════════════════════════════════════════
+function loadProfileData(){
+  if(!currentUser) return;
+  document.getElementById("profFirstName").value=currentUser.firstName;
+  document.getElementById("profSurname").value=currentUser.surname;
+  document.getElementById("profPhone").value=currentUser.phone;
+  document.getElementById("profDob").value=currentUser.dob||"";
+  document.getElementById("profSublocation").value=currentUser.sublocation;
+  document.getElementById("profEmail").value=currentUser.email||"";
+  document.getElementById("profNationalId").value=currentUser.nationalId||"";
+  document.getElementById("profLanguage").value=currentUser.language||"en";
+  const avatar=document.getElementById("profileAvatar");
+  avatar.src=currentUser.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=120&bold=true&name=${encodeURIComponent(currentUser.firstName+"+"+currentUser.surname)}`;
+  document.getElementById("profileName").innerText=`${currentUser.firstName} ${currentUser.surname}`;
+  document.getElementById("profileSub").innerText=`${currentUser.sublocation} · Registered Voter`;
+  document.getElementById("profileVoterNum").innerText=`Voter #${currentUser.voterNumber}`;
+  document.getElementById("profileSublocationChip").innerText=currentUser.sublocation;
+  const badge=getUserVoterBadge(currentUser.phone);
+  const badgeEl=document.getElementById("profileCycleBadge");
+  badgeEl.innerText=badge?`${badge} voter this cycle`:"";
+  badgeEl.style.display=badge?"":"none";
+  // vote count
+  const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}');
+  const userVotes=cur.votes.filter(v=>v.userId===currentUser.phone).length;
+  document.getElementById("profileTotalVotes").innerText=userVotes;
+  document.getElementById("profileCurrentRank").innerText=badge||"—";
+}
+
+async function saveProfileChanges(){
+  const firstName=document.getElementById("profFirstName").value.trim();
+  const surname=document.getElementById("profSurname").value.trim();
+  const sublocation=document.getElementById("profSublocation").value;
+  const email=document.getElementById("profEmail").value.trim();
+  const nationalId=document.getElementById("profNationalId").value.trim();
+  const language=document.getElementById("profLanguage").value;
+  if(!isValidName(firstName)||!isValidName(surname)){showToast("Invalid name format","error");return;}
+  if(!isValidEmail(email)){showToast("Invalid email address","error");return;}
+  if(!isValidNationalId(nationalId)){showToast("National ID must be 7-8 digits","error");return;}
+  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+  const idx=users.findIndex(u=>u.phone===currentUser.phone);
+  if(idx!==-1){
+    users[idx]={...users[idx],firstName,surname,sublocation,email,nationalId,language};
+    localStorage.setItem(KEYS.USERS,JSON.stringify(users));
+    currentUser=users[idx];
+    saveSession(currentUser,true);
+    showToast("✅ Profile updated","success");
+    loadProfileData();
+  }
+}
+
+async function changePassword(){
+  const curr=document.getElementById("currentPassword").value;
+  const new1=document.getElementById("newPassword1").value;
+  const new2=document.getElementById("newPassword2").value;
+  const errorEl=document.getElementById("profilePwdError");
+  if(!curr||!new1||!new2){showFormError(errorEl,"All fields required");return;}
+  if(new1!==new2){showFormError(errorEl,"Passwords do not match");return;}
+  if(new1.length<6){showFormError(errorEl,"Minimum 6 characters");return;}
+  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+  const idx=users.findIndex(u=>u.phone===currentUser.phone);
+  if(idx===-1) return;
+  const valid=await verifyPassword(curr,users[idx].passwordHash,users[idx].salt);
+  if(!valid){showFormError(errorEl,"Current password incorrect");return;}
+  const {hash,salt}=await createUserHash(new1);
+  users[idx].passwordHash=hash; users[idx].salt=salt;
+  localStorage.setItem(KEYS.USERS,JSON.stringify(users));
+  currentUser=users[idx]; saveSession(currentUser,true);
+  errorEl.classList.remove("show");
+  showToast("🔐 Password changed","success");
+  ["currentPassword","newPassword1","newPassword2"].forEach(id=>document.getElementById(id).value="");
+}
+
+function handlePhotoUpload(file){
+  if(!file) return;
+  if(!['image/jpeg','image/png'].includes(file.type)){showToast("JPG or PNG only","error");return;}
+  if(file.size>2*1024*1024){showToast("Max 2MB","error");return;}
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    const base64=e.target.result;
+    let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+    const idx=users.findIndex(u=>u.phone===currentUser.phone);
+    if(idx!==-1){ users[idx].profilePhoto=base64; localStorage.setItem(KEYS.USERS,JSON.stringify(users)); currentUser=users[idx]; saveSession(currentUser,true); document.getElementById("profileAvatar").src=base64; updateHeaderAvatar(); showToast("📸 Photo updated","success"); }
+  };
+  reader.readAsDataURL(file);
+}
+
+function removePhoto(){
+  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+  const idx=users.findIndex(u=>u.phone===currentUser.phone);
+  if(idx!==-1){ delete users[idx].profilePhoto; localStorage.setItem(KEYS.USERS,JSON.stringify(users)); currentUser=users[idx]; saveSession(currentUser,true); loadProfileData(); updateHeaderAvatar(); showToast("Photo removed","info"); }
+}
+
+function exportUserData(){
+  if(!currentUser) return;
+  const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}');
+  const userVotes=cur.votes.filter(v=>v.userId===currentUser.phone).map(v=>({candidateId:v.candidateId,candidateName:CANDIDATES.find(c=>c.id===v.candidateId)?.name,sublocation:v.sublocation,timestamp:new Date(v.timestamp).toISOString()}));
+  const data={exportedAt:new Date().toISOString(),user:{firstName:currentUser.firstName,surname:currentUser.surname,phone:currentUser.phone,dob:currentUser.dob,sublocation:currentUser.sublocation,email:currentUser.email,nationalId:currentUser.nationalId,language:currentUser.language,voterNumber:currentUser.voterNumber},votes:{currentCycleVotes:userVotes}};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download=`ngoliba_voter_${currentUser.phone}.json`; a.click(); URL.revokeObjectURL(url);
+  showToast("📦 Data exported","success");
+}
+
+function updateHeaderAvatar(){
+  const img=document.getElementById("headerAvatar");
+  img.src=currentUser.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=40&bold=true&name=${encodeURIComponent(currentUser.firstName+"+"+currentUser.surname)}`;
+}
+function updateHeaderBadge(){
+  const badgeDiv=document.getElementById("headerBadge");
+  const badge=getUserVoterBadge(currentUser?.phone);
+  if(badge){ badgeDiv.classList.remove("hidden"); badgeDiv.innerText=badge==="1st"?"🥇":badge==="2nd"?"🥈":"🥉"; const colors={"1st":"#e9c46a","2nd":"#9ca3af","3rd":"#cd7f32"}; badgeDiv.style.background=colors[badge]||"#666"; }
+  else badgeDiv.classList.add("hidden");
+}
+
+// ═══════════════════════════════════════════════
+// COMPARE
+// ═══════════════════════════════════════════════
+function populateCompareSelects(){
+  ["compareCandA","compareCandB"].forEach((id,i)=>{ const el=document.getElementById(id); el.innerHTML=CANDIDATES.map(c=>`<option value="${c.id}">${c.name}</option>`).join(''); el.value=i; });
+  refreshComparison();
+}
+function refreshComparison(){
+  const aId=parseInt(document.getElementById("compareCandA").value);
+  const bId=parseInt(document.getElementById("compareCandB").value);
+  const agg=getCurrentPeriodAggregated();
+  const candA=CANDIDATES.find(c=>c.id===aId), candB=CANDIDATES.find(c=>c.id===bId);
+  const vA=agg[aId]?.total||0, vB=agg[bId]?.total||0;
+  const subA=agg[aId]?.sublocations||{}, subB=agg[bId]?.sublocations||{};
+  document.getElementById("comparisonResult").innerHTML=`
+    <div class="compare-result-grid">
+      <div class="compare-card"><img src="${candA.img}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;margin-bottom:0.5rem;"><h4>${candA.name}</h4><p style="font-size:0.8rem;color:var(--mid-gray)">${candA.party}</p><p style="font-family:'JetBrains Mono',monospace;font-size:1.5rem;font-weight:800;color:var(--blue-accent)">${vA}</p><p style="font-size:0.75rem;color:var(--mid-gray)">votes</p><div style="margin-top:0.5rem;font-size:0.75rem;">${Object.entries(subA).map(([k,v])=>`<span style="display:inline-block;background:var(--light-gray);padding:0.2rem 0.5rem;border-radius:50px;margin:0.15rem;">${k}: ${v}</span>`).join('')}</div></div>
+      <div class="compare-card"><img src="${candB.img}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;margin-bottom:0.5rem;"><h4>${candB.name}</h4><p style="font-size:0.8rem;color:var(--mid-gray)">${candB.party}</p><p style="font-family:'JetBrains Mono',monospace;font-size:1.5rem;font-weight:800;color:var(--red-accent)">${vB}</p><p style="font-size:0.75rem;color:var(--mid-gray)">votes</p><div style="margin-top:0.5rem;font-size:0.75rem;">${Object.entries(subB).map(([k,v])=>`<span style="display:inline-block;background:var(--light-gray);padding:0.2rem 0.5rem;border-radius:50px;margin:0.15rem;">${k}: ${v}</span>`).join('')}</div></div>
+    </div>
+    <div class="compare-diff">Difference: <strong>${Math.abs(vA-vB)} votes</strong> · ${vA>vB?candA.name:vB>vA?candB.name:"Tied"} leads</div>`;
+}
+
+// ═══════════════════════════════════════════════
+// OTP
+// ═══════════════════════════════════════════════
+let otpTimer=null; let otpDataStore={};
+function sendOtp(){
+  const phone=document.getElementById("otpPhone").value.trim();
+  const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+  if(!users.find(u=>u.phone===phone)){ showToast("Phone not registered","error"); return; }
+  const otp=Math.floor(100000+Math.random()*900000).toString();
+  otpDataStore={phone,otp,expiry:Date.now()+600000};
+  localStorage.setItem(KEYS.OTP_STORE,JSON.stringify(otpDataStore));
+  alert(`[DEMO] Your OTP is: ${otp}`);
+  showToast("OTP sent!","success");
+  document.getElementById("otpStep1").classList.remove("active");
+  document.getElementById("otpStep2").classList.add("active");
+  let secs=60;
+  const timerSpan=document.getElementById("resendTimer");
+  const resendBtn=document.getElementById("resendOtpBtn");
+  if(otpTimer) clearInterval(otpTimer);
+  otpTimer=setInterval(()=>{ secs--; timerSpan.innerText=secs; if(secs<=0){ clearInterval(otpTimer); resendBtn.disabled=false; resendBtn.innerText="Resend OTP"; } },1000);
+}
+async function resetPasswordConfirm(){
+  const phone=document.getElementById("otpPhone").value.trim();
+  const otpCode=document.getElementById("otpCode").value.trim();
+  const newPwd=document.getElementById("newPassword").value;
+  const stored=JSON.parse(localStorage.getItem(KEYS.OTP_STORE)||"{}");
+  if(!stored||stored.phone!==phone||stored.otp!==otpCode||Date.now()>stored.expiry){ showToast("Invalid or expired OTP","error"); return; }
+  if(newPwd.length<6){ showToast("Password min 6 chars","error"); return; }
+  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
+  const idx=users.findIndex(u=>u.phone===phone);
+  if(idx!==-1){ const {hash,salt}=await createUserHash(newPwd); users[idx].passwordHash=hash; users[idx].salt=salt; localStorage.setItem(KEYS.USERS,JSON.stringify(users)); showToast("🔐 Password reset! Please login.","success"); closeModal("otpModal"); }
+}
+
+// ═══════════════════════════════════════════════
+// WELCOME POPUP
+// ═══════════════════════════════════════════════
+function showWelcomePopup(){
+  const popup=document.getElementById("welcomePopup");
+  const lastCycle=getPreviousPeriodStats();
+  let topCandidate="No data yet";
+  if(lastCycle?.votesByCandidate){ let max=0; for(let c of CANDIDATES){ let v=lastCycle.votesByCandidate[c.id]?.total||0; if(v>max){max=v;topCandidate=c.name;} } }
+  const facts=[`Last cycle's top performer: ${topCandidate}`,`${document.getElementById("totalVoters")?.innerText||0} registered voters in Ngoliba Ward`,`Voting cycle: every 5 minutes. Vote early!`];
+  document.getElementById("welcomePopupTitle").innerText=`Welcome, ${currentUser.firstName}! 👋`;
+  document.getElementById("welcomePopupFact").innerText=facts[Math.floor(Math.random()*facts.length)];
+  popup.classList.add("visible");
+  setTimeout(()=>popup.classList.remove("visible"),5000);
+}
+
+// ═══════════════════════════════════════════════
+// COUNTDOWN
+// ═══════════════════════════════════════════════
+let countdownInterval=null;
+function startCountdown(){
+  if(countdownInterval) clearInterval(countdownInterval);
+  function update(){
+    const next=new Date(getNextPeriodStart());
+    const diff=next-Date.now();
+    if(diff<=0){ document.getElementById("heroCountdown").innerText="00:00"; document.getElementById("countdownDisplay").innerText="00:00:000"; return; }
+    const mins=Math.floor(diff/60000);
+    const secs=Math.floor((diff%60000)/1000);
+    const ms=diff%1000;
+    document.getElementById("heroCountdown").innerText=`${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+    document.getElementById("countdownDisplay").innerText=`${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}:${ms.toString().padStart(3,'0')}`;
+  }
+  update(); countdownInterval=setInterval(update,50);
+}
+
+// ═══════════════════════════════════════════════
+// MODAL HELPERS
+// ═══════════════════════════════════════════════
+function openModal(id){ document.getElementById(id).classList.add("open"); }
+function closeModal(id){ document.getElementById(id).classList.remove("open"); }
+
+// ═══════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════
+function showToast(msg,type="info"){
+  const container=document.getElementById("toastContainer");
+  const toast=document.createElement("div");
+  toast.className=`toast-item ${type}`;
+  toast.innerHTML=msg;
+  container.appendChild(toast);
+  setTimeout(()=>{ toast.classList.add("exiting"); setTimeout(()=>toast.remove(),300); },3200);
+}
+
+// ═══════════════════════════════════════════════
+// UI HELPERS
+// ═══════════════════════════════════════════════
+function showFormError(el,msg){ el.innerText=msg; el.classList.add("show"); }
+function shakeEl(id){ const el=document.getElementById(id); el.style.animation="none"; setTimeout(()=>{ el.style.animation="shake-card 0.4s ease"; setTimeout(()=>el.style.animation="",400); },10); }
+function setButtonLoading(btn,loading,spinnerId){
+  const spinner=document.getElementById(spinnerId);
+  if(loading){ spinner?.classList.remove("hidden"); btn.disabled=true; }
+  else { spinner?.classList.add("hidden"); btn.disabled=false; }
+}
+function addRipple(e,el){
+  const rect=el.getBoundingClientRect();
+  const ripple=document.createElement("div");
+  ripple.className="ripple-wave";
+  ripple.style.cssText=`left:${e.clientX-rect.left}px;top:${e.clientY-rect.top}px;width:40px;height:40px;margin:-20px;`;
+  el.appendChild(ripple); setTimeout(()=>ripple.remove(),600);
+}
+document.querySelectorAll(".ripple-wrap").forEach(el=>el.addEventListener("click",e=>addRipple(e,el)));
+
+// ═══════════════════════════════════════════════
+// SCROLL REVEAL + PARALLAX
+// ═══════════════════════════════════════════════
+function initScrollReveal(){
+  const els=document.querySelectorAll(".scroll-reveal,.scroll-reveal-left,.scroll-reveal-right");
+  const obs=new IntersectionObserver((entries)=>{
+    entries.forEach((e,i)=>{ if(e.isIntersecting){ setTimeout(()=>e.target.classList.add("revealed"),i*60); } });
+  },{threshold:0.1});
+  els.forEach(el=>obs.observe(el));
+}
+initScrollReveal();
+
+// HEADER SCROLL STATE
+window.addEventListener("scroll",()=>{
+  const header=document.getElementById("siteHeader");
+  if(window.scrollY>50) header.classList.add("scrolled");
+  else header.classList.remove("scrolled");
+});
+
+// ═══════════════════════════════════════════════
+// CURSOR
+// ═══════════════════════════════════════════════
+let mouseX=0,mouseY=0,ringX=0,ringY=0;
+document.addEventListener("mousemove",e=>{
+  mouseX=e.clientX; mouseY=e.clientY;
+  document.getElementById("cursor").style.transform=`translate(${mouseX-6}px,${mouseY-6}px)`;
+});
+function animateRing(){
+  ringX+=(mouseX-ringX)*0.12; ringY+=(mouseY-ringY)*0.12;
+  document.getElementById("cursor-ring").style.transform=`translate(${ringX-20}px,${ringY-20}px)`;
+  requestAnimationFrame(animateRing);
+}
+animateRing();
+document.querySelectorAll("button,a,select,input,[data-id]").forEach(el=>{
+  el.addEventListener("mouseenter",()=>{ document.getElementById("cursor").style.transform+=` scale(1.5)`; document.getElementById("cursor-ring").style.width="60px"; document.getElementById("cursor-ring").style.height="60px"; });
+  el.addEventListener("mouseleave",()=>{ document.getElementById("cursor-ring").style.width="40px"; document.getElementById("cursor-ring").style.height="40px"; });
+});
+
+// ═══════════════════════════════════════════════
+// PASSWORD STRENGTH
+// ═══════════════════════════════════════════════
+document.getElementById("regPassword")?.addEventListener("input",function(){
+  const val=this.value; let strength=0;
+  if(val.length>=6) strength=1; if(val.length>=8) strength=2;
+  if(val.match(/[A-Z]/)&&val.match(/[0-9]/)) strength=3;
+  const bar=document.getElementById("strengthBar");
+  const colors=["","#ef4444","#f59e0b","#10b981"];
+  const widths=["0%","33%","66%","100%"];
+  bar.style.width=widths[strength]; bar.style.background=colors[strength];
+});
+
+// ═══════════════════════════════════════════════
+// EVENT BINDINGS
+// ═══════════════════════════════════════════════
+document.getElementById("showLoginTab").onclick=()=>{ document.getElementById("loginForm").classList.remove("hidden"); document.getElementById("registerForm").classList.add("hidden"); document.getElementById("showLoginTab").classList.add("active"); document.getElementById("showRegisterTab").classList.remove("active"); document.getElementById("loginErrorMsg").classList.remove("show"); };
+document.getElementById("showRegisterTab").onclick=()=>{ document.getElementById("registerForm").classList.remove("hidden"); document.getElementById("loginForm").classList.add("hidden"); document.getElementById("showRegisterTab").classList.add("active"); document.getElementById("showLoginTab").classList.remove("active"); document.getElementById("regErrorMsg").classList.remove("show"); };
+document.getElementById("doLoginBtn").onclick=loginUser;
+document.getElementById("doRegisterBtn").onclick=registerUser;
+document.getElementById("logoutBtn").onclick=logout;
+document.getElementById("navDashboard").onclick=()=>showPane("dashboardContent");
+document.getElementById("navProfile").onclick=()=>showPane("profileContent");
+document.getElementById("avatarWrap").onclick=()=>showPane("profileContent");
+document.getElementById("forgotPasswordBtn").onclick=()=>openModal("otpModal");
+document.getElementById("sendOtpBtn").onclick=sendOtp;
+document.getElementById("resendOtpBtn").onclick=sendOtp;
+document.getElementById("resetPasswordConfirmBtn").onclick=resetPasswordConfirm;
+document.getElementById("closeOtpModal").onclick=()=>closeModal("otpModal");
+document.getElementById("sublocationFilter").onchange=renderSublocationRanking;
+document.getElementById("refreshHistoryBtn").onclick=renderHistoricalChart;
+document.getElementById("compareCandidatesBtn").onclick=()=>{ openModal("compareModal"); populateCompareSelects(); };
+document.getElementById("closeCompareBtn").onclick=()=>closeModal("compareModal");
+document.getElementById("refreshCompareBtn").onclick=refreshComparison;
+document.getElementById("confirmVoteYes").onclick=executeVote;
+document.getElementById("confirmVoteNo").onclick=cancelVote;
+document.getElementById("closeVoteConfirm").onclick=cancelVote;
+document.getElementById("profilePhotoUpload").onchange=e=>{ if(e.target.files.length) handlePhotoUpload(e.target.files[0]); };
+document.getElementById("removePhotoBtn").onclick=removePhoto;
+document.getElementById("saveProfileDetailsBtn").onclick=saveProfileChanges;
+document.getElementById("changePasswordBtn").onclick=changePassword;
+document.getElementById("exportDataBtn").onclick=exportUserData;
+document.getElementById("closeWelcomePopup").onclick=()=>document.getElementById("welcomePopup").classList.remove("visible");
+
+// Close modals on backdrop click
+["voteConfirmModal","candidateProfileModal","compareModal","otpModal"].forEach(id=>{
+  document.getElementById(id).addEventListener("click",e=>{ if(e.target===document.getElementById(id)) closeModal(id); });
+});
+
+// Ripple for dynamically created buttons
+document.addEventListener("click",e=>{
+  const btn=e.target.closest(".ripple-wrap");
+  if(btn) addRipple(e,btn);
+});
+
+// Keyboard: Enter to login
+document.getElementById("loginPassword").addEventListener("keydown",e=>{ if(e.key==="Enter") loginUser(); });
+
+// ═══════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════
+checkAndResetPeriod();
+if(Notification.permission==="default") Notification.requestPermission();
+
+// Auto-refresh every 5 seconds
+setInterval(()=>{
+  checkAndResetPeriod();
+  if(currentUser){
+    updateFaceoff();
+    renderVoterRegistry();
+    updateHeaderBadge();
+  }
+},5000);
+
+// Full re-render every 30 seconds
+setInterval(()=>{ if(currentUser) renderDashboard(); },30000);
+
+// Session restore
+const sessUser=loadSession();
+if(sessUser){
+  currentUser=sessUser;
+  enterDashboard();
+}
+
+// CSS for shake animation
+const style=document.createElement("style");
+style.textContent=`@keyframes shake-card{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}`;
+document.head.appendChild(style);
+</script>
+</body>
+</html>
