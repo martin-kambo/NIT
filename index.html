@@ -453,7 +453,7 @@ body::before {
 .card-body { padding: 1rem 1.1rem; flex: 1; display: flex; flex-direction: column; }
 .card-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; color: var(--text-dark); margin-bottom: 0.15rem; }
 .card-party { font-size: 0.72rem; color: var(--mid-gray); margin-bottom: 0.6rem; }
-.card-bio { font-size: 0.78rem; color: var(--text-mid); line-height: 1.5; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-bio { font-size: 0.78rem; color: var(--text-mid); line-height: 1.5; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-vote-btn {
   display: flex; align-items: center; justify-content: center; gap: 0.4rem;
   width: 100%; margin-top: 0.9rem; padding: 0.65rem;
@@ -633,7 +633,6 @@ body::before {
 .compare-diff { text-align: center; font-size: 0.85rem; color: var(--mid-gray); margin-top: 0.75rem; }
 
 /* OTP MODAL */
-.otp-steps { }
 .otp-step { display: none; }
 .otp-step.active { display: block; }
 
@@ -1083,63 +1082,65 @@ const CANDIDATES = [
   { id:6, name:"David Kiprotich", party:"Roots", bio:"Governance activist.", img:"https://randomuser.me/api/portraits/men/99.jpg", fullBio:"Paralegal and governance activist. Advocates for public accountability.", vision:"Public finance watchdog, road safety, disability inclusion.", track:"Petitioned for road project; organized 10 public budget forums." }
 ];
 const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
-const KEYS = { USERS:"ngoliba_users", SESSION:"ngoliba_session", CURRENT_PERIOD:"ngoliba_current_period", PERIOD_ARCHIVE:"ngoliba_period_archive", OTP_STORE:"ngoliba_otp", LOGIN_ATTEMPTS:"login_attempts", VOTER_COUNTER:"ngoliba_voter_counter" };
+// ═══════════════════════════════════════════════
+// API HELPERS
+// ═══════════════════════════════════════════════
+const API = {
+  auth:            '/.netlify/functions/auth',
+  vote:            '/.netlify/functions/vote',
+  profile:         '/.netlify/functions/profile',
+  sendOtp:         '/.netlify/functions/send-otp',
+  verifyOtp:       '/.netlify/functions/verify-otp',
+  pollingResults:  '/.netlify/functions/polling-results',
+  exportData:      '/.netlify/functions/export-data',
+};
 
-// ═══════════════════════════════════════════════
-// CRYPTO HELPERS
-// ═══════════════════════════════════════════════
-async function hashPassword(p,s){ const enc=new TextEncoder(); const buf=await crypto.subtle.digest('SHA-256',enc.encode(p+s)); return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join(''); }
-async function createUserHash(pwd){ const salt=Math.random().toString(36).substring(2,10); const hash=await hashPassword(pwd,salt); return{hash,salt}; }
-async function verifyPassword(pwd,hash,salt){ return await hashPassword(pwd,salt)===hash; }
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, { credentials: 'include', ...options });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
 
 // ═══════════════════════════════════════════════
 // PERIOD MANAGEMENT
 // ═══════════════════════════════════════════════
-function getCurrentPeriodStart(){ const now=Date.now(); return new Date(Math.floor(now/PERIOD_MS)*PERIOD_MS).toISOString(); }
-function getNextPeriodStart(){ return new Date(Date.parse(getCurrentPeriodStart())+PERIOD_MS).toISOString(); }
+// ═══════════════════════════════════════════════
+// PERIOD STATE (fetched from API)
+// ═══════════════════════════════════════════════
+let currentPeriodData = null; // populated by refreshPeriodData()
 
-function checkAndResetPeriod(){
-  let cur=localStorage.getItem(KEYS.CURRENT_PERIOD);
-  const expected=getCurrentPeriodStart();
-  if(!cur){ localStorage.setItem(KEYS.CURRENT_PERIOD,JSON.stringify({periodStart:expected,votes:[],firstVoter:null,secondVoter:null,thirdVoter:null})); return; }
-  const parsed=JSON.parse(cur);
-  if(parsed.periodStart!==expected){
-    let archive=localStorage.getItem(KEYS.PERIOD_ARCHIVE);
-    let list=archive?JSON.parse(archive):[];
-    const agg={}; CANDIDATES.forEach(c=>{ agg[c.id]={total:0,sublocations:{}}; SUBLOCATIONS.forEach(s=>agg[c.id].sublocations[s]=0); });
-    for(let v of parsed.votes){ agg[v.candidateId].total++; agg[v.candidateId].sublocations[v.sublocation]++; }
-    list.push({periodStart:parsed.periodStart,periodEnd:new Date(Date.parse(parsed.periodStart)+PERIOD_MS).toISOString(),votesByCandidate:agg});
-    if(list.length>30) list.shift();
-    localStorage.setItem(KEYS.PERIOD_ARCHIVE,JSON.stringify(list));
-    localStorage.setItem(KEYS.CURRENT_PERIOD,JSON.stringify({periodStart:expected,votes:[],firstVoter:null,secondVoter:null,thirdVoter:null}));
-    showToast("🔄 New voting cycle started!","info");
+async function refreshPeriodData() {
+  const { ok, data } = await apiFetch(API.pollingResults);
+  if (ok) {
+    currentPeriodData = data;
+    if (faceoffInterval) updateFaceoff();
   }
 }
 
-function getCurrentPeriodAggregated(){
-  const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}');
-  const agg={}; CANDIDATES.forEach(c=>{ agg[c.id]={total:0,sublocations:{}}; SUBLOCATIONS.forEach(s=>agg[c.id].sublocations[s]=0); });
-  for(let v of cur.votes){ agg[v.candidateId].total++; agg[v.candidateId].sublocations[v.sublocation]++; }
+function getCurrentPeriodStart() {
+  return currentPeriodData?.periodStart || new Date(Math.floor(Date.now() / PERIOD_MS) * PERIOD_MS).toISOString();
+}
+function getNextPeriodStart() {
+  return currentPeriodData?.periodEnd || new Date(Date.parse(getCurrentPeriodStart()) + PERIOD_MS).toISOString();
+}
+async function checkAndResetPeriod() { await refreshPeriodData(); }
+
+function getCurrentPeriodAggregated() {
+  if (!currentPeriodData?.votesByCandidate) {
+    const agg = {}; CANDIDATES.forEach(c => { agg[c.id] = { total: 0, sublocations: {} }; SUBLOCATIONS.forEach(s => agg[c.id].sublocations[s] = 0); }); return agg;
+  }
+  const agg = {}; CANDIDATES.forEach(c => { agg[c.id] = { total: currentPeriodData.votesByCandidate[c.id] || 0, sublocations: {} }; SUBLOCATIONS.forEach(s => agg[c.id].sublocations[s] = 0); });
   return agg;
 }
-
-function hasUserVotedInPeriod(phone){ const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}'); return cur.votes.some(v=>v.userId===phone); }
-
-function recordVote(cid,uid,sub){
-  if(hasUserVotedInPeriod(uid)) return false;
-  let cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}');
-  cur.votes.push({candidateId:cid,sublocation:sub,userId:uid,timestamp:Date.now()});
-  if(!cur.firstVoter) cur.firstVoter=uid;
-  else if(!cur.secondVoter) cur.secondVoter=uid;
-  else if(!cur.thirdVoter) cur.thirdVoter=uid;
-  localStorage.setItem(KEYS.CURRENT_PERIOD,JSON.stringify(cur)); return true;
+function hasUserVotedInPeriod() { return currentPeriodData?.votesByUser?.includes(currentUser?.id) || false; }
+function getUserVoterBadge(uid) {
+  if (!currentPeriodData) return null;
+  if (currentPeriodData.firstVoter === uid) return '1st';
+  if (currentPeriodData.secondVoter === uid) return '2nd';
+  if (currentPeriodData.thirdVoter === uid) return '3rd';
+  return null;
 }
-
-function getUserVoterBadge(uid){ const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}'); if(cur.firstVoter===uid) return '1st'; if(cur.secondVoter===uid) return '2nd'; if(cur.thirdVoter===uid) return '3rd'; return null; }
-
-function getNextVoterNumber(){ let n=localStorage.getItem(KEYS.VOTER_COUNTER); if(!n){localStorage.setItem(KEYS.VOTER_COUNTER,"1");return 1;} let num=parseInt(n); localStorage.setItem(KEYS.VOTER_COUNTER,(num+1).toString()); return num; }
-
-function getPreviousPeriodStats(){ const a=localStorage.getItem(KEYS.PERIOD_ARCHIVE); if(!a) return null; const weeks=JSON.parse(a); return weeks.length?weeks[weeks.length-1]:null; }
+function getPreviousPeriodStats() { return null; } // historical data via admin API only
 
 // ═══════════════════════════════════════════════
 // VALIDATION
@@ -1152,14 +1153,23 @@ function isValidNationalId(id){ if(!id) return true; return /^[0-9]{7,8}$/.test(
 // ═══════════════════════════════════════════════
 // AUTH & SESSION
 // ═══════════════════════════════════════════════
-let currentUser=null;
-function saveSession(user,remember=false){ const expiry=remember?Date.now()+30*24*3600000:Date.now()+7*24*3600000; localStorage.setItem(KEYS.SESSION,JSON.stringify({phone:user.phone,expiry})); }
-function loadSession(){ const sess=localStorage.getItem(KEYS.SESSION); if(!sess) return null; const {phone,expiry}=JSON.parse(sess); if(Date.now()>expiry){localStorage.removeItem(KEYS.SESSION);return null;} const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]"); return users.find(u=>u.phone===phone)||null; }
-function clearSession(){ localStorage.removeItem(KEYS.SESSION); currentUser=null; }
+// ═══════════════════════════════════════════════
+// AUTH & SESSION
+// ═══════════════════════════════════════════════
+let currentUser = null;
+// Session is managed via HttpOnly cookie — no localStorage needed.
+// On page load we verify session by fetching profile.
+async function loadSession() {
+  const { ok, data } = await apiFetch(API.profile, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_profile' }) });
+  return ok ? data.user : null;
+}
+function clearSession() { currentUser = null; }
 
-function getLoginAttempts(phone){ const att=JSON.parse(localStorage.getItem(KEYS.LOGIN_ATTEMPTS)||"{}"); const rec=att[phone]; if(!rec) return{count:0,blockedUntil:0}; if(Date.now()>rec.blockedUntil){delete att[phone];localStorage.setItem(KEYS.LOGIN_ATTEMPTS,JSON.stringify(att));return{count:0,blockedUntil:0};} return rec; }
-function recordFailedAttempt(phone){ let att=JSON.parse(localStorage.getItem(KEYS.LOGIN_ATTEMPTS)||"{}"); let rec=att[phone]||{count:0,blockedUntil:0}; if(Date.now()>rec.blockedUntil) rec={count:0,blockedUntil:0}; rec.count++; if(rec.count>=5) rec.blockedUntil=Date.now()+5*60*1000; att[phone]=rec; localStorage.setItem(KEYS.LOGIN_ATTEMPTS,JSON.stringify(att)); return rec; }
-function resetLoginAttempts(phone){ let att=JSON.parse(localStorage.getItem(KEYS.LOGIN_ATTEMPTS)||"{}"); delete att[phone]; localStorage.setItem(KEYS.LOGIN_ATTEMPTS,JSON.stringify(att)); }
+// Login-attempt rate limiting stays in memory (resets on page reload, backend enforces real limits)
+const _loginAttempts = {};
+function getLoginAttempts(phone){ const r=_loginAttempts[phone]; if(!r) return{count:0,blockedUntil:0}; if(Date.now()>r.blockedUntil){delete _loginAttempts[phone];return{count:0,blockedUntil:0};} return r; }
+function recordFailedAttempt(phone){ let r=_loginAttempts[phone]||{count:0,blockedUntil:0}; if(Date.now()>r.blockedUntil) r={count:0,blockedUntil:0}; r.count++; if(r.count>=5) r.blockedUntil=Date.now()+5*60*1000; _loginAttempts[phone]=r; return r; }
+function resetLoginAttempts(phone){ delete _loginAttempts[phone]; }
 
 async function registerUser(){
   const fn=document.getElementById("regFirstName").value.trim();
@@ -1182,16 +1192,19 @@ async function registerUser(){
   if(pwd.length<6){ showFormError(errorDiv,"Password minimum 6 characters"); return; }
   if(pwd!==confirm){ showFormError(errorDiv,"Passwords do not match"); return; }
 
-  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-  if(users.find(u=>u.phone===phone)){ showFormError(errorDiv,"Phone already registered"); return; }
-
-  const voterNumber=getNextVoterNumber();
-  const {hash,salt}=await createUserHash(pwd);
-  users.push({firstName:fn,surname:sn,dob,phone,sublocation:sub,email,nationalId,language:lang,passwordHash:hash,salt,profilePhoto:null,voterNumber,registeredAt:Date.now()});
-  localStorage.setItem(KEYS.USERS,JSON.stringify(users));
+  const btn = document.getElementById("doRegisterBtn");
+  setButtonLoading(btn, true, "regSpinner");
+  const { ok, data } = await apiFetch(API.auth, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'register', phone, password: pwd, firstName: fn, surname: sn, dob, sublocation: sub, email, nationalId, language: lang })
+  });
+  setButtonLoading(btn, false, "regSpinner");
+  if (!ok) { showFormError(errorDiv, data.error || 'Registration failed'); return; }
+  currentUser = data.user;
   errorDiv.classList.remove("show");
-  showToast(`🎉 Registration successful! Voter No. ${voterNumber}`,"success");
-  document.getElementById("showLoginTab").click();
+  showToast(`🎉 Registration successful! Voter No. ${data.user.voterNumber}`, "success");
+  await refreshPeriodData();
+  enterDashboard();
 }
 
 async function loginUser(){
@@ -1206,21 +1219,25 @@ async function loginUser(){
   const attempts=getLoginAttempts(phone);
   if(attempts.blockedUntil>Date.now()){ showFormError(errorDiv,"Too many failed attempts. Try again in 5 minutes."); setButtonLoading(btn,false,"loginSpinner"); return; }
 
-  await new Promise(r=>setTimeout(r,600));
-  const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-  const user=users.find(u=>u.phone===phone);
-  if(!user){ recordFailedAttempt(phone); showFormError(errorDiv,"Invalid phone or password"); shakeEl("authContainer"); setButtonLoading(btn,false,"loginSpinner"); return; }
-  const valid=await verifyPassword(pwd,user.passwordHash,user.salt);
-  if(!valid){ recordFailedAttempt(phone); showFormError(errorDiv,"Invalid phone or password"); shakeEl("authContainer"); setButtonLoading(btn,false,"loginSpinner"); return; }
-
+  const { ok, data } = await apiFetch(API.auth, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'login', phone, password: pwd })
+  });
+  if (!ok) {
+    recordFailedAttempt(phone);
+    showFormError(errorDiv, data.error || 'Invalid phone or password');
+    shakeEl("authContainer");
+    setButtonLoading(btn, false, "loginSpinner");
+    return;
+  }
   resetLoginAttempts(phone);
-  currentUser=user;
-  saveSession(user,remember);
+  currentUser = data.user;
   setButtonLoading(btn,false,"loginSpinner");
+  await refreshPeriodData();
   enterDashboard();
 }
 
-function logout(){ clearSession(); if(faceoffInterval) clearInterval(faceoffInterval); if(countdownInterval) clearInterval(countdownInterval); location.reload(); }
+function logout(){ apiFetch(API.auth, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) }).finally(() => { clearSession(); if(faceoffInterval) clearInterval(faceoffInterval); if(countdownInterval) clearInterval(countdownInterval); location.reload(); }); }
 
 // ═══════════════════════════════════════════════
 // UI ENTRY POINT
@@ -1255,7 +1272,7 @@ function showPane(id){
 // ═══════════════════════════════════════════════
 function renderDashboard(){
   if(!currentUser) return;
-  const hasVoted=hasUserVotedInPeriod(currentUser.phone);
+  const hasVoted=hasUserVotedInPeriod();
   document.getElementById("alreadyVotedMsg").classList.toggle("hidden",!hasVoted);
   renderFaceoff();
   renderCandidatesGrid(hasVoted);
@@ -1273,24 +1290,22 @@ function renderDashboard(){
 }
 
 function renderVoterRegistry(){
-  const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-  document.getElementById("totalVoters").innerText=users.length;
-  const counts={Ngoliba:0,Gatiiguru:0,Kilimambogo:0,Magogoni:0};
-  users.forEach(u=>{ if(counts[u.sublocation]!==undefined) counts[u.sublocation]++; });
+  const total = currentPeriodData?.registeredVoters || 0;
+  const counts = currentPeriodData?.votersBySublocation || {};
+  document.getElementById("totalVoters").innerText = total;
   const container=document.getElementById("vrSubsContainer");
-  container.innerHTML=SUBLOCATIONS.map(s=>`<div class="vr-sub-item"><div class="vr-sub-num">${counts[s]}</div><div class="vr-sub-label">${s}</div></div>`).join('');
-  // Countdown strip
+  container.innerHTML=SUBLOCATIONS.map(s=>`<div class="vr-sub-item"><div class="vr-sub-num">${counts[s]||0}</div><div class="vr-sub-label">${s}</div></div>`).join('');
   const stripContainer=document.getElementById("voterStatsRow");
-  stripContainer.innerHTML=`<div class="voter-stat-item"><div class="voter-stat-num">${users.length}</div><div class="voter-stat-label">Voters</div></div>`+SUBLOCATIONS.map(s=>`<div class="voter-stat-item" style="display:none" class="md-show"><div class="voter-stat-num">${counts[s]}</div><div class="voter-stat-label">${s}</div></div>`).join('');
+  stripContainer.innerHTML=`<div class="voter-stat-item"><div class="voter-stat-num">${total}</div><div class="voter-stat-label">Voters</div></div>`+SUBLOCATIONS.map(s=>`<div class="voter-stat-item" style="display:none" class="md-show"><div class="voter-stat-num">${counts[s]||0}</div><div class="voter-stat-label">${s}</div></div>`).join('');
 }
 
 function renderTurnout(){
-  const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-  const currentVotes=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes;
+  const registeredBySub = currentPeriodData?.votersBySublocation || {};
+  const votesBySub = currentPeriodData?.votesBySublocation || {};
   const grid=document.getElementById("turnoutGrid"); grid.innerHTML="";
   for(let sub of SUBLOCATIONS){
-    const total=users.filter(u=>u.sublocation===sub).length;
-    const voted=currentVotes.filter(v=>v.sublocation===sub).length;
+    const total=registeredBySub[sub]||0;
+    const voted=votesBySub[sub]||0;
     const pct=total===0?0:Math.round((voted/total)*100);
     grid.innerHTML+=`<div class="turnout-card scroll-reveal"><div class="turnout-sub">${sub}</div><div class="turnout-fraction">${voted} / ${total} voters</div><div class="turnout-pct">${pct}%</div></div>`;
   }
@@ -1363,11 +1378,11 @@ function renderSublocationRanking(){
 
 let historyChart=null;
 function renderHistoricalChart(){
-  const archive=localStorage.getItem(KEYS.PERIOD_ARCHIVE);
-  let periods=archive?JSON.parse(archive):[];
+  // Historical data is managed server-side; show current period trend if available
+  const periods = currentPeriodData ? [currentPeriodData] : [];
   const labels=periods.map(p=>new Date(p.periodStart).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
   const colors=["#4361ee","#e63946","#40c27a","#e9c46a","#f4a261","#9b5de5","#f15bb5"];
-  const datasets=CANDIDATES.map((cand,i)=>({label:cand.name.split(" ")[0],data:periods.map(p=>p.votesByCandidate[cand.id]?.total||0),borderColor:colors[i],backgroundColor:colors[i]+"22",tension:0.4,fill:false,pointRadius:4,pointHoverRadius:7}));
+  const datasets=CANDIDATES.map((cand,i)=>({label:cand.name.split(" ")[0],data:periods.map(p=>p.votesByCandidate?.[cand.id]||0),borderColor:colors[i],backgroundColor:colors[i]+"22",tension:0.4,fill:false,pointRadius:4,pointHoverRadius:7}));
   const ctx=document.getElementById('historicalChart').getContext('2d');
   if(historyChart) historyChart.destroy();
   historyChart=new Chart(ctx,{type:'line',data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{beginAtZero:true,grid:{color:"rgba(0,0,0,0.04)"}},x:{grid:{display:false}}}}});
@@ -1447,16 +1462,19 @@ async function executeVote(){
   closeModal("voteConfirmModal");
   button.disabled=true;
   button.innerHTML='<div class="btn-spinner"></div> Voting…';
-  await new Promise(r=>setTimeout(r,900));
-  const success=recordVote(candidateId,currentUser.phone,currentUser.sublocation);
+  const { ok, data } = await apiFetch(API.vote, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ candidateId, periodId: currentPeriodData?.periodId })
+  });
   button.disabled=false;
-  if(success){
+  if(ok){
     button.innerHTML='<i class="fas fa-check-circle"></i> Voted!';
     showToast(`✅ Voted for ${cand.name}!`,"success");
+    await refreshPeriodData();
     renderDashboard();
   } else {
     button.innerHTML='<i class="fas fa-vote-yea"></i> Cast Vote';
-    showToast("Already voted this cycle","error");
+    showToast(data.error || "Vote failed","error");
   }
   pendingVote=null;
 }
@@ -1481,14 +1499,11 @@ function loadProfileData(){
   document.getElementById("profileSub").innerText=`${currentUser.sublocation} · Registered Voter`;
   document.getElementById("profileVoterNum").innerText=`Voter #${currentUser.voterNumber}`;
   document.getElementById("profileSublocationChip").innerText=currentUser.sublocation;
-  const badge=getUserVoterBadge(currentUser.phone);
+  const badge=getUserVoterBadge(currentUser.id);
   const badgeEl=document.getElementById("profileCycleBadge");
   badgeEl.innerText=badge?`${badge} voter this cycle`:"";
   badgeEl.style.display=badge?"":"none";
-  // vote count
-  const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}');
-  const userVotes=cur.votes.filter(v=>v.userId===currentUser.phone).length;
-  document.getElementById("profileTotalVotes").innerText=userVotes;
+  document.getElementById("profileTotalVotes").innerText=currentPeriodData?.votesByUser?.filter(id=>id===currentUser.id).length||0;
   document.getElementById("profileCurrentRank").innerText=badge||"—";
 }
 
@@ -1502,16 +1517,14 @@ async function saveProfileChanges(){
   if(!isValidName(firstName)||!isValidName(surname)){showToast("Invalid name format","error");return;}
   if(!isValidEmail(email)){showToast("Invalid email address","error");return;}
   if(!isValidNationalId(nationalId)){showToast("National ID must be 7-8 digits","error");return;}
-  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-  const idx=users.findIndex(u=>u.phone===currentUser.phone);
-  if(idx!==-1){
-    users[idx]={...users[idx],firstName,surname,sublocation,email,nationalId,language};
-    localStorage.setItem(KEYS.USERS,JSON.stringify(users));
-    currentUser=users[idx];
-    saveSession(currentUser,true);
-    showToast("✅ Profile updated","success");
-    loadProfileData();
-  }
+  const { ok, data } = await apiFetch(API.profile, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'update_profile', firstName, surname, sublocation, email, nationalId, language })
+  });
+  if (!ok) { showToast(data.error || 'Update failed', "error"); return; }
+  currentUser = data.user;
+  showToast("✅ Profile updated","success");
+  loadProfileData();
 }
 
 async function changePassword(){
@@ -1522,15 +1535,11 @@ async function changePassword(){
   if(!curr||!new1||!new2){showFormError(errorEl,"All fields required");return;}
   if(new1!==new2){showFormError(errorEl,"Passwords do not match");return;}
   if(new1.length<6){showFormError(errorEl,"Minimum 6 characters");return;}
-  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-  const idx=users.findIndex(u=>u.phone===currentUser.phone);
-  if(idx===-1) return;
-  const valid=await verifyPassword(curr,users[idx].passwordHash,users[idx].salt);
-  if(!valid){showFormError(errorEl,"Current password incorrect");return;}
-  const {hash,salt}=await createUserHash(new1);
-  users[idx].passwordHash=hash; users[idx].salt=salt;
-  localStorage.setItem(KEYS.USERS,JSON.stringify(users));
-  currentUser=users[idx]; saveSession(currentUser,true);
+  const { ok, data } = await apiFetch(API.profile, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'change_password', currentPassword: curr, newPassword: new1 })
+  });
+  if (!ok) { showFormError(errorEl, data.error || 'Password change failed'); return; }
   errorEl.classList.remove("show");
   showToast("🔐 Password changed","success");
   ["currentPassword","newPassword1","newPassword2"].forEach(id=>document.getElementById(id).value="");
@@ -1541,29 +1550,42 @@ function handlePhotoUpload(file){
   if(!['image/jpeg','image/png'].includes(file.type)){showToast("JPG or PNG only","error");return;}
   if(file.size>2*1024*1024){showToast("Max 2MB","error");return;}
   const reader=new FileReader();
-  reader.onload=(e)=>{
+  reader.onload=async (e)=>{
     const base64=e.target.result;
-    let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-    const idx=users.findIndex(u=>u.phone===currentUser.phone);
-    if(idx!==-1){ users[idx].profilePhoto=base64; localStorage.setItem(KEYS.USERS,JSON.stringify(users)); currentUser=users[idx]; saveSession(currentUser,true); document.getElementById("profileAvatar").src=base64; updateHeaderAvatar(); showToast("📸 Photo updated","success"); }
+    const { ok, data } = await apiFetch(API.profile, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_photo', photoBase64: base64 })
+    });
+    if (!ok) { showToast(data.error || 'Photo upload failed', "error"); return; }
+    currentUser = data.user;
+    document.getElementById("profileAvatar").src=base64;
+    updateHeaderAvatar();
+    showToast("📸 Photo updated","success");
   };
   reader.readAsDataURL(file);
 }
 
-function removePhoto(){
-  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-  const idx=users.findIndex(u=>u.phone===currentUser.phone);
-  if(idx!==-1){ delete users[idx].profilePhoto; localStorage.setItem(KEYS.USERS,JSON.stringify(users)); currentUser=users[idx]; saveSession(currentUser,true); loadProfileData(); updateHeaderAvatar(); showToast("Photo removed","info"); }
+async function removePhoto(){
+  const { ok, data } = await apiFetch(API.profile, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'remove_photo' })
+  });
+  if (!ok) { showToast(data.error || 'Failed to remove photo', "error"); return; }
+  currentUser = data.user;
+  loadProfileData(); updateHeaderAvatar(); showToast("Photo removed","info");
 }
 
-function exportUserData(){
+async function exportUserData(){
   if(!currentUser) return;
-  const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}');
-  const userVotes=cur.votes.filter(v=>v.userId===currentUser.phone).map(v=>({candidateId:v.candidateId,candidateName:CANDIDATES.find(c=>c.id===v.candidateId)?.name,sublocation:v.sublocation,timestamp:new Date(v.timestamp).toISOString()}));
-  const data={exportedAt:new Date().toISOString(),user:{firstName:currentUser.firstName,surname:currentUser.surname,phone:currentUser.phone,dob:currentUser.dob,sublocation:currentUser.sublocation,email:currentUser.email,nationalId:currentUser.nationalId,language:currentUser.language,voterNumber:currentUser.voterNumber},votes:{currentCycleVotes:userVotes}};
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement("a"); a.href=url; a.download=`ngoliba_voter_${currentUser.phone}.json`; a.click(); URL.revokeObjectURL(url);
+  showToast("📦 Preparing export…","info");
+  const res = await fetch(API.exportData, { credentials: 'include' });
+  if (!res.ok) { showToast("Export failed","error"); return; }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ngoliba_voter_${currentUser.voterNumber}_${new Date().toISOString().slice(0,10)}.json`;
+  a.click(); URL.revokeObjectURL(url);
   showToast("📦 Data exported","success");
 }
 
@@ -1573,7 +1595,7 @@ function updateHeaderAvatar(){
 }
 function updateHeaderBadge(){
   const badgeDiv=document.getElementById("headerBadge");
-  const badge=getUserVoterBadge(currentUser?.phone);
+  const badge=getUserVoterBadge(currentUser?.id);
   if(badge){ badgeDiv.classList.remove("hidden"); badgeDiv.innerText=badge==="1st"?"🥇":badge==="2nd"?"🥈":"🥉"; const colors={"1st":"#e9c46a","2nd":"#9ca3af","3rd":"#cd7f32"}; badgeDiv.style.background=colors[badge]||"#666"; }
   else badgeDiv.classList.add("hidden");
 }
@@ -1603,16 +1625,16 @@ function refreshComparison(){
 // ═══════════════════════════════════════════════
 // OTP
 // ═══════════════════════════════════════════════
-let otpTimer=null; let otpDataStore={};
-function sendOtp(){
+let otpTimer=null;
+async function sendOtp(){
   const phone=document.getElementById("otpPhone").value.trim();
-  const users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-  if(!users.find(u=>u.phone===phone)){ showToast("Phone not registered","error"); return; }
-  const otp=Math.floor(100000+Math.random()*900000).toString();
-  otpDataStore={phone,otp,expiry:Date.now()+600000};
-  localStorage.setItem(KEYS.OTP_STORE,JSON.stringify(otpDataStore));
-  alert(`[DEMO] Your OTP is: ${otp}`);
-  showToast("OTP sent!","success");
+  if(!isValidPhone(phone)){ showToast("Valid phone required","error"); return; }
+  const { ok, data } = await apiFetch(API.sendOtp, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone })
+  });
+  if (!ok) { showToast(data.error || "Failed to send OTP","error"); return; }
+  showToast("OTP sent to your phone!","success");
   document.getElementById("otpStep1").classList.remove("active");
   document.getElementById("otpStep2").classList.add("active");
   let secs=60;
@@ -1624,13 +1646,15 @@ function sendOtp(){
 async function resetPasswordConfirm(){
   const phone=document.getElementById("otpPhone").value.trim();
   const otpCode=document.getElementById("otpCode").value.trim();
-  const newPwd=document.getElementById("newPassword").value;
-  const stored=JSON.parse(localStorage.getItem(KEYS.OTP_STORE)||"{}");
-  if(!stored||stored.phone!==phone||stored.otp!==otpCode||Date.now()>stored.expiry){ showToast("Invalid or expired OTP","error"); return; }
-  if(newPwd.length<6){ showToast("Password min 6 chars","error"); return; }
-  let users=JSON.parse(localStorage.getItem(KEYS.USERS)||"[]");
-  const idx=users.findIndex(u=>u.phone===phone);
-  if(idx!==-1){ const {hash,salt}=await createUserHash(newPwd); users[idx].passwordHash=hash; users[idx].salt=salt; localStorage.setItem(KEYS.USERS,JSON.stringify(users)); showToast("🔐 Password reset! Please login.","success"); closeModal("otpModal"); }
+  const newPassword=document.getElementById("newPassword").value;
+  if(newPassword.length<6){ showToast("Password min 6 chars","error"); return; }
+  const { ok, data } = await apiFetch(API.verifyOtp, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, otpCode, newPassword })
+  });
+  if (!ok) { showToast(data.error || "Invalid or expired OTP","error"); return; }
+  showToast("🔐 Password reset! Please login.","success");
+  closeModal("otpModal");
 }
 
 // ═══════════════════════════════════════════════
@@ -1803,12 +1827,14 @@ document.getElementById("loginPassword").addEventListener("keydown",e=>{ if(e.ke
 // ═══════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════
-checkAndResetPeriod();
+// ═══════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════
 if(Notification.permission==="default") Notification.requestPermission();
 
 // Auto-refresh every 5 seconds
-setInterval(()=>{
-  checkAndResetPeriod();
+setInterval(async ()=>{
+  await refreshPeriodData();
   if(currentUser){
     updateFaceoff();
     renderVoterRegistry();
@@ -1819,12 +1845,15 @@ setInterval(()=>{
 // Full re-render every 30 seconds
 setInterval(()=>{ if(currentUser) renderDashboard(); },30000);
 
-// Session restore
-const sessUser=loadSession();
-if(sessUser){
-  currentUser=sessUser;
-  enterDashboard();
-}
+// Session restore via cookie — try to load profile on page load
+(async ()=>{
+  const user = await loadSession();
+  if(user){
+    currentUser = user;
+    await refreshPeriodData();
+    enterDashboard();
+  }
+})();
 
 // CSS for shake animation
 const style=document.createElement("style");

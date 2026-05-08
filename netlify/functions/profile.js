@@ -87,7 +87,7 @@ exports.handler = async (event) => {
       return {
         statusCode: 200,
         body: JSON.stringify({ success: true, user: safeUser })
-      });
+      };
     }
 
     // --- UPDATE PASSWORD ---
@@ -120,7 +120,7 @@ exports.handler = async (event) => {
       return {
         statusCode: 200,
         body: JSON.stringify({ success: true, message: 'Password changed successfully' })
-      });
+      };
     }
 
     // --- UPDATE PROFILE PHOTO ---
@@ -146,7 +146,7 @@ exports.handler = async (event) => {
       return {
         statusCode: 200,
         body: JSON.stringify({ success: true, user: safeUser })
-      });
+      };
     }
 
     // --- REMOVE PROFILE PHOTO ---
@@ -160,7 +160,7 @@ exports.handler = async (event) => {
       return {
         statusCode: 200,
         body: JSON.stringify({ success: true, user: safeUser })
-      });
+      };
     }
 
     // --- GET PROFILE ---
@@ -169,13 +169,13 @@ exports.handler = async (event) => {
       return {
         statusCode: 200,
         body: JSON.stringify({ success: true, user: safeUser })
-      });
+      };
     }
 
     return {
       statusCode: 400,
       body: JSON.stringify({ error: 'Invalid action' })
-    });
+    };
 
   } catch (error) {
     console.error('profile error:', error);

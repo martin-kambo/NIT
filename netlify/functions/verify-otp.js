@@ -65,7 +65,7 @@ exports.handler = async (event) => {
         return {
           statusCode: 400,
           body: JSON.stringify({ success: false, error: 'Password must be at least 6 characters' })
-        });
+        };
       }
 
       // Hash new password
@@ -77,7 +77,7 @@ exports.handler = async (event) => {
         return {
           statusCode: 404,
           body: JSON.stringify({ success: false, error: 'User not found' })
-        });
+        };
       }
 
       const user = JSON.parse(userData);
