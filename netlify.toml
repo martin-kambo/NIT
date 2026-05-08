@@ -220,14 +220,6 @@
   targetPort = 8888
   autoLaunch = true
 
-# ============================================
-# EDGE FUNCTIONS (optional - for advanced)
-# ============================================
-
-[edge_functions]
-  # Uncomment if you need edge functions
-  # [edge_functions.geo-redirect]
-  #   path = "/geo/*"
 
 # ============================================
 # PLUGINS (optional)
