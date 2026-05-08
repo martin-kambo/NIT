@@ -2,6 +2,7 @@
 // Verifies OTP code for password reset
 
 const { getStore } = require('@netlify/blobs');
+const store = (name) => getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -19,7 +20,7 @@ exports.handler = async (event) => {
     }
 
     // Get OTP store
-    const otpStore = getStore('otp');
+    const otpStore = store('otp');
     const storedOtp = await otpStore.get(phone);
 
     if (!storedOtp) {
@@ -70,7 +71,7 @@ exports.handler = async (event) => {
 
       // Hash new password
       const crypto = require('crypto');
-      const usersStore = getStore('users');
+      const usersStore = store('users');
       const userData = await usersStore.get(phone);
 
       if (!userData) {

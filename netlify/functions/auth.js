@@ -1,13 +1,14 @@
 // netlify/functions/auth.js
 const { getStore } = require('@netlify/blobs');
+const store = (name) => getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
 const crypto = require('crypto');
 
 function hashPassword(password, salt) {
   return crypto.createHash('sha256').update(password + salt).digest('hex');
 }
 
-function createSession(phone, userId, ttlDays = 7) {
-  const payload = { phone, userId, exp: Date.now() + ttlDays * 24 * 60 * 60 * 1000 };
+function createSession(phone, userId) {
+  const payload = { phone, userId, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 };
   const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');
   const signature = crypto
     .createHmac('sha256', process.env.SESSION_SECRET)
@@ -39,7 +40,7 @@ exports.handler = async (event) => {
   catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
   const { action, phone, password } = body;
-  const usersStore = getStore('users');
+  const usersStore = store('users');
 
   // LOGIN
   if (action === 'login') {
@@ -54,13 +55,11 @@ exports.handler = async (event) => {
     if (hashPassword(password, user.salt) !== user.passwordHash)
       return { statusCode: 401, body: JSON.stringify({ error: 'Invalid credentials' }) };
 
-    const { remember } = body;
-    const ttlDays = remember ? 30 : 7;
-    const sessionToken = createSession(phone, user.id, ttlDays);
+    const sessionToken = createSession(phone, user.id);
     return {
       statusCode: 200,
       headers: {
-        'Set-Cookie': `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttlDays * 24 * 3600}`,
+        'Set-Cookie': `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${7 * 24 * 3600}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ success: true, user: sanitizeUser(user) })
@@ -80,7 +79,7 @@ exports.handler = async (event) => {
     if (existing)
       return { statusCode: 409, body: JSON.stringify({ error: 'Phone number already registered' }) };
 
-    const metaStore = getStore('meta');
+    const metaStore = store('meta');
     const voterNumber = await getNextVoterNumber(metaStore);
     const id = crypto.randomUUID();
     const salt = crypto.randomBytes(16).toString('hex');

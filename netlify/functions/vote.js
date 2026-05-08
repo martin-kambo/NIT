@@ -1,5 +1,6 @@
 // netlify/functions/vote.js
 const { getStore } = require('@netlify/blobs');
+const store = (name) => getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
 const crypto = require('crypto');
 
 function verifySession(cookieHeader) {
@@ -39,8 +40,8 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: 'candidateId and periodId are required' }) };
   }
 
-  const votesStore = getStore('votes');
-  const periodsStore = getStore('periods');
+  const votesStore = store('votes');
+  const periodsStore = store('periods');
 
   // Check current period is still active
   const currentPeriodData = await periodsStore.get('current');
@@ -63,7 +64,7 @@ exports.handler = async (event) => {
   }
 
   // Get user's sublocation
-  const usersStore = getStore('users');
+  const usersStore = store('users');
   const userData = await usersStore.get(session.phone);
   const user = userData ? JSON.parse(userData) : null;
 

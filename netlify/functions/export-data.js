@@ -2,6 +2,7 @@
 // Exports user's personal data (GDPR compliance)
 
 const { getStore } = require('@netlify/blobs');
+const store = (name) => getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
 const crypto = require('crypto');
 
 function verifySession(cookieHeader) {
@@ -33,9 +34,9 @@ exports.handler = async (event) => {
   }
 
   try {
-    const usersStore = getStore('users');
-    const votesStore = getStore('votes');
-    const periodsStore = getStore('periods');
+    const usersStore = store('users');
+    const votesStore = store('votes');
+    const periodsStore = store('periods');
 
     // Get user data
     const userData = await usersStore.get(session.phone);

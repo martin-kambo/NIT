@@ -1,5 +1,6 @@
 // netlify/functions/send-otp.js
 const { getStore } = require('@netlify/blobs');
+const store = (name) => getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
 const africastalking = require('africastalking')({
   apiKey: process.env.AFRICASTALKING_API_KEY,
   username: process.env.AFRICASTALKING_USERNAME
@@ -19,7 +20,7 @@ exports.handler = async (event) => {
   }
 
   // Verify phone exists in users store before sending OTP
-  const usersStore = getStore('users');
+  const usersStore = store('users');
   const userData = await usersStore.get(phone);
   if (!userData) {
     // Return success anyway to avoid phone enumeration
@@ -29,7 +30,7 @@ exports.handler = async (event) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
   // Store OTP with expiry and attempt counter
-  const otpStore = getStore('otp');
+  const otpStore = store('otp');
   await otpStore.set(phone, JSON.stringify({
     code: otp,
     expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes

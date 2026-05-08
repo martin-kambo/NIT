@@ -1,5 +1,6 @@
 // netlify/functions/polling-results.js
 const { getStore } = require('@netlify/blobs');
+const store = (name) => getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'GET') {
@@ -7,7 +8,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const periodsStore = getStore('periods');
+    const periodsStore = store('periods');
     const currentPeriodData = await periodsStore.get('current');
 
     if (!currentPeriodData) {

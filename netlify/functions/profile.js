@@ -2,6 +2,7 @@
 // Update user profile information
 
 const { getStore } = require('@netlify/blobs');
+const store = (name) => getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
 const crypto = require('crypto');
 
 function verifySession(cookieHeader) {
@@ -44,7 +45,7 @@ exports.handler = async (event) => {
 
   try {
     const { action } = JSON.parse(event.body);
-    const usersStore = getStore('users');
+    const usersStore = store('users');
     
     // Get current user data
     const userData = await usersStore.get(session.phone);
