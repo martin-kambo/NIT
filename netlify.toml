@@ -217,9 +217,8 @@
   framework = "#custom"
   command = "echo 'Development server running'"
   port = 8888
-  targetPort = 8888
+  targetPort = 8080
   autoLaunch = true
-
 
 # ============================================
 # PLUGINS (optional)
