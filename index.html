@@ -838,7 +838,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <div class="field-group"><label class="field-label">Password (min 6) *</label><input type="password" id="regPassword" class="field-input" placeholder="••••••"><div class="strength-wrap"><div class="strength-bar" id="strengthBar"></div></div></div>
               <div class="field-group"><label class="field-label">Confirm Password *</label><input type="password" id="regConfirmPassword" class="field-input" placeholder="••••••"></div>
             </div>
-            <button class="btn-primary ripple-wrap" id="doRegisterBtn"><span>Create Account</span> <i class="fas fa-user-plus"></i></button>
+            <button class="btn-primary ripple-wrap" id="doRegisterBtn"><span class="btn-spinner hidden" id="regSpinner"></span><span>Create Account</span> <i class="fas fa-user-plus"></i></button>
           </div>
         </div>
       </div>
@@ -1096,9 +1096,14 @@ const API = {
 };
 
 async function apiFetch(url, options = {}) {
-  const res = await fetch(url, { credentials: 'include', ...options });
-  const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, data };
+  try {
+    const res = await fetch(url, { credentials: 'include', ...options });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err) {
+    console.error('apiFetch network error:', err);
+    return { ok: false, status: 0, data: { error: 'Network error — check your connection and try again.' } };
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -1221,7 +1226,7 @@ async function loginUser(){
 
   const { ok, data } = await apiFetch(API.auth, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'login', phone, password: pwd })
+    body: JSON.stringify({ action: 'login', phone, password: pwd, remember })
   });
   if (!ok) {
     recordFailedAttempt(phone);

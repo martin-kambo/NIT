@@ -6,8 +6,8 @@ function hashPassword(password, salt) {
   return crypto.createHash('sha256').update(password + salt).digest('hex');
 }
 
-function createSession(phone, userId) {
-  const payload = { phone, userId, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 };
+function createSession(phone, userId, ttlDays = 7) {
+  const payload = { phone, userId, exp: Date.now() + ttlDays * 24 * 60 * 60 * 1000 };
   const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');
   const signature = crypto
     .createHmac('sha256', process.env.SESSION_SECRET)
@@ -54,11 +54,13 @@ exports.handler = async (event) => {
     if (hashPassword(password, user.salt) !== user.passwordHash)
       return { statusCode: 401, body: JSON.stringify({ error: 'Invalid credentials' }) };
 
-    const sessionToken = createSession(phone, user.id);
+    const { remember } = body;
+    const ttlDays = remember ? 30 : 7;
+    const sessionToken = createSession(phone, user.id, ttlDays);
     return {
       statusCode: 200,
       headers: {
-        'Set-Cookie': `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${7 * 24 * 3600}`,
+        'Set-Cookie': `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttlDays * 24 * 3600}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ success: true, user: sanitizeUser(user) })
