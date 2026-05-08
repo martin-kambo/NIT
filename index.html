@@ -1252,6 +1252,7 @@ function enterDashboard(){
   showPane("dashboardContent");
   renderDashboard();
   showWelcomePopup();
+  if(Notification.permission==="default") Notification.requestPermission();
   if(faceoffInterval) clearInterval(faceoffInterval);
   faceoffInterval=setInterval(()=>{ checkAndResetPeriod(); updateFaceoff(); },2000);
   startCountdown();
@@ -1836,7 +1837,6 @@ document.getElementById("loginPassword").addEventListener("keydown",e=>{ if(e.ke
 // ═══════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════
-if(Notification.permission==="default") Notification.requestPermission();
 
 // Auto-refresh every 5 seconds
 setInterval(async ()=>{
