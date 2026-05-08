@@ -838,7 +838,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <div class="field-group"><label class="field-label">Password (min 6) *</label><input type="password" id="regPassword" class="field-input" placeholder="••••••"><div class="strength-wrap"><div class="strength-bar" id="strengthBar"></div></div></div>
               <div class="field-group"><label class="field-label">Confirm Password *</label><input type="password" id="regConfirmPassword" class="field-input" placeholder="••••••"></div>
             </div>
-            <button class="btn-primary ripple-wrap" id="doRegisterBtn"><span class="btn-spinner hidden" id="regSpinner"></span><span>Create Account</span> <i class="fas fa-user-plus"></i></button>
+            <button class="btn-primary ripple-wrap" id="doRegisterBtn"><span>Create Account</span> <i class="fas fa-user-plus"></i></button>
           </div>
         </div>
       </div>
@@ -1096,14 +1096,9 @@ const API = {
 };
 
 async function apiFetch(url, options = {}) {
-  try {
-    const res = await fetch(url, { credentials: 'include', ...options });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, data };
-  } catch (err) {
-    console.error('apiFetch network error:', err);
-    return { ok: false, status: 0, data: { error: 'Network error — check your connection and try again.' } };
-  }
+  const res = await fetch(url, { credentials: 'include', ...options });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
 }
 
 // ═══════════════════════════════════════════════
@@ -1226,7 +1221,7 @@ async function loginUser(){
 
   const { ok, data } = await apiFetch(API.auth, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'login', phone, password: pwd, remember })
+    body: JSON.stringify({ action: 'login', phone, password: pwd })
   });
   if (!ok) {
     recordFailedAttempt(phone);
@@ -1683,10 +1678,16 @@ function showWelcomePopup(){
 let countdownInterval=null;
 function startCountdown(){
   if(countdownInterval) clearInterval(countdownInterval);
+  let refreshing=false;
   function update(){
     const next=new Date(getNextPeriodStart());
     const diff=next-Date.now();
-    if(diff<=0){ document.getElementById("heroCountdown").innerText="00:00"; document.getElementById("countdownDisplay").innerText="00:00:000"; return; }
+    if(diff<=0){
+      document.getElementById("heroCountdown").innerText="00:00";
+      document.getElementById("countdownDisplay").innerText="00:00:000";
+      if(!refreshing){ refreshing=true; refreshPeriodData().then(()=>{ refreshing=false; }); }
+      return;
+    }
     const mins=Math.floor(diff/60000);
     const secs=Math.floor((diff%60000)/1000);
     const ms=diff%1000;
