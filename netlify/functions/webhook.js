@@ -3,7 +3,6 @@
 // Trigger via Netlify Cron Jobs or external scheduler like cron-job.org
 
 const { getStore } = require('@netlify/blobs');
-const store = (name) => getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
 
 exports.handler = async (event) => {
   // Verify secret key for security
@@ -13,8 +12,8 @@ exports.handler = async (event) => {
   }
 
   try {
-    const periodsStore = store('periods');
-    const metaStore = store('meta');
+    const periodsStore = getStore('periods');
+    const metaStore = getStore('meta');
     
     // Get current period
     let currentPeriod = await periodsStore.get('current');
@@ -65,8 +64,8 @@ exports.handler = async (event) => {
       // Create new period
       const newPeriod = {
         periodId: newPeriodId,
-        periodStart: currentPeriod.periodEnd,
-        periodEnd: new Date(new Date(currentPeriod.periodEnd).getTime() + 5 * 60 * 1000).toISOString(),
+        periodStart: new Date().toISOString(),
+        periodEnd: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
         isActive: true,
         totalVotes: 0,
         votesByCandidate: {},
