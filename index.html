@@ -1160,8 +1160,10 @@ let currentUser = null;
 // Session is managed via HttpOnly cookie — no localStorage needed.
 // On page load we verify session by fetching profile.
 async function loadSession() {
-  const { ok, data } = await apiFetch(API.profile, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_profile' }) });
-  return ok ? data.user : null;
+  try {
+    const { ok, data } = await apiFetch(API.profile, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_profile' }) });
+    return ok ? data.user : null;
+  } catch { return null; }
 }
 function clearSession() { currentUser = null; }
 
@@ -1200,6 +1202,7 @@ async function registerUser(){
   });
   setButtonLoading(btn, false, "regSpinner");
   if (!ok) { showFormError(errorDiv, data.error || 'Registration failed'); return; }
+  if(Notification.permission==="default") Notification.requestPermission();
   currentUser = data.user;
   errorDiv.classList.remove("show");
   showToast(`🎉 Registration successful! Voter No. ${data.user.voterNumber}`, "success");
@@ -1231,6 +1234,7 @@ async function loginUser(){
     return;
   }
   resetLoginAttempts(phone);
+  if(Notification.permission==="default") Notification.requestPermission();
   currentUser = data.user;
   setButtonLoading(btn,false,"loginSpinner");
   await refreshPeriodData();
