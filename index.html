@@ -1252,7 +1252,6 @@ function enterDashboard(){
   showPane("dashboardContent");
   renderDashboard();
   showWelcomePopup();
-  if(Notification.permission==="default") Notification.requestPermission();
   if(faceoffInterval) clearInterval(faceoffInterval);
   faceoffInterval=setInterval(()=>{ checkAndResetPeriod(); updateFaceoff(); },2000);
   startCountdown();
