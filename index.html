@@ -1096,9 +1096,14 @@ const API = {
 };
 
 async function apiFetch(url, options = {}) {
-  const res = await fetch(url, { credentials: 'include', ...options });
-  const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, data };
+  try {
+    const res = await fetch(url, { credentials: 'include', ...options });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (err) {
+    console.error('apiFetch network error:', err);
+    return { ok: false, status: 0, data: { error: 'Network error — check your connection and try again.' } };
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -1160,10 +1165,8 @@ let currentUser = null;
 // Session is managed via HttpOnly cookie — no localStorage needed.
 // On page load we verify session by fetching profile.
 async function loadSession() {
-  try {
-    const { ok, data } = await apiFetch(API.profile, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_profile' }) });
-    return ok ? data.user : null;
-  } catch { return null; }
+  const { ok, data } = await apiFetch(API.profile, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_profile' }) });
+  return ok ? data.user : null;
 }
 function clearSession() { currentUser = null; }
 
@@ -1202,7 +1205,6 @@ async function registerUser(){
   });
   setButtonLoading(btn, false, "regSpinner");
   if (!ok) { showFormError(errorDiv, data.error || 'Registration failed'); return; }
-  if(Notification.permission==="default") Notification.requestPermission();
   currentUser = data.user;
   errorDiv.classList.remove("show");
   showToast(`🎉 Registration successful! Voter No. ${data.user.voterNumber}`, "success");
@@ -1234,7 +1236,6 @@ async function loginUser(){
     return;
   }
   resetLoginAttempts(phone);
-  if(Notification.permission==="default") Notification.requestPermission();
   currentUser = data.user;
   setButtonLoading(btn,false,"loginSpinner");
   await refreshPeriodData();
@@ -1454,6 +1455,10 @@ function showCandidateProfile(cand){
 // ═══════════════════════════════════════════════
 let pendingVote=null;
 function showVoteConfirm(cid,btn){
+  if(!currentPeriodData?.periodEnd || new Date(currentPeriodData.periodEnd) <= new Date()){
+    showToast("⏳ Voting period just ended — next cycle starting soon!","error");
+    return;
+  }
   const cand=CANDIDATES.find(c=>c.id===cid);
   document.getElementById("confirmCandidateName").innerText=cand.name;
   pendingVote={candidateId:cid,button:btn};
@@ -1683,15 +1688,27 @@ let countdownInterval=null;
 function startCountdown(){
   if(countdownInterval) clearInterval(countdownInterval);
   let refreshing=false;
+  let lastPeriodId=null;
   function update(){
     const next=new Date(getNextPeriodStart());
     const diff=next-Date.now();
     if(diff<=0){
       document.getElementById("heroCountdown").innerText="00:00";
       document.getElementById("countdownDisplay").innerText="00:00:000";
-      if(!refreshing){ refreshing=true; refreshPeriodData().then(()=>{ refreshing=false; }); }
+      if(!refreshing){
+        refreshing=true;
+        refreshPeriodData().then(()=>{
+          refreshing=false;
+          const newId=currentPeriodData?.periodId;
+          if(newId && newId!==lastPeriodId){
+            lastPeriodId=newId;
+            if(currentUser) renderDashboard();
+          }
+        });
+      }
       return;
     }
+    if(lastPeriodId===null) lastPeriodId=currentPeriodData?.periodId||null;
     const mins=Math.floor(diff/60000);
     const secs=Math.floor((diff%60000)/1000);
     const ms=diff%1000;
