@@ -3,6 +3,7 @@
 // Trigger via Netlify Cron Jobs or external scheduler like cron-job.org
 
 const { getStore } = require('@netlify/blobs');
+const store = (name) => getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
 
 exports.handler = async (event) => {
   // Verify secret key for security
@@ -12,8 +13,8 @@ exports.handler = async (event) => {
   }
 
   try {
-    const periodsStore = getStore('periods');
-    const metaStore = getStore('meta');
+    const periodsStore = store('periods');
+    const metaStore = store('meta');
     
     // Get current period
     let currentPeriod = await periodsStore.get('current');
