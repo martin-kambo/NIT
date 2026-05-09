@@ -9,33 +9,32 @@ exports.handler = async (event) => {
 
   try {
     const periodsStore = store('periods');
-    const currentPeriodData = await periodsStore.get('current');
+    const metaStore = store('meta');
+
+    const [currentPeriodData, metaData] = await Promise.all([
+      periodsStore.get('current'),
+      metaStore.get('counters')
+    ]);
+
+    const meta = metaData ? JSON.parse(metaData) : {};
+    const registeredVoters = meta.registeredVoters || 0;
+    const votersBySublocation = meta.votersBySublocation || {};
 
     if (!currentPeriodData) {
       return {
         statusCode: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'public, max-age=5',
-          'CDN-Cache-Control': 'public, max-age=5'
-        },
-        body: JSON.stringify({ periodId: null, totalVotes: 0, votesByCandidate: {}, isActive: false })
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=5' },
+        body: JSON.stringify({ periodId: null, totalVotes: 0, votesByCandidate: {}, isActive: false, registeredVoters, votersBySublocation })
       };
     }
 
     const currentPeriod = JSON.parse(currentPeriodData);
-
-    // Return only aggregate/public data — no voter IDs
     const { votesByUser, ...publicData } = currentPeriod;
 
     return {
       statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'public, max-age=5',
-        'CDN-Cache-Control': 'public, max-age=5'
-      },
-      body: JSON.stringify(publicData)
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=5' },
+      body: JSON.stringify({ ...publicData, registeredVoters, votersBySublocation })
     };
   } catch (error) {
     console.error('polling-results error:', error);

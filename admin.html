@@ -3,743 +3,472 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ngoliba InfoTrack · Admin Dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<title>Ngoliba InfoTrack · Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root {
-  --forest: #0d2818;
-  --forest-mid: #1a3f28;
-  --forest-light: #2d6a4f;
-  --emerald: #40c27a;
-  --emerald-bright: #5ddb96;
-  --gold: #e9c46a;
-  --gold-dark: #c9a027;
-  --cream: #faf7f0;
-  --cream-dark: #f0e8d4;
-  --sand: #e8d5b7;
-  --charcoal: #1c1c1e;
-  --mid-gray: #6b7280;
-  --light-gray: #f3f4f6;
-  --red-accent: #e63946;
-  --blue-accent: #4361ee;
-  --text-dark: #111827;
-  --text-mid: #374151;
-  --shadow-card: 0 8px 30px -8px rgba(0,0,0,0.1);
-  --radius-xl: 1.5rem;
-  --radius-lg: 1rem;
-  --radius-md: 0.75rem;
+  --forest: #0d2818; --forest-mid: #1a3f28; --forest-light: #2d6a4f;
+  --emerald: #40c27a; --gold: #e9c46a; --gold-dark: #c9a027;
+  --cream: #faf7f0; --charcoal: #1c1c1e; --mid-gray: #6b7280;
+  --light-gray: #f3f4f6; --red: #e63946; --blue: #4361ee;
+  --text-dark: #111827; --radius: 1rem; --shadow: 0 8px 30px -8px rgba(0,0,0,0.15);
 }
-
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-  font-family: 'Outfit', sans-serif;
-  background: var(--cream);
-  color: var(--text-dark);
-  overflow-x: hidden;
-}
-
-/* Admin Layout */
-.admin-wrapper {
-  display: flex;
-  min-height: 100vh;
-}
-
-/* Sidebar */
-.sidebar {
-  width: 280px;
-  background: linear-gradient(180deg, var(--forest) 0%, var(--forest-mid) 100%);
-  color: white;
-  position: fixed;
-  height: 100vh;
-  overflow-y: auto;
-  transition: all 0.3s;
-  z-index: 100;
-}
-
-.sidebar-header {
-  padding: 1.5rem;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-  margin-bottom: 1.5rem;
-}
-
-.sidebar-logo {
-  font-family: 'Syne', sans-serif;
-  font-size: 1.2rem;
-  font-weight: 800;
-  color: var(--gold);
-  margin-bottom: 0.25rem;
-}
-
-.sidebar-sub {
-  font-size: 0.7rem;
-  color: rgba(255,255,255,0.5);
-  letter-spacing: 0.08em;
-}
-
-.sidebar-nav {
-  padding: 0 1rem;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius-md);
-  color: rgba(255,255,255,0.7);
-  cursor: pointer;
-  transition: all 0.2s;
-  margin-bottom: 0.25rem;
-}
-
-.nav-item:hover {
-  background: rgba(255,255,255,0.1);
-  color: white;
-}
-
-.nav-item.active {
-  background: var(--gold);
-  color: var(--forest);
-}
-
-.nav-item i { width: 20px; font-size: 1rem; }
-
-.sidebar-footer {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 1.5rem;
-  border-top: 1px solid rgba(255,255,255,0.1);
-  font-size: 0.75rem;
-  color: rgba(255,255,255,0.4);
-}
-
-/* Main Content */
-.main-content {
-  flex: 1;
-  margin-left: 280px;
-  padding: 1.5rem;
-}
-
-/* Top Bar */
-.top-bar {
-  background: white;
-  border-radius: var(--radius-lg);
-  padding: 1rem 1.5rem;
-  margin-bottom: 1.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  box-shadow: var(--shadow-card);
-}
-
-.page-title {
-  font-family: 'Syne', sans-serif;
-  font-size: 1.3rem;
-  font-weight: 700;
-}
-
-.admin-info {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.admin-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--forest-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: 700;
-}
-
-.logout-btn {
-  background: none;
-  border: 1px solid var(--light-gray);
-  padding: 0.5rem 1rem;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-family: 'Outfit', sans-serif;
-  transition: all 0.2s;
-}
-
-.logout-btn:hover {
-  background: var(--red-accent);
-  color: white;
-  border-color: var(--red-accent);
-}
-
-/* Stats Grid */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.stat-card {
-  background: white;
-  border-radius: var(--radius-lg);
-  padding: 1.25rem;
-  box-shadow: var(--shadow-card);
-  transition: transform 0.2s;
-}
-
-.stat-card:hover { transform: translateY(-2px); }
-
-.stat-title {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--mid-gray);
-  margin-bottom: 0.5rem;
-}
-
-.stat-value {
-  font-family: 'Syne', sans-serif;
-  font-size: 2rem;
-  font-weight: 800;
-  color: var(--forest);
-}
-
-.stat-change {
-  font-size: 0.7rem;
-  margin-top: 0.5rem;
-}
-
-.stat-change.up { color: var(--emerald); }
-.stat-change.down { color: var(--red-accent); }
-
-/* Panels */
-.panel {
-  background: white;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  margin-bottom: 1.5rem;
-  overflow: hidden;
-}
-
-.panel-header {
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--light-gray);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.panel-title {
-  font-family: 'Syne', sans-serif;
-  font-weight: 700;
-  font-size: 1rem;
-}
-
-.panel-action {
-  background: var(--forest);
-  color: white;
-  border: none;
-  padding: 0.4rem 1rem;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 0.75rem;
-  transition: all 0.2s;
-}
-
-.panel-action:hover { background: var(--forest-light); }
-
-.panel-body {
-  padding: 1.5rem;
-}
-
-/* Tables */
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.data-table th {
-  text-align: left;
-  padding: 0.75rem;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--mid-gray);
-  border-bottom: 1px solid var(--light-gray);
-}
-
-.data-table td {
-  padding: 0.75rem;
-  border-bottom: 1px solid var(--light-gray);
-  font-size: 0.85rem;
-}
-
-.data-table tr:hover td { background: var(--light-gray); }
-
-/* Candidate Row */
-.candidate-name {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.candidate-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-/* Progress Bar */
-.progress-bar {
-  height: 6px;
-  background: var(--light-gray);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.3s;
-}
-
-/* Badges */
-.badge {
-  padding: 0.2rem 0.5rem;
-  border-radius: 20px;
-  font-size: 0.7rem;
-  font-weight: 600;
-}
-
-.badge-active { background: #d1fae5; color: #065f46; }
-.badge-inactive { background: #fee2e2; color: #991b1b; }
-.badge-admin { background: #e0e7ff; color: #3730a3; }
-
-/* Modal */
-.modal {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0,0,0,0.5);
-  z-index: 1000;
-  align-items: center;
-  justify-content: center;
-}
-
-.modal.active { display: flex; }
-
-.modal-content {
-  background: white;
-  border-radius: var(--radius-xl);
-  max-width: 500px;
-  width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
-  padding: 1.5rem;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--light-gray);
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  font-size: 1.2rem;
-  cursor: pointer;
-  color: var(--mid-gray);
-}
-
-/* Form */
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-label {
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-  color: var(--text-mid);
-}
-
-.form-input {
-  width: 100%;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--light-gray);
-  border-radius: var(--radius-md);
-  font-family: 'Outfit', sans-serif;
-}
-
-.form-input:focus { outline: none; border-color: var(--forest-light); }
-
-/* Tabs */
-.tabs {
-  display: flex;
-  gap: 0.5rem;
-  border-bottom: 1px solid var(--light-gray);
-  margin-bottom: 1rem;
-}
-
-.tab-btn {
-  padding: 0.5rem 1rem;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-family: 'Outfit', sans-serif;
-  font-weight: 500;
-  color: var(--mid-gray);
-  position: relative;
-}
-
-.tab-btn.active {
-  color: var(--forest);
-}
-
-.tab-btn.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--forest);
-}
-
-.tab-pane { display: none; }
-.tab-pane.active { display: block; }
-
-/* Toast */
-.toast-container {
-  position: fixed;
-  bottom: 1rem;
-  right: 1rem;
-  z-index: 1100;
-}
-
-.toast {
-  background: var(--charcoal);
-  color: white;
-  padding: 0.75rem 1.25rem;
-  border-radius: var(--radius-md);
-  margin-top: 0.5rem;
-  animation: slideIn 0.3s ease;
-  border-left: 3px solid var(--emerald);
-}
-
-.toast.error { border-left-color: var(--red-accent); }
-
-@keyframes slideIn {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-
-/* Chart Containers */
-.chart-container {
-  height: 300px;
-  position: relative;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-  .sidebar { transform: translateX(-100%); position: fixed; }
-  .sidebar.mobile-open { transform: translateX(0); }
-  .main-content { margin-left: 0; }
-  .stats-grid { grid-template-columns: 1fr; }
-}
-
-/* Login Screen */
-.login-screen {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(135deg, var(--forest) 0%, var(--forest-mid) 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-}
-
-.login-card {
-  background: white;
-  border-radius: var(--radius-xl);
-  padding: 2rem;
-  width: 360px;
-  max-width: 90%;
-  text-align: center;
-}
-
-.login-logo {
-  font-family: 'Syne', sans-serif;
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--forest);
-  margin-bottom: 0.5rem;
-}
-
-.login-sub {
-  font-size: 0.7rem;
-  color: var(--mid-gray);
-  margin-bottom: 1.5rem;
-}
-
-.login-input {
-  width: 100%;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
-  border: 1px solid var(--light-gray);
-  border-radius: var(--radius-md);
-}
-
-.login-btn {
-  width: 100%;
-  padding: 0.75rem;
-  background: var(--forest);
-  color: white;
-  border: none;
-  border-radius: var(--radius-md);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.login-error {
-  color: var(--red-accent);
-  font-size: 0.75rem;
-  margin-top: 0.5rem;
-  display: none;
-}
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Outfit', sans-serif; background: #f0f2f5; color: var(--text-dark); min-height: 100vh; }
+
+/* LOGIN */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--forest); }
+.login-card { background: white; border-radius: 1.5rem; padding: 2.5rem; width: 100%; max-width: 400px; box-shadow: 0 32px 80px rgba(0,0,0,0.3); }
+.login-logo { text-align: center; margin-bottom: 2rem; }
+.login-logo .logo-mark { width: 60px; height: 60px; border-radius: 16px; background: linear-gradient(135deg, var(--forest-light), var(--emerald)); display: inline-flex; align-items: center; justify-content: center; font-size: 1.8rem; margin-bottom: 0.75rem; }
+.login-logo h1 { font-family: 'Syne', sans-serif; font-size: 1.4rem; color: var(--forest); }
+.login-logo p { font-size: 0.8rem; color: var(--mid-gray); margin-top: 0.25rem; }
+.field { margin-bottom: 1.25rem; }
+.field label { display: block; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--mid-gray); margin-bottom: 0.4rem; }
+.field input { width: 100%; padding: 0.8rem 1rem; border: 1.5px solid #e5e7eb; border-radius: 0.75rem; font-family: 'Outfit', sans-serif; font-size: 0.9rem; outline: none; transition: all 0.2s; }
+.field input:focus { border-color: var(--forest-light); box-shadow: 0 0 0 4px rgba(45,106,79,0.08); }
+.btn-primary { width: 100%; padding: 0.9rem; background: var(--forest); color: white; border: none; border-radius: 0.75rem; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; }
+.btn-primary:hover { background: var(--forest-light); transform: translateY(-1px); }
+.error-msg { background: #fff5f5; border: 1px solid #fecaca; color: #dc2626; padding: 0.6rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; margin-bottom: 1rem; display: none; }
+.error-msg.show { display: block; }
+
+/* ADMIN SHELL */
+.admin-shell { display: none; min-height: 100vh; }
+.admin-shell.visible { display: flex; }
+.sidebar { width: 260px; background: var(--forest); min-height: 100vh; padding: 1.5rem; flex-shrink: 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar-logo { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.sidebar-logo .mark { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--forest-light), var(--emerald)); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; }
+.sidebar-logo .text { font-family: 'Syne', sans-serif; font-weight: 800; color: white; font-size: 0.95rem; line-height: 1.2; }
+.sidebar-logo .sub { font-size: 0.65rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.1em; }
+.nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 1rem; border-radius: 0.75rem; color: rgba(255,255,255,0.6); font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: all 0.2s; margin-bottom: 0.25rem; border: none; background: none; width: 100%; text-align: left; }
+.nav-item:hover { background: rgba(255,255,255,0.08); color: white; }
+.nav-item.active { background: rgba(255,255,255,0.12); color: var(--gold); }
+.nav-item i { width: 18px; text-align: center; }
+.sidebar-logout { margin-top: auto; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.1); margin-top: 2rem; }
+
+.main { flex: 1; padding: 2rem; overflow-y: auto; }
+.page-header { margin-bottom: 2rem; }
+.page-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.8rem; color: var(--text-dark); }
+.page-sub { color: var(--mid-gray); font-size: 0.875rem; margin-top: 0.25rem; }
+
+/* STAT CARDS */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+.stat-card { background: white; border-radius: var(--radius); padding: 1.5rem; box-shadow: var(--shadow); }
+.stat-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mid-gray); margin-bottom: 0.5rem; }
+.stat-value { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 2rem; color: var(--text-dark); }
+.stat-sub { font-size: 0.75rem; color: var(--mid-gray); margin-top: 0.25rem; }
+.stat-icon { float: right; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+.icon-green { background: rgba(64,194,122,0.12); color: var(--forest-light); }
+.icon-blue { background: rgba(67,97,238,0.1); color: var(--blue); }
+.icon-gold { background: rgba(233,196,106,0.15); color: var(--gold-dark); }
+.icon-red { background: rgba(230,57,70,0.1); color: var(--red); }
+
+/* PANELS */
+.panel { background: white; border-radius: var(--radius); padding: 1.75rem; box-shadow: var(--shadow); margin-bottom: 1.5rem; }
+.panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem; }
+.panel-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem; color: var(--text-dark); display: flex; align-items: center; gap: 0.5rem; }
+.btn-sm { padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.8rem; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; font-family: 'Outfit', sans-serif; }
+.btn-green { background: var(--emerald); color: white; }
+.btn-green:hover { background: var(--forest-light); }
+.btn-red { background: var(--red); color: white; }
+.btn-red:hover { background: #c1121f; }
+.btn-ghost { background: var(--light-gray); color: var(--text-dark); border: 1px solid #e5e7eb; }
+.btn-ghost:hover { background: #e5e7eb; }
+
+/* TABLE */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+thead tr { border-bottom: 2px solid var(--light-gray); }
+th { padding: 0.5rem 0.75rem; text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mid-gray); font-weight: 700; }
+td { padding: 0.75rem; border-bottom: 1px solid var(--light-gray); }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--light-gray); }
+.badge { display: inline-flex; padding: 0.2rem 0.6rem; border-radius: 50px; font-size: 0.7rem; font-weight: 700; }
+.badge-green { background: rgba(64,194,122,0.12); color: var(--forest-light); }
+.badge-blue { background: rgba(67,97,238,0.1); color: var(--blue); }
+
+/* CANDIDATE BAR */
+.cand-bar-wrap { margin-bottom: 0.75rem; }
+.cand-bar-info { display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.3rem; }
+.cand-bar-name { font-weight: 600; }
+.cand-bar-count { font-family: 'JetBrains Mono', monospace; color: var(--mid-gray); }
+.cand-bar { height: 8px; background: var(--light-gray); border-radius: 4px; overflow: hidden; }
+.cand-bar-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--forest-light), var(--emerald)); transition: width 0.6s; }
+
+/* PAGES */
+.page { display: none; }
+.page.active { display: block; }
+
+/* PERIOD TIMER */
+.period-status { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+.period-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--emerald); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* TOAST */
+.toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 1000; display: flex; flex-direction: column; gap: 0.5rem; }
+.toast { background: var(--charcoal); color: white; padding: 0.7rem 1.2rem; border-radius: 0.75rem; font-size: 0.85rem; box-shadow: 0 8px 20px rgba(0,0,0,0.3); border-left: 3px solid var(--emerald); animation: slide-in 0.3s ease; }
+.toast.error { border-left-color: var(--red); }
+.toast.success { border-left-color: var(--emerald); }
+@keyframes slide-in { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+/* CONFIRM MODAL */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 1rem; opacity: 0; visibility: hidden; transition: all 0.2s; }
+.modal-backdrop.open { opacity: 1; visibility: visible; }
+.modal-box { background: white; border-radius: 1.25rem; padding: 2rem; max-width: 420px; width: 100%; box-shadow: 0 40px 80px rgba(0,0,0,0.3); }
+.modal-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.2rem; margin-bottom: 0.75rem; }
+.modal-btns { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+
+.hidden { display: none !important; }
+@media (max-width: 768px) { .sidebar { width: 220px; } .main { padding: 1rem; } }
 </style>
 </head>
 <body>
 
-<div id="loginScreen" class="login-screen">
+<!-- LOGIN -->
+<div class="login-wrap" id="loginWrap">
   <div class="login-card">
-    <div class="login-logo">🗳️ Ngoliba InfoTrack</div>
-    <div class="login-sub">Admin Access Only</div>
-    <input type="password" id="adminPassword" class="login-input" placeholder="Enter Admin Password" autofocus>
-    <button id="loginBtn" class="login-btn">Access Dashboard →</button>
-    <div id="loginError" class="login-error">Incorrect password</div>
+    <div class="login-logo">
+      <div class="logo-mark">🗳️</div>
+      <h1>Ngoliba InfoTrack</h1>
+      <p>Admin Dashboard</p>
+    </div>
+    <div class="error-msg" id="loginError"></div>
+    <div class="field">
+      <label>Admin Password</label>
+      <input type="password" id="adminPassword" placeholder="Enter admin password" autocomplete="current-password">
+    </div>
+    <button class="btn-primary" id="loginBtn">Sign In <i class="fas fa-arrow-right"></i></button>
   </div>
 </div>
 
-<div id="adminApp" style="display: none;">
-  <div class="admin-wrapper">
-    <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <div class="sidebar-logo">🗳️ Ngoliba InfoTrack</div>
-        <div class="sidebar-sub">Administrator Console</div>
+<!-- ADMIN SHELL -->
+<div class="admin-shell" id="adminShell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="mark">🗳️</div>
+      <div>
+        <div class="text">InfoTrack</div>
+        <div class="sub">Admin Panel</div>
       </div>
-      <nav class="sidebar-nav">
-        <div class="nav-item active" data-page="dashboard">
-          <i class="fas fa-chart-line"></i> Dashboard
-        </div>
-        <div class="nav-item" data-page="voters">
-          <i class="fas fa-users"></i> Voters
-        </div>
-        <div class="nav-item" data-page="candidates">
-          <i class="fas fa-user-tie"></i> Candidates
-        </div>
-        <div class="nav-item" data-page="voting">
-          <i class="fas fa-vote-yea"></i> Voting
-        </div>
-        <div class="nav-item" data-page="analytics">
-          <i class="fas fa-chart-bar"></i> Analytics
-        </div>
-        <div class="nav-item" data-page="settings">
-          <i class="fas fa-cog"></i> Settings
-        </div>
-      </nav>
-      <div class="sidebar-footer">
-        <div>© 2025 Ngoliba InfoTrack</div>
-        <div>Kiambu County · Ward Poll</div>
-      </div>
-    </aside>
+    </div>
+    <button class="nav-item active" onclick="showPage('dashboard')"><i class="fas fa-chart-pie"></i> Dashboard</button>
+    <button class="nav-item" onclick="showPage('periods')"><i class="fas fa-clock"></i> Periods</button>
+    <button class="nav-item" onclick="showPage('users')"><i class="fas fa-users"></i> Voters</button>
+    <div class="sidebar-logout">
+      <button class="nav-item" onclick="adminLogout()"><i class="fas fa-sign-out-alt"></i> Logout</button>
+    </div>
+  </aside>
 
-    <!-- Main Content -->
-    <main class="main-content">
-      <div class="top-bar">
-        <div class="page-title" id="pageTitle">Dashboard</div>
-        <div class="admin-info">
-          <div class="admin-avatar">A</div>
-          <button id="logoutBtnAdmin" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
-        </div>
+  <!-- Main -->
+  <main class="main">
+
+    <!-- DASHBOARD PAGE -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <div class="page-title">Dashboard</div>
+        <div class="page-sub">Real-time overview of Ngoliba Ward Poll</div>
       </div>
 
-      <!-- Dashboard Page -->
-      <div id="dashboardPage">
-        <div class="stats-grid" id="statsGrid">
-          <!-- Dynamic stats -->
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-icon icon-green"><i class="fas fa-users"></i></div>
+          <div class="stat-label">Registered Voters</div>
+          <div class="stat-value" id="statVoters">—</div>
         </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-chart-pie"></i> Live Results - Current Cycle</div>
-            <button class="panel-action" id="refreshResults"><i class="fas fa-sync-alt"></i> Refresh</button>
-          </div>
-          <div class="panel-body">
-            <div class="chart-container">
-              <canvas id="resultsChart"></canvas>
-            </div>
-          </div>
+        <div class="stat-card">
+          <div class="stat-icon icon-blue"><i class="fas fa-vote-yea"></i></div>
+          <div class="stat-label">Votes This Cycle</div>
+          <div class="stat-value" id="statVotes">—</div>
         </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-trophy"></i> Candidate Rankings</div>
-          </div>
-          <div class="panel-body">
-            <table class="data-table" id="rankingsTable">
-              <thead>
-                <tr><th>Rank</th><th>Candidate</th><th>Party</th><th>Votes</th><th>%</th><th>Progress</th></tr>
-              </thead>
-              <tbody id="rankingsBody"></tbody>
-            </table>
-          </div>
+        <div class="stat-card">
+          <div class="stat-icon icon-gold"><i class="fas fa-hashtag"></i></div>
+          <div class="stat-label">Current Period</div>
+          <div class="stat-value" id="statPeriod">—</div>
         </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-map-marker-alt"></i> Sublocation Turnout</div>
-          </div>
-          <div class="panel-body">
-            <div id="turnoutGrid"></div>
-          </div>
+        <div class="stat-card">
+          <div class="stat-icon icon-red"><i class="fas fa-clock"></i></div>
+          <div class="stat-label">Cycle Ends In</div>
+          <div class="stat-value" id="statTimer" style="font-size:1.4rem;font-family:'JetBrains Mono',monospace;">—</div>
         </div>
       </div>
 
-      <!-- Voters Page -->
-      <div id="votersPage" style="display: none;">
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-users"></i> Registered Voters</div>
-            <div><input type="text" id="searchVoter" class="form-input" style="width: 200px;" placeholder="Search by name or phone..."></div>
-          </div>
-          <div class="panel-body">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Voter</th>
-                  <th>Phone</th>
-                  <th>Sublocation</th>
-                  <th>Registered</th>
-                  <th>Votes Cast</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="votersTableBody"></tbody>
-            </table>
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title"><i class="fas fa-chart-bar" style="color:var(--blue)"></i> Current Cycle Votes</div>
+          <div style="display:flex;gap:0.5rem;">
+            <button class="btn-sm btn-ghost" onclick="loadDashboard()"><i class="fas fa-sync"></i> Refresh</button>
+            <button class="btn-sm btn-red" onclick="confirmResetPeriod()"><i class="fas fa-redo"></i> Reset Period Now</button>
           </div>
         </div>
+        <div id="candidateBars">Loading…</div>
       </div>
 
-      <!-- Candidates Page -->
-      <div id="candidatesPage" style="display: none;">
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-user-tie"></i> Manage Candidates</div>
-            <button class="panel-action" id="addCandidateBtn"><i class="fas fa-plus"></i> Add Candidate</button>
-          </div>
-          <div class="panel-body">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Photo</th>
-                  <th>Name</th>
-                  <th>Party</th>
-                  <th>Incumbent</th>
-                  <th>Votes</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="candidatesTableBody"></tbody>
-            </table>
-          </div>
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title"><i class="fas fa-map-marker-alt" style="color:var(--forest-light)"></i> Voters by Sublocation</div>
+        </div>
+        <div id="sublocationStats">Loading…</div>
+      </div>
+    </div>
+
+    <!-- PERIODS PAGE -->
+    <div class="page" id="page-periods">
+      <div class="page-header">
+        <div class="page-title">Period History</div>
+        <div class="page-sub">Last 10 completed voting cycles</div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title"><i class="fas fa-history" style="color:var(--gold-dark)"></i> Recent Periods</div>
+          <button class="btn-sm btn-ghost" onclick="loadPeriods()"><i class="fas fa-sync"></i> Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Period</th><th>Start</th><th>End</th><th>Total Votes</th><th>Winner</th></tr></thead>
+            <tbody id="periodsTable">
+              <tr><td colspan="5" style="text-align:center;color:var(--mid-gray);padding:2rem;">Loading…</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
+    </div>
 
-      <!-- Voting Page -->
-      <div id="votingPage" style="display: none;">
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-clock"></i> Voting Cycle Control</div>
-          </div>
-          <div class="panel-body">
-            <div id="cycleInfo"></div>
-            <button id="resetCycleBtn" class="panel-action" style="background: var(--red-accent);">Reset Current Cycle</button>
-          </div>
+    <!-- USERS PAGE -->
+    <div class="page" id="page-users">
+      <div class="page-header">
+        <div class="page-title">Registered Voters</div>
+        <div class="page-sub">Manage voter accounts</div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title"><i class="fas fa-users" style="color:var(--blue)"></i> Voter List</div>
+          <button class="btn-sm btn-ghost" onclick="loadUsers()"><i class="fas fa-sync"></i> Refresh</button>
         </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-history"></i> Previous Cycles</div>
-          </div>
-          <div class="panel-body">
-            <table class="data-table" id="cycleHistoryTable">
-              <thead><tr><th>Period</th><th>Total Votes</th><th>Top Candidate</th><th>Winner</th></tr></thead>
-              <tbody id="cycleHistoryBody"></tbody>
-            </table>
-          </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Sublocation</th><th>Joined</th><th>Action</th></tr></thead>
+            <tbody id="usersTable">
+              <tr><td colspan="6" style="text-align:center;color:var(--mid-gray);padding:2rem;">Loading…</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
+    </div>
 
-      <!-- Analytics Page -->
-      <div id="analyticsPage" style="display: none;">
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-chart-line"></i> Historical Trends</div>
-          </div>
-          <div class="panel-body">
-            <div class="chart-container">
-              <canvas id="historicalChart"></canvas>
-            </div>
-          </div>
-        </div>
+  </main>
+</div>
 
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-download"></i> Export Data</div>
-          </div>
-          <div class="panel-body">
-            <button id="exportVotersBtn" class="panel-action">Export Voters (CSV)</button>
-            <button id="exportResultsBtn" class="panel-action">Export Results (CSV)</button>
-          </div>
-        </div>
-      </div>
+<!-- Confirm Modal -->
+<div class="modal-backdrop" id="confirmModal">
+  <div class="modal-box">
+    <div class="modal-title" id="confirmTitle">Are you sure?</div>
+    <p id="confirmMsg" style="color:var(--mid-gray);font-size:0.9rem;"></p>
+    <div class="modal-btns">
+      <button class="btn-sm btn-red" style="flex:1;padding:0.65rem;" id="confirmYes">Confirm</button>
+      <button class="btn-sm btn-ghost" style="flex:1;padding:0.65rem;" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
 
-      <!-- Settings Page -->
-      <div id="settingsPage" style="display: none;">
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><i class="fas fa-lock"></i> Admin Settings</div>
-          </div>
-          <div class="panel-body">
-            <div class="form-group">
-              <label class="form-label">Change Admin Password</label>
-              <input type="password" id="newAdminPassword" class="form-input" placeholder="New Password">
-            </div>
-            <div class="form-group">
-              <label class="
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const API = '/.netlify/functions/admin';
+const CANDIDATES = [
+  { id:0, name:'Hon. James Mwangi' }, { id:1, name:'Grace Wanjiku' },
+  { id:2, name:'Peter Kimani' }, { id:3, name:'Sarah Nduati' },
+  { id:4, name:'John Otieno' }, { id:5, name:'Mary Wambui' },
+  { id:6, name:'David Kiprotich' }
+];
+let adminToken = sessionStorage.getItem('adminToken') || null;
+let timerInterval = null;
+let currentPeriodEnd = null;
+
+// ── AUTH ──
+async function login() {
+  const pwd = document.getElementById('adminPassword').value;
+  const errEl = document.getElementById('loginError');
+  if (!pwd) { showError(errEl, 'Password required'); return; }
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_login', password: pwd }) });
+    const data = await res.json();
+    if (!res.ok) { showError(errEl, data.error || 'Login failed'); btn.disabled = false; btn.innerHTML = 'Sign In <i class="fas fa-arrow-right"></i>'; return; }
+    adminToken = data.token;
+    sessionStorage.setItem('adminToken', adminToken);
+    document.getElementById('loginWrap').style.display = 'none';
+    document.getElementById('adminShell').classList.add('visible');
+    loadDashboard();
+  } catch { showError(errEl, 'Network error'); btn.disabled = false; btn.innerHTML = 'Sign In <i class="fas fa-arrow-right"></i>'; }
+}
+
+function adminLogout() {
+  adminToken = null; sessionStorage.removeItem('adminToken');
+  document.getElementById('adminShell').classList.remove('visible');
+  document.getElementById('loginWrap').style.display = 'flex';
+  document.getElementById('adminPassword').value = '';
+  if (timerInterval) clearInterval(timerInterval);
+}
+
+async function adminFetch(body) {
+  const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` }, body: JSON.stringify(body) });
+  if (res.status === 401) { adminLogout(); return null; }
+  return res.json();
+}
+
+// ── PAGES ──
+function showPage(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(`page-${page}`).classList.add('active');
+  document.querySelector(`[onclick="showPage('${page}')"]`).classList.add('active');
+  if (page === 'dashboard') loadDashboard();
+  if (page === 'periods') loadPeriods();
+  if (page === 'users') loadUsers();
+}
+
+// ── DASHBOARD ──
+async function loadDashboard() {
+  const data = await adminFetch({ action: 'get_stats' });
+  if (!data) return;
+
+  document.getElementById('statVoters').textContent = data.registeredVoters;
+  document.getElementById('statVotes').textContent = data.currentPeriod?.totalVotes ?? 0;
+  document.getElementById('statPeriod').textContent = data.currentPeriod ? `#${data.currentPeriod.periodId}` : '—';
+
+  // Timer
+  if (data.currentPeriod?.periodEnd) {
+    currentPeriodEnd = new Date(data.currentPeriod.periodEnd);
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(updateTimer, 500);
+    updateTimer();
+  }
+
+  // Candidate bars
+  const vbc = data.currentPeriod?.votesByCandidate || {};
+  const maxV = Math.max(...CANDIDATES.map(c => vbc[c.id] || 0), 1);
+  document.getElementById('candidateBars').innerHTML = CANDIDATES
+    .map(c => ({ ...c, votes: vbc[c.id] || 0 }))
+    .sort((a, b) => b.votes - a.votes)
+    .map(c => `
+      <div class="cand-bar-wrap">
+        <div class="cand-bar-info"><span class="cand-bar-name">${c.name}</span><span class="cand-bar-count">${c.votes} votes</span></div>
+        <div class="cand-bar"><div class="cand-bar-fill" style="width:${Math.round((c.votes/maxV)*100)}%"></div></div>
+      </div>`).join('');
+
+  // Sublocation
+  const subs = data.votersBySublocation || {};
+  const subNames = ['Ngoliba','Gatiiguru','Kilimambogo','Magogoni'];
+  document.getElementById('sublocationStats').innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+      <thead><tr><th style="text-align:left;padding:0.5rem 0.75rem;color:var(--mid-gray);font-size:0.7rem;text-transform:uppercase;">Sublocation</th><th style="text-align:left;padding:0.5rem 0.75rem;color:var(--mid-gray);font-size:0.7rem;text-transform:uppercase;">Registered</th></tr></thead>
+      <tbody>${subNames.map(s => `<tr><td style="padding:0.65rem 0.75rem;border-bottom:1px solid var(--light-gray);">${s}</td><td style="padding:0.65rem 0.75rem;border-bottom:1px solid var(--light-gray);font-family:'JetBrains Mono',monospace;font-weight:700;">${subs[s]||0}</td></tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function updateTimer() {
+  if (!currentPeriodEnd) return;
+  const diff = currentPeriodEnd - Date.now();
+  if (diff <= 0) { document.getElementById('statTimer').textContent = '00:00'; return; }
+  const m = Math.floor(diff/60000).toString().padStart(2,'0');
+  const s = Math.floor((diff%60000)/1000).toString().padStart(2,'0');
+  document.getElementById('statTimer').textContent = `${m}:${s}`;
+}
+
+// ── PERIODS ──
+async function loadPeriods() {
+  const res = await fetch('/.netlify/functions/get-history?limit=10');
+  const data = await res.json();
+  if (!data.periods) return;
+  const tbody = document.getElementById('periodsTable');
+  if (data.periods.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--mid-gray);padding:2rem;">No completed periods yet</td></tr>'; return; }
+  tbody.innerHTML = data.periods.reverse().map(p => {
+    let winnerId = null, maxV = 0;
+    for (const [id, v] of Object.entries(p.votesByCandidate || {})) { if (v > maxV) { maxV = v; winnerId = id; } }
+    const winnerName = winnerId !== null ? (CANDIDATES.find(c => String(c.id) === String(winnerId))?.name || '—') : '—';
+    return `<tr>
+      <td><span class="badge badge-blue">#${p.periodId}</span></td>
+      <td style="font-size:0.78rem;">${new Date(p.periodStart).toLocaleTimeString()}</td>
+      <td style="font-size:0.78rem;">${new Date(p.periodEnd).toLocaleTimeString()}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:700;">${p.totalVotes}</td>
+      <td><span class="badge badge-green">${winnerName}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── USERS ──
+async function loadUsers() {
+  const data = await adminFetch({ action: 'list_users' });
+  if (!data) return;
+  const tbody = document.getElementById('usersTable');
+  if (!data.users?.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mid-gray);padding:2rem;">No users found</td></tr>'; return; }
+  tbody.innerHTML = data.users.map(u => `
+    <tr>
+      <td style="font-family:'JetBrains Mono',monospace;">#${u.voterNumber}</td>
+      <td style="font-weight:600;">${u.firstName} ${u.surname}</td>
+      <td style="font-size:0.8rem;">${u.phone}</td>
+      <td><span class="badge badge-green">${u.sublocation || '—'}</span></td>
+      <td style="font-size:0.78rem;">${new Date(u.createdAt).toLocaleDateString()}</td>
+      <td><button class="btn-sm btn-red" onclick="confirmDeleteUser('${u.phone}','${u.firstName} ${u.surname}')"><i class="fas fa-trash"></i></button></td>
+    </tr>`).join('');
+}
+
+// ── ACTIONS ──
+function confirmResetPeriod() {
+  document.getElementById('confirmTitle').textContent = 'Reset Voting Period?';
+  document.getElementById('confirmMsg').textContent = 'This will immediately end the current cycle and start a fresh 5-minute period. All current votes will be archived.';
+  document.getElementById('confirmYes').onclick = async () => {
+    closeModal();
+    const data = await adminFetch({ action: 'reset_period' });
+    if (data?.success) { showToast('✅ Period reset successfully', 'success'); loadDashboard(); }
+    else showToast('Reset failed', 'error');
+  };
+  openModal();
+}
+
+function confirmDeleteUser(phone, name) {
+  document.getElementById('confirmTitle').textContent = `Delete ${name}?`;
+  document.getElementById('confirmMsg').textContent = `This will permanently delete the voter account for ${name} (${phone}). This cannot be undone.`;
+  document.getElementById('confirmYes').onclick = async () => {
+    closeModal();
+    const data = await adminFetch({ action: 'delete_user', phone });
+    if (data?.success) { showToast('✅ User deleted', 'success'); loadUsers(); }
+    else showToast('Delete failed', 'error');
+  };
+  openModal();
+}
+
+function openModal() { document.getElementById('confirmModal').classList.add('open'); }
+function closeModal() { document.getElementById('confirmModal').classList.remove('open'); }
+
+function showToast(msg, type = 'success') {
+  const t = document.createElement('div');
+  t.className = `toast ${type}`; t.textContent = msg;
+  document.getElementById('toastContainer').appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+function showError(el, msg) { el.textContent = msg; el.classList.add('show'); }
+
+// ── INIT ──
+document.getElementById('adminPassword').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+document.getElementById('loginBtn').onclick = login;
+document.getElementById('confirmModal').addEventListener('click', e => { if (e.target === document.getElementById('confirmModal')) closeModal(); });
+
+// Auto-check existing session
+if (adminToken) {
+  document.getElementById('loginWrap').style.display = 'none';
+  document.getElementById('adminShell').classList.add('visible');
+  loadDashboard();
+}
+
+// Auto-refresh dashboard every 30s
+setInterval(() => {
+  const activePage = document.querySelector('.page.active');
+  if (activePage?.id === 'page-dashboard') loadDashboard();
+}, 30000);
+</script>
+</body>
+</html>
