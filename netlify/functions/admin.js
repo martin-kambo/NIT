@@ -142,6 +142,48 @@ exports.handler = async (event) => {
     }
 
     // ── RESET PERIOD NOW ──
+if (action === 'auto_reset') {
+  // Verify secret key from cronjob.org request
+  const secret = event.headers['x-cron-secret'] || event.queryStringParameters?.secret;
+  if (secret !== process.env.CRON_SECRET) {
+    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
+  }
+
+  const current = await periodsStore.get('current');
+  if (!current) {
+    return { statusCode: 200, body: JSON.stringify({ skipped: true, reason: 'No active period' }) };
+  }
+
+  const p = JSON.parse(current);
+  const now = Date.now();
+  const periodEnd = new Date(p.periodEnd).getTime();
+
+  // Only reset if period has actually expired
+  if (now < periodEnd) {
+    const remaining = Math.round((periodEnd - now) / 1000);
+    return { statusCode: 200, body: JSON.stringify({ skipped: true, reason: 'Period still active', secondsRemaining: remaining }) };
+  }
+
+  // Archive current and start new period
+  await periodsStore.set(`archive_${p.periodId}_${now}`, current);
+
+  let meta = await metaStore.get('counters');
+  meta = meta ? JSON.parse(meta) : {};
+  const newPeriodId = (meta.lastPeriodId || 0) + 1;
+  const newPeriod = {
+    periodId: newPeriodId,
+    periodStart: new Date().toISOString(),
+    periodEnd: new Date(now + 5 * 60 * 1000).toISOString(),
+    isActive: true, totalVotes: 0,
+    votesByCandidate: {}, votesByUser: [], votesBySublocation: {}
+  };
+
+  await periodsStore.set('current', JSON.stringify(newPeriod));
+  await metaStore.set('counters', JSON.stringify({ ...meta, lastPeriodId: newPeriodId }));
+
+  return { statusCode: 200, body: JSON.stringify({ success: true, newPeriodId, archivedPeriodId: p.periodId }) };
+}
+
     if (action === 'reset_period') {
       const current = await periodsStore.get('current');
       if (current) {
