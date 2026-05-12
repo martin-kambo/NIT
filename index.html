@@ -709,9 +709,42 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .welcome-popup-text h4 { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.2rem; }
 .welcome-popup-text p { font-size: 0.78rem; color: var(--mid-gray); line-height: 1.4; }
 .welcome-close { position: absolute; top: 0.5rem; right: 0.5rem; background: none; border: none; color: var(--mid-gray); cursor: none; font-size: 0.9rem; }
+
+/* HIDDEN ADMIN LINK — visible only on keyboard focus */
+.admin-ghost-link {
+  position: fixed;
+  top: -100px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  padding: 0.6rem 1.4rem;
+  background: var(--forest);
+  color: var(--gold);
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  border-radius: 0 0 0.75rem 0.75rem;
+  border: 1px solid var(--gold-dark);
+  border-top: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  transition: top 0.25s ease;
+  pointer-events: none;
+  cursor: default;
+}
+.admin-ghost-link:focus {
+  top: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  outline: none;
+}
 </style>
 </head>
 <body>
+
+<!-- ADMIN ACCESS (keyboard only) -->
+<a href="/admin.html" class="admin-ghost-link" tabindex="1" aria-label="Admin Panel">Admin</a>
 
 <!-- AMBIENT -->
 <div class="ambient-orb orb-1"></div>
