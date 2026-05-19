@@ -385,7 +385,7 @@ app.post('/api/auth', async (req, res) => {
       // Update counters
       await pool.query(
         `UPDATE metadata SET value = jsonb_set(value, '{registered_voters}', 
-         (COALESCE((value->'registered_voters')::int, 0) + 1)::text::jsonb) 
+         to_jsonb(COALESCE((value->'registered_voters')::int, 0) + 1)) 
          WHERE key = 'counters'`
       );
 
