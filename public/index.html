@@ -2800,7 +2800,7 @@ async function registerUser() {
       document.getElementById("regNationalId").value = "";
       
       // ✅ Switch to login view
-      switchAuthView(false);  // false = show login
+      switchToLogin();  // false = show login
       
       showToast(
         `Account created! Your voter number is: ${data.user.voter_number}`,
