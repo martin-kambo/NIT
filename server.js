@@ -259,7 +259,7 @@ function verifyAdminToken(authHeader) {
   } catch { return false; }
 }
 
-aasync function getNextVoterNumber() {
+async function getNextVoterNumber() {
   const res = await pool.query(
     `SELECT (value->>'last_voter_number')::bigint as last FROM metadata WHERE key = 'counters'`
   );
