@@ -26,6 +26,162 @@ const pool = new Pool({
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
 });
+// ── Initialize Database Tables ──
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY,
+      phone VARCHAR(20) UNIQUE NOT NULL,
+      first_name VARCHAR(50),
+      surname VARCHAR(50),
+      dob DATE,
+      sublocation VARCHAR(100),
+      email VARCHAR(255),
+      national_id VARCHAR(20),
+      language VARCHAR(10) DEFAULT 'en',
+      voter_number BIGINT,
+      password_hash VARCHAR(64),
+      salt VARCHAR(32),
+      profile_photo BYTEA,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS metadata (
+      key VARCHAR(50) PRIMARY KEY,
+      value JSONB NOT NULL
+    );
+    INSERT INTO metadata (key, value) VALUES ('counters', '{"last_voter_number": 0, "registered_voters": 0, "last_period_id": 0}')
+      ON CONFLICT (key) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS voters_by_sublocation (
+      sublocation VARCHAR(100) PRIMARY KEY,
+      voter_count INT DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS voting_periods (
+      id INT PRIMARY KEY,
+      period_start TIMESTAMP,
+      period_end TIMESTAMP,
+      is_active BOOLEAN DEFAULT true,
+      total_votes INT DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS votes (
+      id SERIAL PRIMARY KEY,
+      user_id UUID,
+      candidate_id INT,
+      period_id INT,
+      sublocation VARCHAR(100),
+      ip_hash VARCHAR(16),
+      timestamp BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS period_archives (
+      id INT PRIMARY KEY,
+      period_data JSONB,
+      archived_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS otps (
+      phone VARCHAR(20) PRIMARY KEY,
+      code VARCHAR(6),
+      expires_at TIMESTAMP,
+      attempts INT DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS forum_posts (
+      id UUID PRIMARY KEY,
+      title VARCHAR(200),
+      content TEXT,
+      author_id UUID,
+      author_name VARCHAR(100),
+      author_phone VARCHAR(20),
+      like_count INT DEFAULT 0,
+      reply_count INT DEFAULT 0,
+      last_activity_at TIMESTAMP DEFAULT NOW(),
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS forum_replies (
+      id UUID PRIMARY KEY,
+      post_id UUID,
+      content TEXT,
+      author_id UUID,
+      author_name VARCHAR(100),
+      author_phone VARCHAR(20),
+      like_count INT DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS post_likes (
+      post_id UUID,
+      user_id UUID,
+      PRIMARY KEY (post_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS reply_likes (
+      reply_id UUID,
+      user_id UUID,
+      PRIMARY KEY (reply_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS notices (
+      id UUID PRIMARY KEY,
+      title VARCHAR(200),
+      content TEXT,
+      category VARCHAR(50) DEFAULT 'general',
+      priority VARCHAR(20) DEFAULT 'normal',
+      expires_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS ad_requests (
+      id UUID PRIMARY KEY,
+      business_name VARCHAR(100),
+      ad_content TEXT,
+      contact_phone VARCHAR(20),
+      contact_email VARCHAR(255),
+      budget VARCHAR(50),
+      duration VARCHAR(50) DEFAULT '7 days',
+      status VARCHAR(20) DEFAULT 'pending',
+      submitted_at TIMESTAMP DEFAULT NOW(),
+      reviewed_at TIMESTAMP,
+      reviewed_by VARCHAR(50),
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS mpesa_transactions (
+      id VARCHAR(100) PRIMARY KEY,
+      phone VARCHAR(20),
+      amount INT,
+      account_reference VARCHAR(50),
+      description TEXT,
+      status VARCHAR(20) DEFAULT 'pending',
+      respond_code VARCHAR(10),
+      respond_description TEXT,
+      mpesa_receipt_number VARCHAR(50),
+      callback_data JSONB,
+      callback_received_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS mpesa_callback_logs (
+      id SERIAL PRIMARY KEY,
+      transaction_id VARCHAR(100),
+      result_code INT,
+      result_desc TEXT,
+      raw_data JSONB,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  console.log('✅ All tables initialized');
+}
+
+initDB().catch(err => {
+  console.error('❌ DB init failed:', err);
+  process.exit(1);
+});
 
 // Test database connection
 pool.query('SELECT NOW()', (err, res) => {
