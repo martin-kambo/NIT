@@ -2607,19 +2607,6 @@ function getEarnedBadges(user){
 }
 
 // ═══ SESSION ═══
-// ═══ NEW SESSION MANAGEMENT ═══
-
-// 1. On page load, check if user is already logged in
-
-// 2. Logout - let server clear the cookie
-function logout(){ 
-  if(typeof clearSession==='function') clearSession();
-  if(faceoffInterval) clearInterval(faceoffInterval); 
-  if(countdownInterval) clearInterval(countdownInterval); 
-  location.reload(); 
-}
-
-    console.error('Logout error:', error);
 
     // Clear client-side state
     SESSION.clearCurrentUser();
@@ -2794,31 +2781,56 @@ async function loginUser(){
     btn.disabled = false;
   }
 }
-        
-    // ━━━ 6. HANDLE SUCCESS ━━━
-  
+
+// ═══ LOGOUT FUNCTION ═══
+async function logout() {
+  try {
+    await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'logout' })
+    });
+  } catch(error) {
+    console.error('Logout error:', error);
+  } finally {
+    SESSION.clearCurrentUser();
+    currentUser = null;
     
-    // ━━━ 7. HANDLE ERROR ━━━
-    if(response.status === 401) {
-      showFormError(errEl, "Invalid phone or password");
-      shakeEl("authContainer");
-    } else if(response.status === 429) {
-      showFormError(errEl, "Too many login attempts. Please try again later.");
-    } else {
-      showFormError(errEl, data.error || "Login failed");
+    document.getElementById("authContainer")?.classList.remove("hidden");
+    ["heroBand","countdownStrip","headerNav","avatarWrap","notifBell","logoutBtn","livePulse"]
+      .forEach(id => document.getElementById(id)?.classList.add("hidden"));
+    
+    if(faceoffInterval) clearInterval(faceoffInterval);
+    if(countdownInterval) clearInterval(countdownInterval);
+    
+    location.reload();
+  }
+}
+
+// ═══ INITIALIZE SESSION ON PAGE LOAD ═══
+document.addEventListener('DOMContentLoaded', async () => {
+  const user = await loadSession();
+  if(user) {
+    currentUser = user;
+    enterDashboard();
+  } else {
+    document.getElementById("authContainer")?.classList.remove("hidden");
+  }
+});
+
+// ═══ LOAD SESSION ═══
+async function loadSession(){
+  try {
+    const res = await fetch('/api/me');
+    if(res.ok){ 
+      const d = await res.json(); 
+      SESSION.setCurrentUser(d.user); 
+      return d.user; 
     }
-    
-    console.error('Login error:', error);
-    showFormError(errEl, "Network error. Check your connection.");
-    shakeEl("authContainer");
-     // ━━━ 8. HIDE LOADING STATE ━━━
-function logout(){ 
-  fetch('/api/auth', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'logout'})}).catch(()=>{});
-  SESSION.clearCurrentUser();
-  currentUser = null;
-  if(faceoffInterval) clearInterval(faceoffInterval); 
-  if(countdownInterval) clearInterval(countdownInterval); 
-  location.reload(); 
+  } catch(e) {
+    console.error('Session load failed:', e);
+  }
+  return null;
 }
 
 // ═══ ENTRY POINT ═══
