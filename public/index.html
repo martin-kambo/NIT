@@ -2417,7 +2417,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 // ═══════════════════════════════════════════════════════════════
 
 const PERIOD_MS = 5 * 60 * 1000;
-const DB_NS = "ngoliba_db_v1";
 const KEYS = { USERS:"ngoliba_users", SESSION:"ngoliba_session", CURRENT_PERIOD:"ngoliba_current_period", PERIOD_ARCHIVE:"ngoliba_period_archive", OTP_STORE:"ngoliba_otp", LOGIN_ATTEMPTS:"login_attempts", VOTER_COUNTER:"ngoliba_voter_counter" };
 
 const CANDIDATES = [
@@ -2494,8 +2493,6 @@ async function initializeSession() {
 
 // ═══ CRYPTO ═══
 async function hashPassword(p,s){ const enc=new TextEncoder(); const buf=await crypto.subtle.digest("SHA-256",enc.encode(p+s)); return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join(""); }
-async function createUserHash(pwd){ const salt=Math.random().toString(36).substring(2,10); return {hash:await hashPassword(pwd,salt),salt}; }
-async function verifyPassword(pwd,hash,salt){ return (await hashPassword(pwd,salt))===hash; }
 
 // ═══ VALIDATION ═══
 const isValidPhone=(p)=>/^[0-9]{10,12}$/.test(p)&&(p.startsWith("07")||p.startsWith("01")||p.startsWith("254"));
@@ -2592,20 +2589,6 @@ function getPreviousPeriodStats(){ const a=JSON.parse(localStorage.getItem(KEYS.
 function getAllTimeTotalVotes(){ return JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]").reduce((s,p)=>s+Object.values(p.votesByCandidate||{}).reduce((ss,v)=>ss+(v.total||0),0),0)+(JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes||[]).length; }
 
 // ═══ GAMIFICATION — VOTER META ═══
-function updateVoterMeta(phone){
-  const meta=DB.getVoterMeta(phone);
-  meta.totalVotes=(meta.totalVotes||0)+1;
-  meta.lastVoted=Date.now();
-  // Streak: check if voted in previous cycle
-  const archive=JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]");
-  if(archive.length>0){
-    const prevCycle=archive[archive.length-1];
-    const votedPrev=prevCycle.votes?.some?.(v=>v.userId===phone) || false;
-    meta.streak=votedPrev?(meta.streak||0)+1:1;
-  } else { meta.streak=1; }
-  meta.civicScore=Math.round((meta.totalVotes||0)*10+(meta.streak||0)*5);
-  DB.saveVoterMeta(phone,meta);
-}
 
 const ALL_BADGES=[
   {id:"first_blood",icon:"🥇",name:"First Voter",desc:"Cast your very first vote",req:(m)=>m.totalVotes>=1},
@@ -2627,39 +2610,17 @@ function getEarnedBadges(user){
 // ═══ NEW SESSION MANAGEMENT ═══
 
 // 1. On page load, check if user is already logged in
-async function loadSession() {
-  try {
-    // Call /api/me to verify session cookie
-    const response = await fetch('/api/me');
-    
-    if(response.status === 200) {
-      const data = await response.json();
-      SESSION.setCurrentUser(data.user);
-      currentUser = data.user;
-      return data.user;
-    } else {
-      // Session expired or invalid
-      SESSION.clearCurrentUser();
-      return null;
-    }
-  } catch(error) {
-    console.error('Session load failed:', error);
-    return null;
-  }
-}
 
 // 2. Logout - let server clear the cookie
-async function logout() {
-  try {
-    // Call server to clear session cookie
-    await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'logout' })
-    });
-  } catch(error) {
+function logout(){ 
+  if(typeof clearSession==='function') clearSession();
+  if(faceoffInterval) clearInterval(faceoffInterval); 
+  if(countdownInterval) clearInterval(countdownInterval); 
+  location.reload(); 
+}
+
     console.error('Logout error:', error);
-  } finally {
+
     // Clear client-side state
     SESSION.clearCurrentUser();
     currentUser = null;
@@ -2675,8 +2636,6 @@ async function logout() {
     
     // Reload page
     location.reload();
-  }
-}
 
 // 3. On app startup (in DOMContentLoaded):
 document.addEventListener('DOMContentLoaded', async () => {
@@ -2695,94 +2654,75 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // ═══ AUTH  //  API call ═══
 
-async function registerUser() {
-  // ━━━ 1. READ ALL FORM FIELD VALUES ━━━
-  const firstName = document.getElementById("regFirstName")?.value.trim() || "";
-  const surname = document.getElementById("regSurname")?.value.trim() || "";
-  const phone = document.getElementById("regPhone")?.value.trim() || "";
-  const password = document.getElementById("regPassword")?.value || "";
-  const confirmPassword = document.getElementById("regConfirmPassword")?.value || "";
-  const dob = document.getElementById("regDob")?.value || null;
-  const sublocation = document.getElementById("regSublocation")?.value || null;
-  const email = document.getElementById("regEmail")?.value.trim() || null;
-  const nationalId = document.getElementById("regNationalId")?.value.trim() || null;
-  const language = document.getElementById("regLanguage")?.value || "en";
+async function registerUser(){
+  const fn = document.getElementById("regFirstName").value.trim();
+  const sn = document.getElementById("regSurname").value.trim();
+  const dob = document.getElementById("regDob").value;
+  const phone = document.getElementById("regPhone").value.trim();
+  const sub = document.getElementById("regSublocation").value;
+  const email = document.getElementById("regEmail").value.trim();
+  const natId = document.getElementById("regNationalId").value.trim();
+  const lang = document.getElementById("regLanguage").value;
+  const pwd = document.getElementById("regPassword").value;
+  const confirm = document.getElementById("regConfirmPassword").value;
+  const err = document.getElementById("regErrorMsg");
   
-  // ━━━ 2. GET UI ELEMENTS ━━━
-  const errEl = document.getElementById("regErrorMsg");
+  if(!isValidName(fn) || !isValidName(sn)){
+    if(err) { err.textContent = "First and last name must be 2–30 letters"; err.classList.add("show"); }
+    return;
+  }
+  if(!dob){ if(err) { err.textContent = "Date of birth required"; err.classList.add("show"); } return; }
+  if(!isValidPhone(phone)){ if(err) { err.textContent = "Valid phone required"; err.classList.add("show"); } return; }
+  if(!sub){ if(err) { err.textContent = "Select sublocation"; err.classList.add("show"); } return; }
+  if(!isValidEmail(email)){ if(err) { err.textContent = "Invalid email"; err.classList.add("show"); } return; }
+  if(!isValidNationalId(natId)){ if(err) { err.textContent = "ID must be 7–8 digits"; err.classList.add("show"); } return; }
+  if(pwd.length < 6){ if(err) { err.textContent = "Password min 6 chars"; err.classList.add("show"); } return; }
+  if(pwd !== confirm){ if(err) { err.textContent = "Passwords don't match"; err.classList.add("show"); } return; }
+  
   const btn = document.getElementById("doRegisterBtn");
-  const spinner = document.getElementById("regSpinner");
-  
-  // ━━━ 3. VALIDATE CLIENT-SIDE (ALL FIELDS) ━━━
-  if(!firstName || !surname || !phone || !password) {
-    showFormError(errEl, "First name, surname, phone, and password are required");
-    return;
-  }
-  
-  if(!isValidPhone(phone)) {
-    showFormError(errEl, "Invalid phone number format");
-    return;
-  }
-  
-  if(!isValidName(firstName)) {
-    showFormError(errEl, "First name must be 2-30 letters");
-    return;
-  }
-  
-  if(!isValidName(surname)) {
-    showFormError(errEl, "Surname must be 2-30 letters");
-    return;
-  }
-  
-  if(password.length < 6) {
-    showFormError(errEl, "Password must be at least 6 characters");
-    return;
-  }
-  
-  if(password !== confirmPassword) {
-    showFormError(errEl, "Passwords do not match");
-    return;
-  }
-  
-  if(email && !isValidEmail(email)) {
-    showFormError(errEl, "Invalid email address");
-    return;
-  }
-  
-  if(nationalId && !isValidNationalId(nationalId)) {
-    showFormError(errEl, "National ID must be 7-8 digits");
-    return;
-  }
-  
-  // ━━━ 4. SHOW LOADING STATE ━━━
-  spinner?.classList.remove("hidden");
   btn.disabled = true;
+  btn.innerHTML = '<div class="btn-spinner"></div> Creating…';
   
   try {
-    // ━━━ 5. CALL SERVER API ━━━
-    const response = await fetch('/api/auth', {
+    const data = await (await fetch('/api/auth', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        action: 'register',
-        firstName: firstName,        // ✅ Correctly read from form
-        surname: surname,            // ✅ Correctly read from form
-        phone: phone,                // ✅ Correctly read from form
-        password: password,          // ✅ Correctly read from form
-        dob: dob,                    // ✅ Optional but validated
-        sublocation: sublocation,    // ✅ Optional but validated
-        email: email,                // ✅ Optional but validated
-        nationalId: nationalId,      // ✅ Optional but validated
-        language: language           // ✅ Defaults to 'en'
-      })
-    });
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'register', firstName: fn, surname: sn, dob, phone, sublocation: sub, email, nationalId: natId, language: lang, password: pwd })
+    })).json();
     
-    const data = await response.json();
+    if (!data.success) {
+      if(err) { err.textContent = data.error || 'Failed'; err.classList.add("show"); }
+      btn.disabled = false;
+      btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
+      return;
+    }
     
+    currentUser = data.user;
+    btn.disabled = false;
+    btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
+    if(err) err.classList.remove("show");
+    
+    if(typeof showToast === 'function') showToast(`🎉 Registered! Voter No. ${data.user.voter_number || '?'}`, "success");
+    
+    document.getElementById("regFirstName").value = '';
+    document.getElementById("regSurname").value = '';
+    document.getElementById("regDob").value = '';
+    document.getElementById("regPhone").value = '';
+    document.getElementById("regEmail").value = '';
+    document.getElementById("regNationalId").value = '';
+    document.getElementById("regPassword").value = '';
+    document.getElementById("regConfirmPassword").value = '';
+    
+    setTimeout(() => document.getElementById("showLoginTab").click(), 500);
+  } catch (error) {
+    console.error('Reg error:', error);
+    if(err) { err.textContent = 'Error occurred'; err.classList.add("show"); }
+    btn.disabled = false;
+    btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
+  }
+}
+        
     // ━━━ 6. HANDLE SUCCESS ━━━
-    if(response.status === 200 && data.success) {
       // Server sets HttpOnly cookie automatically!
       // Store user in our SESSION object
       SESSION.setCurrentUser(data.user);
@@ -2800,15 +2740,7 @@ async function registerUser() {
       document.getElementById("regNationalId").value = "";
       
       // ✅ Switch to login view
-      switchToLogin();  // false = show login
       
-      showToast(
-        `Account created! Your voter number is: ${data.user.voter_number}`,
-        "success"
-      );
-      
-      return;
-    }
     
     // ━━━ 7. HANDLE ERRORS ━━━
     if(response.status === 409) {
@@ -2819,75 +2751,52 @@ async function registerUser() {
       showFormError(errEl, data.error || "Registration failed. Please try again.");
     }
     
-  } catch(error) {
     console.error('Registration error:', error);
     showFormError(errEl, "Network error. Check your connection.");
-  } finally {
     // ━━━ 8. HIDE LOADING STATE ━━━
-    spinner?.classList.add("hidden");
-    btn.disabled = false;
-  }
-}
 
 async function loginUser(){
-  // ━━━ 1. GET FORM VALUES ━━━
   const phone = document.getElementById("loginPhone").value.trim();
-  const password = document.getElementById("loginPassword").value;
-  const remember = document.getElementById("rememberMe")?.checked ?? false;
-  
-  // ━━━ 2. GET UI ELEMENTS ━━━
-  const errEl = document.getElementById("loginErrorMsg");
+  const pwd = document.getElementById("loginPassword").value;
+  const remember = document.getElementById("rememberMe").checked;
+  const err = document.getElementById("loginErrorMsg");
   const btn = document.getElementById("doLoginBtn");
-  const spinner = document.getElementById("loginSpinner");
   
-  // ━━━ 3. VALIDATE CLIENT-SIDE ━━━
-  if(!phone || !password) {
-    showFormError(errEl, "Phone and password are required");
-    return;
-  }
-  
-  if(!isValidPhone(phone)) {
-    showFormError(errEl, "Invalid phone format");
-    return;
-  }
-  
-  // ━━━ 4. SHOW LOADING STATE ━━━
-  spinner?.classList.remove("hidden");
+  document.getElementById("loginSpinner").classList.remove("hidden");
   btn.disabled = true;
   
   try {
-    // ━━━ 5. CALL SERVER API ━━━
-    const response = await fetch('/api/auth', {
+    const data = await (await fetch('/api/auth', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        action: 'login',
-        phone: phone,
-        password: password,
-        remember: remember
-      })
-    });
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'login', phone, password: pwd, remember })
+    })).json();
     
-    const data = await response.json();
-    
-    // ━━━ 6. HANDLE SUCCESS ━━━
-    if(response.status === 200 && data.success) {
-      // Server sets HttpOnly cookie automatically!
-      // Store user in our SESSION object
-      SESSION.setCurrentUser(data.user);
-      currentUser = data.user;
-      
-      // ✅ Hide auth overlay
-      document.getElementById("authContainer")?.classList.add("hidden");
-      
-      // ✅ Show dashboard
-      enterDashboard();
-      
-      showToast(`Welcome back, ${data.user.first_name}! 👋`, "success");
+    if (!data.success) {
+      if(err) { err.textContent = data.error || 'Login failed'; err.classList.add("show"); }
+      if(typeof shakeEl === 'function') shakeEl("authContainer");
+      document.getElementById("loginSpinner").classList.add("hidden");
+      btn.disabled = false;
       return;
     }
+    
+    currentUser = data.user;
+    document.getElementById("loginSpinner").classList.add("hidden");
+    btn.disabled = false;
+    if(err) err.classList.remove("show");
+    document.getElementById("loginPhone").value = '';
+    document.getElementById("loginPassword").value = '';
+    if(typeof enterDashboard === 'function') enterDashboard();
+  } catch (error) {
+    console.error('Login error:', error);
+    if(err) { err.textContent = 'Error occurred'; err.classList.add("show"); }
+    document.getElementById("loginSpinner").classList.add("hidden");
+    btn.disabled = false;
+  }
+}
+        
+    // ━━━ 6. HANDLE SUCCESS ━━━
+  
     
     // ━━━ 7. HANDLE ERROR ━━━
     if(response.status === 401) {
@@ -2899,22 +2808,29 @@ async function loginUser(){
       showFormError(errEl, data.error || "Login failed");
     }
     
-  } catch(error) {
     console.error('Login error:', error);
     showFormError(errEl, "Network error. Check your connection.");
     shakeEl("authContainer");
-  } finally {
-    // ━━━ 8. HIDE LOADING STATE ━━━
-    spinner?.classList.add("hidden");
-    btn.disabled = false;
-  }
+     // ━━━ 8. HIDE LOADING STATE ━━━
+function logout(){ 
+  fetch('/api/auth', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'logout'})}).catch(()=>{});
+  SESSION.clearCurrentUser();
+  currentUser = null;
+  if(faceoffInterval) clearInterval(faceoffInterval); 
+  if(countdownInterval) clearInterval(countdownInterval); 
+  location.reload(); 
 }
 
-function logout(){ clearSession(); if(faceoffInterval)clearInterval(faceoffInterval); if(countdownInterval)clearInterval(countdownInterval); location.reload(); }
-
 // ═══ ENTRY POINT ═══
+async function loadSession(){
+  try {
+    const res = await fetch('/api/me');
+    if(res.ok){ const d = await res.json(); SESSION.setCurrentUser(d.user); return d.user; }
+  } catch(e) {}
+  return null;
+}
+
 function enterDashboard(){
-  const fresh=DB.findUser(currentUser?.phone); if(fresh) currentUser=fresh;
   ["authContainer"].forEach(id=>document.getElementById(id)?.classList.add("hidden"));
   ["heroBand","countdownStrip","headerNav","avatarWrap","notifBell","logoutBtn","livePulse"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
   showPane("dashboardContent");
