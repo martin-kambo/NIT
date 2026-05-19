@@ -1470,7 +1470,7 @@ app.post('/api/mpesa/confirmation', async (req, res) => {
 // CATCH-ALL & ERROR HANDLING
 // ════════════════════════════════════════════════
 
-app.get('*', (req, res) => {
+app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
