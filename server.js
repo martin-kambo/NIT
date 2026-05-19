@@ -390,7 +390,7 @@ app.post('/api/auth', async (req, res) => {
       if (sublocation) {
         await pool.query(
           `INSERT INTO voters_by_sublocation (sublocation, voter_count) VALUES ($1, 1)
-           ON CONFLICT (sublocation) DO UPDATE SET voter_count = voter_count + 1`,
+           ON CONFLICT (sublocation) DO UPDATE SET voter_count = voters_by_sublocation.voter_count + 1`,
           [sublocation]
         );
       }
