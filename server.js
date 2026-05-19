@@ -13,13 +13,16 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 // ── PostgreSQL Connection Pool ──
+// ── PostgreSQL Connection Pool ──
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
-
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
 });
