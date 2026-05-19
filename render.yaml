@@ -1,0 +1,90 @@
+# ============================================
+# RENDER DEPLOYMENT CONFIGURATION
+# ============================================
+
+services:
+  # Web Service - Express API + Static Frontend
+  - type: web
+    name: ngoliba-infotrack
+    runtime: node
+    repo: https://github.com/YOUR_USERNAME/ngoliba-infotrack
+    plan: free
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: NODE_ENV
+        value: production
+      
+      # Database (from Render PostgreSQL)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ngoliba-db
+          property: connectionString
+      
+      # Required Secrets
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: CRON_SECRET
+        generateValue: true
+      
+      # Admin Password (must set manually in Render Dashboard)
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      
+      # Optional - Africa's Talking
+      - key: AFRICASTALKING_USERNAME
+        sync: false
+      - key: AFRICASTALKING_API_KEY
+        sync: false
+      - key: AFRICASTALKING_SENDER_ID
+        sync: false
+      
+      # Optional - M-PESA
+      - key: MPESA_CONSUMER_KEY
+        sync: false
+      - key: MPESA_CONSUMER_SECRET
+        sync: false
+      - key: MPESA_SHORTCODE
+        sync: false
+      - key: MPESA_PASSKEY
+        sync: false
+      - key: MPESA_CALLBACK_URL
+        sync: false
+
+    buildCommand: |
+      npm install --production=false
+      npm run build || echo "No build script"
+
+    startCommand: node server.js
+
+    healthCheckPath: /api/polling-results
+    autoDeploy: true
+
+  # Cron Job - Period Reset (every minute)
+  - type: cron
+    name: ngoliba-period-reset
+    runtime: node
+    repo: https://github.com/YOUR_USERNAME/ngoliba-infotrack
+    plan: free
+    schedule: "* * * * *"  # Every minute
+    buildCommand: npm install
+    startCommand: node cron-period-reset.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CRON_SECRET
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ngoliba-db
+          property: connectionString
+      - key: SESSION_SECRET
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+
+databases:
+  - name: ngoliba-db
+    databaseName: ngoliba_db
+    plan: free
+    ipAllowList: []  # Allow all connections (Render internal)
