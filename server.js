@@ -259,17 +259,15 @@ function verifyAdminToken(authHeader) {
   } catch { return false; }
 }
 
-async function getNextVoterNumber() {
+aasync function getNextVoterNumber() {
   const res = await pool.query(
-    'SELECT (value->>\'last_voter_number\')::bigint as last FROM metadata WHERE key = \'counters\''
+    `SELECT (value->>'last_voter_number')::bigint as last FROM metadata WHERE key = 'counters'`
   );
   const last = res.rows[0]?.last || 0;
   const next = last + 1;
- await pool.query(
-  `UPDATE metadata SET value = jsonb_set(value, '{last_voter_number}', $1::jsonb) 
-   WHERE key = 'counters'`,
-  [next]   // pass the number directly
-);
+  await pool.query(
+    `UPDATE metadata SET value = jsonb_set(value, '{last_voter_number}', to_jsonb($1::int)) WHERE key = 'counters'`,
+    [next]
   );
   return next;
 }
