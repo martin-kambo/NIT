@@ -265,10 +265,11 @@ async function getNextVoterNumber() {
   );
   const last = res.rows[0]?.last || 0;
   const next = last + 1;
-  await pool.query(
-    `UPDATE metadata SET value = jsonb_set(value, '{last_voter_number}', $1::text::jsonb) 
-     WHERE key = 'counters'`,
-    [next.toString()]
+ await pool.query(
+  `UPDATE metadata SET value = jsonb_set(value, '{last_voter_number}', $1::jsonb) 
+   WHERE key = 'counters'`,
+  [next]   // pass the number directly
+);
   );
   return next;
 }
@@ -937,7 +938,7 @@ app.post('/api/admin', async (req, res) => {
 
       await pool.query(
         'UPDATE metadata SET value = jsonb_set(value, \'{last_period_id}\', $1::text::jsonb) WHERE key = \'counters\'',
-        [newPeriodId.toString()]
+        [newPeriodId]
       );
 
       return res.json({ success: true, newPeriodId });
@@ -1029,7 +1030,7 @@ app.all('/api/webhook', async (req, res) => {
 
       await pool.query(
         'UPDATE metadata SET value = jsonb_set(value, \'{last_period_id}\', $1::text::jsonb) WHERE key = \'counters\'',
-        [newPeriodId.toString()]
+        [newPeriodId]
       );
 
       return res.json({
