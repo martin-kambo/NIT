@@ -2504,19 +2504,9 @@ const isValidNationalId=(id)=>!id||/^[0-9]{7,8}$/.test(id);
 function getCurrentPeriodStart(){ return new Date(Math.floor(Date.now()/PERIOD_MS)*PERIOD_MS).toISOString(); }
 function getNextPeriodStart(){ return new Date(Date.parse(getCurrentPeriodStart())+PERIOD_MS).toISOString(); }
 function checkAndResetPeriod(){
-  const expected=getCurrentPeriodStart();
-  let cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||"null");
-  if(!cur){ localStorage.setItem(KEYS.CURRENT_PERIOD,JSON.stringify({periodStart:expected,votes:[],firstVoter:null,secondVoter:null,thirdVoter:null})); return; }
-  if(cur.periodStart!==expected){
-    let archive=JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]");
-    const agg={}; CANDIDATES.forEach(c=>{agg[c.id]={total:0,sublocations:{}}; SUBLOCATIONS.forEach(s=>agg[c.id].sublocations[s]=0);});
-    for(let v of cur.votes){agg[v.candidateId].total++; agg[v.candidateId].sublocations[v.sublocation]++;}
-    archive.push({periodStart:cur.periodStart,periodEnd:new Date(Date.parse(cur.periodStart)+PERIOD_MS).toISOString(),votesByCandidate:agg});
-    if(archive.length>30) archive.shift();
-    localStorage.setItem(KEYS.PERIOD_ARCHIVE,JSON.stringify(archive));
-    localStorage.setItem(KEYS.CURRENT_PERIOD,JSON.stringify({periodStart:expected,votes:[],firstVoter:null,secondVoter:null,thirdVoter:null}));
-    showToast("🔄 New voting cycle started!","info");
-  }
+  // This function is no longer needed - server handles periods
+  // Placeholder to prevent errors
+  return;
 }
 function getCurrentPeriodAggregated(){
   const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}');
@@ -2602,43 +2592,27 @@ const ALL_BADGES=[
 ];
 
 function getEarnedBadges(user){
-  const meta=DB.getVoterMeta(user.phone);
-  return ALL_BADGES.filter(b=>b.req(meta,user));
+  // Placeholder - badges from server
+  return [];
 }
 
-// ═══ SESSION ═══
-
-    // Clear client-side state
-    SESSION.clearCurrentUser();
-    currentUser = null;
-    
-    // Hide dashboard
-    document.getElementById("authContainer")?.classList.remove("hidden");
-    ["heroBand","countdownStrip","headerNav","avatarWrap","notifBell","logoutBtn","livePulse"]
-      .forEach(id => document.getElementById(id)?.classList.add("hidden"));
-    
-    // Clear any intervals
-    if(faceoffInterval) clearInterval(faceoffInterval);
-    if(countdownInterval) clearInterval(countdownInterval);
-    
-    // Reload page
-    location.reload();
 
 // 3. On app startup (in DOMContentLoaded):
 document.addEventListener('DOMContentLoaded', async () => {
-  // Check if user is already logged in
-  const user = await loadSession();
+  // Initialize app
+  document.getElementById("authContainer")?.classList.remove("hidden");
   
-  if(user) {
-    // User is authenticated, show dashboard
-    currentUser = user;
-    enterDashboard();
-  } else {
-    // Show login/register form
-    document.getElementById("authContainer")?.classList.remove("hidden");
+  // Try to restore session from cookie
+  try {
+    const data = await fetch('/api/me').then(r => r.json());
+    if (data.success) {
+      currentUser = data.user;
+      enterDashboard();
+    }
+  } catch (error) {
+    console.log('No active session');
   }
 });
-
 // ═══ AUTH  //  API call ═══
 
 async function registerUser(){
@@ -3952,12 +3926,345 @@ checkAndResetPeriod();
 if(Notification.permission==="default")Notification.requestPermission();
 
 // Auto-check every 5s
-setInterval(()=>{checkAndResetPeriod();if(currentUser){updateFaceoff();renderVoterRegistry();updateHeaderBadge();}},5000);
-setInterval(()=>{if(currentUser)renderDashboard();},30000);
+// Removed - server handles periods now
+if(currentUser) {
+  setInterval(()=>{
+    if(typeof updateFaceoff === 'function') updateFaceoff();
+    if(typeof renderVoterRegistry === 'function') renderVoterRegistry();
+    if(typeof updateHeaderBadge === 'function') updateHeaderBadge();
+  }, 5000);
+  
+  setInterval(()=>{
+    if(typeof renderDashboard === 'function') renderDashboard();
+  }, 30000);
+}
 
 // Session restore
 const _s=loadSession();
 if(_s){currentUser=_s;enterDashboard();}
+// ════════════════════════════════════════════════════════════════════════════
+// NGOLIBA - API INTEGRATION (WORKING VERSION)
+// ════════════════════════════════════════════════════════════════════════════
+
+// 1. API UTILITIES
+async function apiCall(endpoint, body = null) {
+  try {
+    const options = {
+      method: body ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    };
+    if (body) options.body = JSON.stringify(body);
+    
+    const response = await fetch(endpoint, options);
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error('API Error:', data);
+      return { success: false, error: data.error || 'API failed' };
+    }
+    return data;
+  } catch (error) {
+    console.error('Network Error:', error);
+    return { success: false, error: 'Network error' };
+  }
+}
+
+// 2. FIXED REGISTRATION
+async function registerUser(){
+  const fn = document.getElementById("regFirstName").value.trim();
+  const sn = document.getElementById("regSurname").value.trim();
+  const dob = document.getElementById("regDob").value;
+  const phone = document.getElementById("regPhone").value.trim();
+  const sub = document.getElementById("regSublocation").value;
+  const email = document.getElementById("regEmail").value.trim();
+  const natId = document.getElementById("regNationalId").value.trim();
+  const lang = document.getElementById("regLanguage").value;
+  const pwd = document.getElementById("regPassword").value;
+  const confirm = document.getElementById("regConfirmPassword").value;
+  const err = document.getElementById("regErrorMsg");
+  
+  if(!isValidName(fn) || !isValidName(sn)){ if(err) { err.textContent = "Name invalid"; err.classList.add("show"); } return; }
+  if(!dob){ if(err) { err.textContent = "DOB required"; err.classList.add("show"); } return; }
+  if(!isValidPhone(phone)){ if(err) { err.textContent = "Phone invalid"; err.classList.add("show"); } return; }
+  if(!sub){ if(err) { err.textContent = "Sublocation required"; err.classList.add("show"); } return; }
+  if(!isValidEmail(email)){ if(err) { err.textContent = "Email invalid"; err.classList.add("show"); } return; }
+  if(!isValidNationalId(natId)){ if(err) { err.textContent = "ID invalid"; err.classList.add("show"); } return; }
+  if(pwd.length < 6){ if(err) { err.textContent = "Password too short"; err.classList.add("show"); } return; }
+  if(pwd !== confirm){ if(err) { err.textContent = "Passwords don't match"; err.classList.add("show"); } return; }
+  
+  const btn = document.getElementById("doRegisterBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<div class="btn-spinner"></div> Creating…';
+  
+  try {
+    const data = await apiCall('/api/auth', {
+      action: 'register',
+      firstName: fn,
+      surname: sn,
+      dob, phone, sublocation: sub, email, nationalId: natId, language: lang,
+      password: pwd
+    });
+    
+    if (!data.success) {
+      if(err) { err.textContent = data.error || 'Failed'; err.classList.add("show"); }
+      btn.disabled = false;
+      btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
+      return;
+    }
+    
+    currentUser = data.user;
+    btn.disabled = false;
+    btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
+    if(err) err.classList.remove("show");
+    if(typeof showToast === 'function') showToast(`🎉 Registered! Voter No. ${data.user.voter_number}`, "success");
+    
+    document.getElementById("regFirstName").value = '';
+    document.getElementById("regSurname").value = '';
+    document.getElementById("regDob").value = '';
+    document.getElementById("regPhone").value = '';
+    document.getElementById("regEmail").value = '';
+    document.getElementById("regNationalId").value = '';
+    document.getElementById("regPassword").value = '';
+    document.getElementById("regConfirmPassword").value = '';
+    
+    setTimeout(() => document.getElementById("showLoginTab").click(), 500);
+  } catch (error) {
+    console.error('Reg error:', error);
+    if(err) { err.textContent = 'Error'; err.classList.add("show"); }
+    btn.disabled = false;
+    btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
+  }
+}
+
+// 3. FIXED LOGIN
+async function loginUser(){
+  const phone = document.getElementById("loginPhone").value.trim();
+  const pwd = document.getElementById("loginPassword").value;
+  const remember = document.getElementById("rememberMe").checked;
+  const err = document.getElementById("loginErrorMsg");
+  const btn = document.getElementById("doLoginBtn");
+  
+  document.getElementById("loginSpinner").classList.remove("hidden");
+  btn.disabled = true;
+  
+  try {
+    const data = await apiCall('/api/auth', {
+      action: 'login',
+      phone, password: pwd, remember
+    });
+    
+    if (!data.success) {
+      if(err) { err.textContent = data.error || 'Login failed'; err.classList.add("show"); }
+      if(typeof shakeEl === 'function') shakeEl("authContainer");
+      document.getElementById("loginSpinner").classList.add("hidden");
+      btn.disabled = false;
+      return;
+    }
+    
+    currentUser = data.user;
+    document.getElementById("loginSpinner").classList.add("hidden");
+    btn.disabled = false;
+    if(err) err.classList.remove("show");
+    document.getElementById("loginPhone").value = '';
+    document.getElementById("loginPassword").value = '';
+    
+    if(typeof enterDashboard === 'function') enterDashboard();
+  } catch (error) {
+    console.error('Login error:', error);
+    if(err) { err.textContent = 'Error'; err.classList.add("show"); }
+    document.getElementById("loginSpinner").classList.add("hidden");
+    btn.disabled = false;
+  }
+}
+
+// 4. VOTE
+async function submitVote(candidateId) {
+  if(!currentUser) { if(typeof showToast === 'function') showToast("Login first", "warning"); return false; }
+  
+  const btn = event?.target;
+  if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Voting...'; }
+  
+  try {
+    const data = await apiCall('/api/votes', {
+      action: 'cast_vote',
+      candidateId: candidateId,
+      sublocation: currentUser.sublocation
+    });
+    
+    if (data.success) {
+      if(typeof showToast === 'function') showToast(`✅ Vote submitted!`, "success");
+      if(typeof renderDashboard === 'function') await renderDashboard();
+      return true;
+    }
+    
+    if(typeof showToast === 'function') showToast(data.error || 'Vote failed', "warning");
+    return false;
+  } catch(error) {
+    console.error('Vote error:', error);
+    if(typeof showToast === 'function') showToast("Network error", "error");
+    return false;
+  } finally {
+    if(btn) { btn.disabled = false; btn.innerHTML = 'CAST VOTE'; }
+  }
+}
+
+// 5. REFRESH STATS
+async function refreshDashboardStats(){
+  try {
+    const data = await apiCall('/api/stats');
+    if (!data.success) return;
+    
+    if (data.registeredVoters !== undefined) {
+      const el = document.getElementById("totalVoters");
+      if (el) el.textContent = data.registeredVoters;
+    }
+    
+    if (data.votersBySubLocation) {
+      const container = document.getElementById("vrSubsContainer");
+      if (container) {
+        container.innerHTML = SUBLOCATIONS
+          .map(s => `<div class="vr-sub-item"><div class="vr-sub-num">${(data.votersBySubLocation || {})[s] || 0}</div><div class="vr-sub-label">${s}</div></div>`)
+          .join("");
+      }
+    }
+    
+    const votesByCandidate = data.currentPeriod?.votesByCandidate || {};
+    CANDIDATES?.forEach(candidate => {
+      const el = document.querySelector(`[data-candidate-id="${candidate.id}"] .card-votes-chip`);
+      if (el) el.textContent = `${votesByCandidate[candidate.id] || 0} votes`;
+    });
+  } catch (error) {
+    console.error('Stats error:', error);
+  }
+}
+
+// 6. VOTER REGISTRY
+async function renderVoterRegistry(){
+  try {
+    const data = await apiCall('/api/stats');
+    if (!data.success) return;
+    
+    const el = document.getElementById("totalVoters");
+    if (el) el.innerText = data.registeredVoters || 0;
+    
+    const container = document.getElementById("vrSubsContainer");
+    if (container) {
+      container.innerHTML = SUBLOCATIONS
+        .map(s => `<div class="vr-sub-item"><div class="vr-sub-num">${(data.votersBySubLocation || {})[s] || 0}</div><div class="vr-sub-label">${s}</div></div>`)
+        .join("");
+    }
+  } catch (error) {
+    console.error('Registry error:', error);
+  }
+}
+
+// 7. FORUM
+async function renderForumTab(){
+  try {
+    const data = await apiCall('/api/forum', { action: 'list_posts' });
+    if (!data.success) return;
+    
+    const container = document.getElementById("forumPostsContainer");
+    if (!container) return;
+    
+    const posts = data.posts || [];
+    if (posts.length === 0) { container.innerHTML = '<div class="forum-empty">No posts yet</div>'; return; }
+    
+    container.innerHTML = posts
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map(post => `
+        <div class="forum-post" data-post-id="${post.id}">
+          <div class="forum-post-header">
+            <img class="forum-post-avatar" src="https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=38&bold=true&name=${encodeURIComponent(post.author || 'User')}" alt="">
+            <div class="forum-post-info">
+              <div class="forum-post-author">${post.author || 'Anonymous'}</div>
+              <div class="forum-post-time">${new Date(post.created_at).toLocaleString()}</div>
+            </div>
+          </div>
+          <div class="forum-post-content">${(post.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+          <div class="forum-post-footer">
+            <span class="forum-tag">#${post.tag || 'general'}</span>
+            <button class="forum-like-btn" onclick="likePost('${post.id}')">❤️ ${post.likes || 0}</button>
+          </div>
+        </div>
+      `)
+      .join("");
+  } catch (error) {
+    console.error('Forum error:', error);
+  }
+}
+
+async function postToForum(){
+  if (!currentUser) { if(typeof showError === 'function') showError("Login first"); return; }
+  
+  const text = document.getElementById("forumInput").value.trim();
+  const tag = document.getElementById("forumTag").value;
+  
+  if (!text) { if(typeof showError === 'function') showError("Write something"); return; }
+  
+  try {
+    const data = await apiCall('/api/forum', { action: 'create_post', text, tag });
+    if (!data.success) { if(typeof showError === 'function') showError(data.error); return; }
+    
+    document.getElementById("forumInput").value = '';
+    document.getElementById("forumTag").value = 'general';
+    if(typeof showToast === 'function') showToast('✅ Posted', 'success');
+    await renderForumTab();
+  } catch (error) {
+    console.error('Post error:', error);
+  }
+}
+
+async function likePost(postId){
+  if (!currentUser) { if(typeof showError === 'function') showError("Login first"); return; }
+  
+  try {
+    const data = await apiCall('/api/forum', { action: 'like_post', postId });
+    if (!data.success) { if(typeof showError === 'function') showError(data.error); return; }
+    await renderForumTab();
+  } catch (error) {
+    console.error('Like error:', error);
+  }
+}
+
+// 8. FIX ENTER DASHBOARD (Remove DB references)
+const _origEnterDashboard = window.enterDashboard || function(){};
+window.enterDashboard = function(){
+  if (!currentUser) {
+    console.error('currentUser not set');
+    return;
+  }
+  
+  ["authContainer"].forEach(id=>document.getElementById(id)?.classList.add("hidden"));
+  ["heroBand","countdownStrip","headerNav","avatarWrap","notifBell","logoutBtn","livePulse"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
+  
+  if (typeof showPane === 'function') showPane("dashboardContent");
+  if (typeof renderDashboard === 'function') renderDashboard();
+  if (typeof showWelcomePopup === 'function') showWelcomePopup();
+  if (typeof initLiveTicker === 'function') initLiveTicker();
+  if (typeof initPWAInstall === 'function') initPWAInstall();
+  if (typeof seedInitialNotifications === 'function') seedInitialNotifications();
+  if (typeof renderNotifBell === 'function') renderNotifBell();
+  if (typeof initAdRequestChat === 'function') initAdRequestChat();
+  
+  if(typeof faceoffInterval !== 'undefined' && faceoffInterval) clearInterval(faceoffInterval);
+  if(typeof faceoffInterval !== 'undefined') {
+    faceoffInterval = setInterval(()=>{
+      if (typeof updateFaceoff === 'function') updateFaceoff();
+      if (typeof updateLiveTicker === 'function') updateLiveTicker();
+    }, 3000);
+  }
+  
+  if (typeof startCountdown === 'function') startCountdown();
+  if(typeof showToast === 'function') showToast(`Welcome, ${currentUser.firstName || currentUser.first_name}! 👋`, "success");
+  
+  const lp = document.getElementById("livePulse");
+  if(lp) lp.style.display = "flex";
+  
+  setInterval(()=>{ const n = Math.floor(Math.random()*12)+3; const el = document.getElementById("liveViewers"); if(el) el.innerText = `${n} viewing live`; }, 8000);
+};
+
+console.log('✅ API Integration Ready!');
 
 console.log("%c\n╔══════════════════════════════════════════╗\n║  NGOLIBA INFOTRACK v4.0               ║\n║  ✅ DB Layer + Daraja M-Pesa           ║\n║  ✅ Analytics + AI Insights            ║\n║  ✅ Gamification + Leaderboard         ║\n║  ✅ Community Forum                    ║\n║  ✅ Promise Tracker                    ║\n║  ✅ Live Ticker + PWA Ready            ║\n╚══════════════════════════════════════════╝\n","color:#40c27a;font-family:monospace;");
 </script>
