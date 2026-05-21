@@ -3831,7 +3831,7 @@ document.head.appendChild(_ss);
 })();
 
 // ═══ OVERLAY STATS + CANDIDATE STRIP ═══
-function initOverlayStats(){
+/*function initOverlayStats(){
   const users=DB.getUsers();
   const el1=document.getElementById("oStatVoters"); if(el1) el1.innerText=users.length;
   const el2=document.getElementById("oStatVotes"); if(el2) el2.innerText=getAllTimeTotalVotes();
@@ -3840,7 +3840,7 @@ function initOverlayStats(){
   const chips=[...CANDIDATES,...CANDIDATES].map(c=>`<div class="overlay-cand-chip"><img src="${c.img}" alt="${c.name}"><span>${c.name.split(" ")[0]}</span></div>`).join("");
   strip.innerHTML=chips;
 }
-initOverlayStats();
+initOverlayStats();*/ // WILL BE CALLED BY API
 
 // ═══ AUTH ENTRY ANIMATION ═══
 setTimeout(()=>{
@@ -3849,8 +3849,8 @@ setTimeout(()=>{
 },100);
 
 // ═══ INIT ═══
-checkAndResetPeriod();
-if(Notification.permission==="default")Notification.requestPermission();
+//checkAndResetPeriod();
+//if(Notification.permission==="default")Notification.requestPermission();
 
 // Auto-check every 5s
 // Removed - server handles periods now
@@ -3867,8 +3867,8 @@ if(currentUser) {
 }
 
 // Session restore
-const _s=loadSession();
-if(_s){currentUser=_s;enterDashboard();}
+//const _s=loadSession(); SESSIONS NOW SERVERSIDE
+//if(_s){currentUser=_s;enterDashboard();}
 // ════════════════════════════════════════════════════════════════════════════
 // NGOLIBA - API INTEGRATION (WORKING VERSION)
 // ════════════════════════════════════════════════════════════════════════════
@@ -4957,6 +4957,239 @@ window.enterDashboard = function(){
 };
 
 console.log('✅ DB references patched! Dashboard should work now.');
+// ════════════════════════════════════════════════════════════════════════════
+// FINAL PATCH - REMOVE ALL REMAINING DB REFERENCES
+// ════════════════════════════════════════════════════════════════════════════
+
+// STUB OUT FUNCTIONS THAT NO LONGER WORK WITH localStorage
+
+window.checkAndResetPeriod = function(){
+  // Period management is now server-side
+  return;
+};
+
+window.loadSession = function(){
+  // Sessions are now HTTP-only cookies
+  // Return null to indicate no local session
+  return null;
+};
+
+window.saveSession = function(user, remember){
+  // Sessions are now HTTP-only cookies set by server
+  return;
+};
+
+window.clearSession = function(){
+  // Sessions cleared by server on logout
+  return;
+};
+
+window.getCurrentPeriodAggregated = function(){
+  // This needs API call - return empty
+  return {};
+};
+
+window.getAllTimeTotalVotes = function(){
+  // This needs API call - return 0 for now
+  return 0;
+};
+
+window.getPreviousPeriodStats = function(){
+  // This needs API call - return empty
+  return {};
+};
+
+// FIX: initOverlayStats (Line 3907)
+window.initOverlayStats = async function(){
+  try {
+    const data = await apiCall('/api/stats');
+    if (!data.success) {
+      console.error('Failed to get stats');
+      return;
+    }
+    
+    const registeredVoters = data.registeredVoters || 0;
+    const totalVotes = data.currentPeriod?.totalVotes || 0;
+    
+    const el1 = document.getElementById("oStatVoters");
+    if (el1) el1.innerText = registeredVoters;
+    
+    const el2 = document.getElementById("oStatVotes");
+    if (el2) el2.innerText = totalVotes;
+    
+    // Candidate strip
+    const strip = document.getElementById("overlayCandStrip");
+    if (!strip) return;
+    
+    const chips = [...CANDIDATES, ...CANDIDATES]
+      .map(c => `<div class="overlay-cand-chip"><img src="${c.photo}" alt="${c.name}"><span>${c.name.split(" ")[0]}</span></div>`)
+      .join("");
+    strip.innerHTML = chips;
+  } catch (error) {
+    console.error('Overlay stats error:', error);
+  }
+};
+
+// FIX: showWelcomePopup (Line 3663)
+window.showWelcomePopup = async function(){
+  try {
+    if (!currentUser) return;
+    
+    // Get stats for facts
+    const data = await apiCall('/api/stats');
+    const registeredVoters = data?.registeredVoters || 0;
+    
+    const facts = [
+      `Welcome back! 👋`,
+      `🔥 You're an active voter`,
+      `${registeredVoters} registered Ngoliba voters`
+    ];
+    
+    const titleEl = document.getElementById("welcomePopupTitle");
+    if (titleEl) titleEl.innerText = `Welcome back, ${currentUser.firstName || 'User'}! 👋`;
+    
+    const factEl = document.getElementById("welcomePopupFact");
+    if (factEl) factEl.innerText = facts[Math.floor(Math.random() * facts.length)];
+    
+    const popup = document.getElementById("welcomePopup");
+    if (popup) {
+      popup.classList.add("visible");
+      setTimeout(() => popup.classList.remove("visible"), 5000);
+    }
+  } catch (error) {
+    console.error('Welcome popup error:', error);
+  }
+};
+
+// FIX: renderAnalyticsTab (Line 3045)
+window.renderAnalyticsTab = async function(){
+  try {
+    const data = await apiCall('/api/stats');
+    if (!data.success) {
+      console.error('Failed to get analytics');
+      return;
+    }
+    
+    const registeredVoters = data.registeredVoters || 0;
+    const votesByCandidate = data.currentPeriod?.votesByCandidate || {};
+    const totalVotes = Object.values(votesByCandidate).reduce((a, b) => a + (b || 0), 0);
+    
+    // AI Prediction
+    const sorted = CANDIDATES
+      .map(c => ({ ...c, votes: votesByCandidate[c.id] || 0 }))
+      .sort((a, b) => b.votes - a.votes);
+    
+    const leader = sorted[0];
+    const second = sorted[1];
+    const conf = leader && second && leader.votes + second.votes > 0
+      ? Math.min(99, Math.round((leader.votes / (leader.votes + second.votes)) * 100))
+      : 50;
+    
+    const aiWinner = document.getElementById("aiPredictedWinner");
+    if (aiWinner) aiWinner.innerText = leader?.votes > 0 ? leader.name : "Too early to call";
+    
+    const aiConf = document.getElementById("aiPredictConf");
+    if (aiConf) aiConf.innerText = `${conf}% confidence based on current vote distribution`;
+    
+    const confBar = document.getElementById("aiConfBar");
+    if (confBar) confBar.style.width = `${conf}%`;
+    
+    // KPIs
+    const turnoutPct = registeredVoters > 0 ? Math.round((totalVotes / registeredVoters) * 100) : 0;
+    
+    const kpiGrid = document.getElementById("analyticsKPIGrid");
+    if (kpiGrid) {
+      kpiGrid.innerHTML = [
+        {
+          icon: "🗳️",
+          val: totalVotes,
+          label: "Votes This Cycle",
+          delta: "Current period",
+          dc: "",
+          c: "akpi-g"
+        },
+        {
+          icon: "👥",
+          val: registeredVoters,
+          label: "Registered Voters",
+          delta: `${SUBLOCATIONS?.length || 4} sublocations`,
+          dc: "",
+          c: "akpi-b"
+        },
+        {
+          icon: "📈",
+          val: `${turnoutPct}%`,
+          label: "Turnout Rate",
+          delta: "This cycle",
+          dc: turnoutPct > 50 ? "delta-up" : "",
+          c: "akpi-gold"
+        },
+        {
+          icon: "📊",
+          val: totalVotes,
+          label: "Period Votes",
+          delta: "So far",
+          dc: "",
+          c: "akpi-r"
+        }
+      ]
+        .map(k => `<div class="analytics-kpi ${k.c}"><div class="analytics-kpi-icon">${k.icon}</div><div class="analytics-kpi-val">${k.val}</div><div class="analytics-kpi-label">${k.label}</div><div class="analytics-kpi-delta ${k.dc}">${k.delta}</div></div>`)
+        .join("");
+    }
+    
+    // Heatmap by sublocation
+    const heatmapGrid = document.getElementById("heatmapGrid");
+    if (heatmapGrid && SUBLOCATIONS) {
+      heatmapGrid.innerHTML = SUBLOCATIONS
+        .map(sub => {
+          const votersInSub = data.votersBySubLocation?.[sub] || 1;
+          const pct = Math.round((totalVotes / (registeredVoters || 1)) * 100);
+          const intensity = Math.min(1, pct / 100);
+          const bg = `rgba(45,106,79,${0.08 + intensity * 0.85})`;
+          const textColor = intensity > 0.5 ? "white" : "var(--forest)";
+          return `<div class="heatmap-cell" style="background:${bg};color:${textColor};"><div class="heatmap-label" style="color:${textColor}">${sub}</div><div class="heatmap-pct">${pct}%</div><div class="heatmap-sub">${votersInSub}</div><div class="velocity-bar"><div class="velocity-fill" style="width:${pct}%"></div></div></div>`;
+        })
+        .join("");
+    }
+    
+    // Time heatmap (simulated)
+    const timeHeatmap = document.getElementById("timeHeatmap");
+    if (timeHeatmap) {
+      const hours = Array.from({ length: 12 }, (_, i) => ({
+        h: i * 2,
+        v: Math.floor(Math.random() * Math.max(1, totalVotes / 3))
+      }));
+      const maxH = Math.max(...hours.map(x => x.v), 1);
+      timeHeatmap.innerHTML = hours
+        .map(h => {
+          const intensity = h.v / maxH;
+          return `<div class="time-cell" style="background:rgba(45,106,79,${0.08 + intensity * 0.85});" title="${h.h}:00 — ${h.v} votes"></div>`;
+        })
+        .join("");
+    }
+    
+    if (typeof renderAnalyticsChart === 'function') renderAnalyticsChart("votes");
+    if (typeof initScrollReveal === 'function') initScrollReveal();
+  } catch (error) {
+    console.error('Analytics tab error:', error);
+  }
+};
+
+// Also make sure initOverlayStats is called (was at line 3916)
+// But only if the page is already loaded
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', async () => {
+    if (typeof initOverlayStats === 'function') {
+      await initOverlayStats();
+    }
+  });
+} else {
+  if (typeof initOverlayStats === 'function') {
+    initOverlayStats();
+  }
+}
+
+console.log('✅ ALL DB references removed!');
 </script>
 
 <style id="uxGlassStyles">
