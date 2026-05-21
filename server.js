@@ -594,26 +594,32 @@ app.use((err, req, res, next) => {
 // ════════════════════════════════════════════════════════════════════════════
 
 // GET /api/stats - Return voting statistics
+// GET /api/stats - Return voting statistics
 app.get('/api/stats', async (req, res) => {
   try {
-    const stats = await pool.query(`
-      SELECT 
-        (SELECT COUNT(*) FROM users) as registered_voters,
-        (SELECT COUNT(*) FROM votes WHERE created_at > NOW() - INTERVAL '24 hours') as today_votes,
-        (SELECT jsonb_object_agg(candidate_id, vote_count) FROM (
-          SELECT candidate_id, COUNT(*) as vote_count FROM votes 
-          WHERE created_at > NOW() - INTERVAL '24 hours'
-          GROUP BY candidate_id
-        ) votes) as votes_by_candidate
+    // Get registered voters count
+    const votersResult = await pool.query('SELECT COUNT(*) as count FROM users');
+    const registeredVoters = parseInt(votersResult.rows[0].count || 0);
+    
+    // Get votes by candidate
+    const votesResult = await pool.query(`
+      SELECT candidate_id, COUNT(*) as vote_count 
+      FROM votes 
+      GROUP BY candidate_id
     `);
     
-    const row = stats.rows[0];
+    const votesByCandidate = {};
+    votesResult.rows.forEach(row => {
+      votesByCandidate[row.candidate_id] = parseInt(row.vote_count);
+    });
+    
+    // Return stats
     res.json({
       success: true,
-      registeredVoters: parseInt(row.registered_voters || 0),
+      registeredVoters: registeredVoters,
       currentPeriod: {
-        totalVotes: parseInt(row.today_votes || 0),
-        votesByCandidate: row.votes_by_candidate || {}
+        totalVotes: Object.values(votesByCandidate).reduce((a, b) => a + b, 0),
+        votesByCandidate: votesByCandidate
       },
       votersBySubLocation: {
         'Ngoliba': 0,
@@ -624,7 +630,7 @@ app.get('/api/stats', async (req, res) => {
     });
   } catch (error) {
     console.error('/api/stats error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get stats' });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
