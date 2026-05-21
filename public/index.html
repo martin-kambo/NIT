@@ -5448,6 +5448,97 @@ if (document.readyState === 'loading') {
 }
 
 console.log('✅ ALL DB references removed!');
+// ════════════════════════════════════════════════════════════════════════════
+// RENDER CANDIDATES TO DASHBOARD
+// ════════════════════════════════════════════════════════════════════════════
+
+window.renderCandidatesToDashboard = function() {
+  const container = document.getElementById('dashboardContent');
+  if (!container) {
+    console.error('dashboardContent not found');
+    return;
+  }
+  
+  // Clear existing content
+  container.innerHTML = '';
+  
+  // Create candidates grid
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; padding: 2rem;';
+  
+  // Render each candidate
+  (CANDIDATES || []).forEach(c => {
+    const card = document.createElement('div');
+    card.className = 'candidate-card';
+    card.setAttribute('data-candidate-id', c.id);
+    card.style.cssText = `
+      background: linear-gradient(135deg, ${c.color}15 0%, ${c.color}05 100%);
+      border-left: 4px solid ${c.color};
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      transition: transform 0.2s, box-shadow 0.2s;
+    `;
+    
+    card.innerHTML = `
+      <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+        <img src="${c.img}" alt="${c.name}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 3px solid ${c.color};">
+        <div style="flex: 1;">
+          <h3 style="margin: 0 0 0.3rem 0; color: #2d6a4f; font-size: 1.2rem; font-weight: bold;">${c.name}</h3>
+          <p style="margin: 0 0 0.3rem 0; color: #666; font-size: 0.9rem; font-weight: 600;">${c.party}</p>
+          <p style="margin: 0; color: #888; font-size: 0.85rem;">${c.bio}</p>
+        </div>
+        ${c.incumbent ? '<span style="background: gold; color: #333; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-weight: bold;">INCUMBENT</span>' : ''}
+      </div>
+      
+      <div style="margin-bottom: 1rem;">
+        <p style="margin: 0 0 0.5rem 0; color: #555; font-size: 0.9rem;"><strong>Vision:</strong> ${c.vision}</p>
+        <p style="margin: 0; color: #666; font-size: 0.85rem;"><strong>Track Record:</strong> ${c.track}</p>
+      </div>
+      
+      <button onclick="submitVote(${c.id})" style="
+        width: 100%;
+        background: ${c.color};
+        color: white;
+        border: none;
+        padding: 0.75rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 1rem;
+        transition: opacity 0.2s;
+      " onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+        🗳️ VOTE FOR ${c.name.split(' ')[0].toUpperCase()}
+      </button>
+    `;
+    
+    grid.appendChild(card);
+  });
+  
+  container.appendChild(grid);
+  console.log('✅ Rendered', CANDIDATES.length, 'candidates');
+};
+
+// Override enterDashboard to render candidates
+const _originalEnterDashboard = window.enterDashboard;
+window.enterDashboard = function() {
+  // Call original
+  if (_originalEnterDashboard) {
+    try {
+      _originalEnterDashboard.call(this);
+    } catch (e) {
+      console.error('enterDashboard error:', e);
+    }
+  }
+  
+  // RENDER CANDIDATES
+  setTimeout(() => {
+    renderCandidatesToDashboard();
+  }, 200);
+};
+
+console.log('✅ Candidate renderer ready!');
+
 </script>
 
 <style id="uxGlassStyles">
