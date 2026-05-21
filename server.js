@@ -948,7 +948,63 @@ app.post('/api/admin', async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
-
+// ════════════════════════════════════════════════════════════════════════════
+// ROUTE: /api/stats (Required by index.html)
+// ════════════════════════════════════════════════════════════════════════════
+app.get('/api/stats', async (req, res) => {
+  try {
+    // Get registered voters
+    const votersResult = await pool.query('SELECT COUNT(*) as count FROM users');
+    const registeredVoters = parseInt(votersResult.rows[0].count || 0);
+    
+    // Get voters by sublocation
+    const sublocResult = await pool.query(
+      'SELECT sublocation, COUNT(*) as count FROM users WHERE sublocation IS NOT NULL GROUP BY sublocation'
+    );
+    const votersBySubLocation = {};
+    sublocResult.rows.forEach(row => {
+      votersBySubLocation[row.sublocation] = parseInt(row.count);
+    });
+    
+    // Get current active period and vote counts
+    const periodResult = await pool.query(
+      'SELECT id, total_votes, period_end FROM voting_periods WHERE is_active = true LIMIT 1'
+    );
+    
+    let currentPeriod = null;
+    if (periodResult.rows.length > 0) {
+      const period = periodResult.rows[0];
+      
+      // Get votes by candidate
+      const votesResult = await pool.query(
+        'SELECT candidate_id, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
+        [period.id]
+      );
+      
+      const votesByCandidate = {};
+      votesResult.rows.forEach(row => {
+        votesByCandidate[row.candidate_id] = parseInt(row.count);
+      });
+      
+      currentPeriod = {
+        periodId: period.id,
+        totalVotes: parseInt(period.total_votes || 0),
+        periodEnd: period.period_end,
+        votesByCandidate
+      };
+    }
+    
+    return res.json({
+      success: true,
+      registeredVoters,
+      votersBySubLocation,
+      currentPeriod
+    });
+  } catch (error) {
+    console.error('/api/stats error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get stats' });
+  }
+});
 // ════════════════════════════════════════════════
 // ROUTE: /api/webhook — period reset trigger
 // ════════════════════════════════════════════════

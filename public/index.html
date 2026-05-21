@@ -2683,79 +2683,6 @@ async function registerUser(){
   }
 }
         
-    // ━━━ 6. HANDLE SUCCESS ━━━
-      // Server sets HttpOnly cookie automatically!
-      // Store user in our SESSION object
-      SESSION.setCurrentUser(data.user);
-      currentUser = data.user;
-      
-      // ✅ Clear form
-      document.getElementById("regFirstName").value = "";
-      document.getElementById("regSurname").value = "";
-      document.getElementById("regPhone").value = "";
-      document.getElementById("regPassword").value = "";
-      document.getElementById("regConfirmPassword").value = "";
-      document.getElementById("regEmail").value = "";
-      document.getElementById("regDob").value = "";
-      document.getElementById("regSublocation").value = "";
-      document.getElementById("regNationalId").value = "";
-      
-      // ✅ Switch to login view
-      
-    
-    // ━━━ 7. HANDLE ERRORS ━━━
-    if(response.status === 409) {
-      showFormError(errEl, "This phone number is already registered");
-    } else if(response.status === 400) {
-      showFormError(errEl, data.error || "Invalid input. Please check all fields.");
-    } else {
-      showFormError(errEl, data.error || "Registration failed. Please try again.");
-    }
-    
-    console.error('Registration error:', error);
-    showFormError(errEl, "Network error. Check your connection.");
-    // ━━━ 8. HIDE LOADING STATE ━━━
-
-async function loginUser(){
-  const phone = document.getElementById("loginPhone").value.trim();
-  const pwd = document.getElementById("loginPassword").value;
-  const remember = document.getElementById("rememberMe").checked;
-  const err = document.getElementById("loginErrorMsg");
-  const btn = document.getElementById("doLoginBtn");
-  
-  document.getElementById("loginSpinner").classList.remove("hidden");
-  btn.disabled = true;
-  
-  try {
-    const data = await (await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'login', phone, password: pwd, remember })
-    })).json();
-    
-    if (!data.success) {
-      if(err) { err.textContent = data.error || 'Login failed'; err.classList.add("show"); }
-      if(typeof shakeEl === 'function') shakeEl("authContainer");
-      document.getElementById("loginSpinner").classList.add("hidden");
-      btn.disabled = false;
-      return;
-    }
-    
-    currentUser = data.user;
-    document.getElementById("loginSpinner").classList.add("hidden");
-    btn.disabled = false;
-    if(err) err.classList.remove("show");
-    document.getElementById("loginPhone").value = '';
-    document.getElementById("loginPassword").value = '';
-    if(typeof enterDashboard === 'function') enterDashboard();
-  } catch (error) {
-    console.error('Login error:', error);
-    if(err) { err.textContent = 'Error occurred'; err.classList.add("show"); }
-    document.getElementById("loginSpinner").classList.add("hidden");
-    btn.disabled = false;
-  }
-}
-
 // ═══ LOGOUT FUNCTION ═══
 async function logout() {
   try {
@@ -4633,6 +4560,403 @@ console.log("%c\n╔════════════════════
     });
   }
 })();
+// ════════════════════════════════════════════════════════════════════════════
+// COMPREHENSIVE PATCH - REMOVE ALL DB REFERENCES
+// ════════════════════════════════════════════════════════════════════════════
+
+// 1. OVERRIDE BROKEN DASHBOARD FUNCTIONS
+
+// Fix renderVoterRegistry (line 2893)
+window.renderVoterRegistry = async function(){
+  try {
+    const data = await fetch('/api/stats').then(r => r.json());
+    if (!data.success) return;
+    
+    const el = document.getElementById("totalVoters");
+    if (el) el.innerText = data.registeredVoters || 0;
+    
+    const container = document.getElementById("vrSubsContainer");
+    if (container) {
+      const SUBLOCATIONS = ['Ngoliba', 'Gatiiguru', 'Kilimambogo', 'Magogoni'];
+      container.innerHTML = SUBLOCATIONS
+        .map(s => `<div class="vr-sub-item"><div class="vr-sub-num">${(data.votersBySubLocation || {})[s] || 0}</div><div class="vr-sub-label">${s}</div></div>`)
+        .join("");
+    }
+  } catch (error) {
+    console.error('Registry error:', error);
+  }
+};
+
+// Fix renderTurnout (line 2901)
+window.renderTurnout = async function(){
+  try {
+    const data = await fetch('/api/stats').then(r => r.json());
+    if (!data.success) return;
+    
+    const currentPeriod = data.currentPeriod || {};
+    const votesByCandidate = currentPeriod.votesByCandidate || {};
+    const totalVotes = Object.values(votesByCandidate).reduce((a, b) => a + (b || 0), 0);
+    
+    const el = document.getElementById("totalVotesCycle");
+    if (el) el.innerText = totalVotes;
+    
+    CANDIDATES?.forEach(candidate => {
+      const voteEl = document.querySelector(`[data-candidate-id="${candidate.id}"] .card-votes-chip`);
+      if (voteEl) voteEl.textContent = `${votesByCandidate[candidate.id] || 0} votes`;
+    });
+  } catch (error) {
+    console.error('Turnout error:', error);
+  }
+};
+
+// Fix renderLeaderboard (line 3098 area)
+window.renderLeaderboard = async function(){
+  try {
+    const data = await fetch('/api/stats').then(r => r.json());
+    if (!data.success) return;
+    
+    const candidates = CANDIDATES || [];
+    const votesByCandidate = data.currentPeriod?.votesByCandidate || {};
+    
+    const sorted = candidates.sort((a, b) => (votesByCandidate[b.id] || 0) - (votesByCandidate[a.id] || 0));
+    const container = document.getElementById("leaderboardItems");
+    
+    if (container) {
+      container.innerHTML = sorted.slice(0, 5).map((c, i) => `
+        <div class="lb-row" style="animation-delay: ${i * 0.05}s;">
+          <span class="lb-rank">#${i + 1}</span>
+          <div class="lb-candidate">
+            <img src="${c.photo}" alt="${c.name}" class="lb-photo">
+            <span class="lb-name">${c.name}</span>
+          </div>
+          <span class="lb-votes">${votesByCandidate[c.id] || 0}</span>
+        </div>
+      `).join("");
+    }
+  } catch (error) {
+    console.error('Leaderboard error:', error);
+  }
+};
+
+// Fix renderForumTab (line 3148)
+window.renderForumTab = async function(){
+  try {
+    const data = await fetch('/api/forum', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list_posts' })
+    }).then(r => r.json());
+    
+    if (!data.success) return;
+    
+    const container = document.getElementById("forumPostsContainer");
+    if (!container) return;
+    
+    const posts = data.posts || [];
+    if (posts.length === 0) {
+      container.innerHTML = '<div class="forum-empty">No posts yet. Start a conversation!</div>';
+      return;
+    }
+    
+    container.innerHTML = posts
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map(post => `
+        <div class="forum-post" data-post-id="${post.id}">
+          <div class="forum-post-header">
+            <img class="forum-post-avatar" src="https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=38&bold=true&name=${encodeURIComponent(post.author || 'User')}" alt="">
+            <div class="forum-post-info">
+              <div class="forum-post-author">${post.author || 'Anonymous'}</div>
+              <div class="forum-post-time">${new Date(post.created_at).toLocaleString()}</div>
+            </div>
+          </div>
+          <div class="forum-post-content">${(post.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+          <div class="forum-post-footer">
+            <span class="forum-tag">#${post.tag || 'general'}</span>
+            <button class="forum-like-btn" onclick="likePost('${post.id}')">❤️ <span class="like-count">${post.likes || 0}</span></button>
+          </div>
+        </div>
+      `).join("");
+  } catch (error) {
+    console.error('Forum error:', error);
+  }
+};
+
+// Fix likePost (line 3197)
+window.likePost = async function(postId){
+  if (!currentUser) { 
+    if(typeof showToast === 'function') showToast("Login first", "warning");
+    return; 
+  }
+  
+  try {
+    const data = await fetch('/api/forum', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'like_post', postId })
+    }).then(r => r.json());
+    
+    if (!data.success) {
+      if(typeof showToast === 'function') showToast(data.error || 'Like failed', 'warning');
+      return;
+    }
+    
+    await renderForumTab();
+  } catch (error) {
+    console.error('Like error:', error);
+  }
+};
+
+// Fix postToForum (line 3223)
+window.postToForum = async function(){
+  if (!currentUser) {
+    if(typeof showToast === 'function') showToast("Login first", "warning");
+    return;
+  }
+  
+  const text = document.getElementById("forumInput").value.trim();
+  const tag = document.getElementById("forumTag").value;
+  
+  if (!text) {
+    if(typeof showToast === 'function') showToast("Write something", "warning");
+    return;
+  }
+  
+  try {
+    const data = await fetch('/api/forum', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_post', text, tag })
+    }).then(r => r.json());
+    
+    if (!data.success) {
+      if(typeof showToast === 'function') showToast(data.error || 'Post failed', 'warning');
+      return;
+    }
+    
+    document.getElementById("forumInput").value = '';
+    document.getElementById("forumTag").value = 'general';
+    if(typeof showToast === 'function') showToast('✅ Posted!', 'success');
+    await renderForumTab();
+  } catch (error) {
+    console.error('Post error:', error);
+  }
+};
+
+// 2. DISABLE FUNCTIONS THAT HEAVILY RELY ON DB (Non-essential)
+
+// These functions are nice-to-have but not critical for voting
+// Disable them by replacing with stub functions
+
+window.updateHeaderBadge = function(){
+  // Badges from server would go here
+  // For now, just hide the badge
+  const badge = document.getElementById("badgeIcon");
+  if (badge) badge.style.display = 'none';
+};
+
+window.updateHeaderAvatar = function(){
+  // Avatar already shown in currentUser
+  // This is cosmetic only
+};
+
+window.loadProfileData = function(){
+  // Profile data from currentUser object
+  if (currentUser) {
+    if (document.getElementById("profileName")) {
+      document.getElementById("profileName").value = `${currentUser.firstName || ''} ${currentUser.surname || ''}`;
+    }
+    if (document.getElementById("profilePhone")) {
+      document.getElementById("profilePhone").value = currentUser.phone || '';
+    }
+    if (document.getElementById("profileEmail")) {
+      document.getElementById("profileEmail").value = currentUser.email || '';
+    }
+    if (document.getElementById("profileSubLocation")) {
+      document.getElementById("profileSubLocation").value = currentUser.sublocation || '';
+    }
+  }
+};
+
+window.updateProfilePhoto = function(){
+  if(typeof showToast === 'function') showToast("Feature coming soon", "info");
+};
+
+window.removePhoto = function(){
+  if(typeof showToast === 'function') showToast("Feature coming soon", "info");
+};
+
+window.saveProfile = async function(){
+  if (!currentUser) return;
+  
+  const fn = document.getElementById("profileName")?.value.split(" ")[0] || currentUser.firstName;
+  const sn = document.getElementById("profileName")?.value.split(" ")[1] || currentUser.surname;
+  
+  try {
+    const data = await fetch('/api/me', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        firstName: fn,
+        surname: sn,
+        email: document.getElementById("profileEmail")?.value || currentUser.email,
+        sublocation: document.getElementById("profileSubLocation")?.value || currentUser.sublocation
+      })
+    }).then(r => r.json());
+    
+    if (data.success) {
+      currentUser = data.user;
+      if(typeof showToast === 'function') showToast("✅ Profile saved!", "success");
+    }
+  } catch (error) {
+    console.error('Save error:', error);
+  }
+};
+
+window.changePassword = async function(){
+  if(typeof showToast === 'function') showToast("Feature coming soon", "info");
+};
+
+window.downloadData = function(){
+  if(typeof showToast === 'function') showToast("Feature coming soon", "info");
+};
+
+window.resetPassword = function(){
+  if(typeof showToast === 'function') showToast("Feature coming soon", "info");
+};
+
+window.searchAI = function(q){
+  if(typeof showToast === 'function') showToast("Feature coming soon", "info");
+  return [];
+};
+
+window.initAdRequestChat = function(){
+  // Ad chat feature - not critical
+};
+
+window.seedInitialNotifications = function(){
+  // Initial notifications - optional
+};
+
+window.renderNotifBell = function(){
+  // Notifications - optional
+};
+
+// 3. FIX CRITICAL FUNCTIONS
+
+window.renderDashboard = async function(){
+  try {
+    if(typeof renderTurnout === 'function') await renderTurnout();
+    if(typeof renderFaceoff === 'function') await renderFaceoff();
+    if(typeof renderVoterRegistry === 'function') await renderVoterRegistry();
+    if(typeof renderLeaderboard === 'function') await renderLeaderboard();
+  } catch (error) {
+    console.error('Dashboard error:', error);
+  }
+};
+
+window.updateFaceoff = async function(){
+  if(typeof renderFaceoff === 'function') await renderFaceoff();
+};
+
+window.renderFaceoff = async function(){
+  try {
+    const data = await fetch('/api/stats').then(r => r.json());
+    if (!data.success) return;
+    
+    const currentPeriod = data.currentPeriod || {};
+    const votesByCandidate = currentPeriod.votesByCandidate || {};
+    
+    const sorted = (CANDIDATES || []).sort((a, b) => (votesByCandidate[b.id] || 0) - (votesByCandidate[a.id] || 0));
+    
+    if (sorted.length >= 2) {
+      const first = sorted[0];
+      const second = sorted[1];
+      
+      const container = document.getElementById("faceoffContainer");
+      if (container) {
+        container.innerHTML = `
+          <div class="faceoff-card" data-candidate-id="${first.id}">
+            <img src="${first.photo}" alt="${first.name}">
+            <h3>${first.name}</h3>
+            <p class="votes">${votesByCandidate[first.id] || 0} votes</p>
+          </div>
+          <div class="faceoff-vs">VS</div>
+          <div class="faceoff-card" data-candidate-id="${second.id}">
+            <img src="${second.photo}" alt="${second.name}">
+            <h3>${second.name}</h3>
+            <p class="votes">${votesByCandidate[second.id] || 0} votes</p>
+          </div>
+        `;
+      }
+    }
+  } catch (error) {
+    console.error('Faceoff error:', error);
+  }
+};
+
+window.updateLiveTicker = function(){
+  // Live ticker animation - optional
+};
+
+window.initLiveTicker = function(){
+  // Initialize ticker - optional
+};
+
+// 4. OVERRIDE PROBLEMATIC FUNCTIONS
+
+const origRenderDashboard = window.renderDashboard;
+window.renderDashboard = async function(){
+  try {
+    if(typeof renderTurnout === 'function') await renderTurnout();
+    if(typeof renderFaceoff === 'function') await renderFaceoff();
+    if(typeof renderVoterRegistry === 'function') await renderVoterRegistry();
+    if(typeof renderLeaderboard === 'function') await renderLeaderboard();
+  } catch (error) {
+    console.error('Dashboard error:', error);
+  }
+};
+
+const origEnterDashboard = window.enterDashboard;
+window.enterDashboard = function(){
+  if (!currentUser) {
+    console.error('No user logged in');
+    return;
+  }
+  
+  ["authContainer"].forEach(id => document.getElementById(id)?.classList.add("hidden"));
+  ["heroBand","countdownStrip","headerNav","avatarWrap","notifBell","logoutBtn","livePulse"]
+    .forEach(id => document.getElementById(id)?.classList.remove("hidden"));
+  
+  if (typeof showPane === 'function') showPane("dashboardContent");
+  if (typeof renderDashboard === 'function') renderDashboard();
+  if (typeof showWelcomePopup === 'function') showWelcomePopup();
+  if (typeof initLiveTicker === 'function') initLiveTicker();
+  if (typeof initPWAInstall === 'function') initPWAInstall();
+  if (typeof seedInitialNotifications === 'function') seedInitialNotifications();
+  if (typeof renderNotifBell === 'function') renderNotifBell();
+  if (typeof initAdRequestChat === 'function') initAdRequestChat();
+  
+  if(typeof faceoffInterval !== 'undefined' && faceoffInterval) clearInterval(faceoffInterval);
+  faceoffInterval = setInterval(() => {
+    if (typeof updateFaceoff === 'function') updateFaceoff();
+    if (typeof updateLiveTicker === 'function') updateLiveTicker();
+  }, 3000);
+  
+  if (typeof startCountdown === 'function') startCountdown();
+  
+  if(typeof showToast === 'function') showToast(`Welcome, ${currentUser.firstName || 'User'}! 👋`, "success");
+  
+  const lp = document.getElementById("livePulse");
+  if(lp) lp.style.display = "flex";
+  
+  setInterval(() => {
+    const n = Math.floor(Math.random() * 12) + 3;
+    const el = document.getElementById("liveViewers");
+    if(el) el.innerText = `${n} viewing live`;
+  }, 8000);
+};
+
+console.log('✅ DB references patched! Dashboard should work now.');
 </script>
 
 <style id="uxGlassStyles">
