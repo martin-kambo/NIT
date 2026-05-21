@@ -661,7 +661,7 @@ app.post('/api/forum', async (req, res) => {
   
   if (action === 'create_post') {
     try {
-      const session = verifySession(req.headers.cookie?.match(/session=([^;]*)/)?.[1] || '');
+      const session = verifySession(req.headers.cookie || '');
       if (!session) return res.status(401).json({ error: 'Unauthorized' });
       
       const user = await pool.query('SELECT first_name, surname FROM users WHERE phone = $1', [session.phone]);

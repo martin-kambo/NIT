@@ -2674,7 +2674,7 @@ async function registerUser(){
     document.getElementById("regPassword").value = '';
     document.getElementById("regConfirmPassword").value = '';
     
-    setTimeout(() => document.getElementById("showLoginTab").click(), 500);
+    setTimeout(() => { if(typeof switchToLogin === 'function') switchToLogin(); }, 500);
   } catch (error) {
     console.error('Reg error:', error);
     if(err) { err.textContent = 'Error occurred'; err.classList.add("show"); }
@@ -3963,7 +3963,7 @@ async function registerUser(){
     document.getElementById("regPassword").value = '';
     document.getElementById("regConfirmPassword").value = '';
     
-    setTimeout(() => document.getElementById("showLoginTab").click(), 500);
+    setTimeout(() => { if(typeof switchToLogin === 'function') switchToLogin(); }, 500);
   } catch (error) {
     console.error('Reg error:', error);
     if(err) { err.textContent = 'Error'; err.classList.add("show"); }
