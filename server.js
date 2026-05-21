@@ -197,7 +197,9 @@ pool.query('SELECT NOW()', (err, res) => {
 // ── Middleware ──
 app.use(cors({
   origin: true,
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -282,6 +284,21 @@ const CANDIDATES = [
   { id: 5, name: 'Mary Wambui' },
   { id: 6, name: 'David Kiprotich' }
 ];
+
+// ════════════════════════════════════════════════
+// ROUTE: /api/candidates (PUBLIC - NO AUTH REQUIRED)
+// ════════════════════════════════════════════════
+app.get('/api/candidates', (req, res) => {
+  try {
+    return res.json({ 
+      success: true, 
+      candidates: CANDIDATES 
+    });
+  } catch (e) {
+    console.error('/api/candidates error:', e);
+    return res.status(500).json({ error: 'Failed to fetch candidates' });
+  }
+});
 
 // ════════════════════════════════════════════════
 // ROUTE: /api/me
