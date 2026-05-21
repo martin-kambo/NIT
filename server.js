@@ -1,6 +1,7 @@
 // server.js — Ngoliba InfoTrack
 // PostgreSQL version (no Netlify dependency)
 // Production-ready for Render
+require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
@@ -18,7 +19,7 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 15000,
   ssl: {
     rejectUnauthorized: false
   }
