@@ -4433,13 +4433,13 @@ window.renderDashboard = async function() {
   }
 };
 
-// Also override enterDashboard to ensure candidates show
-const _origEnterDashboard = window.enterDashboard;
+// Also make sure candidates render after dashboard loads
+const origEnterDashboardV2 = window.enterDashboard;
 window.enterDashboard = function() {
   console.log('🚀 enterDashboard called');
   
-  if (_origEnterDashboard && typeof _origEnterDashboard === 'function') {
-    _origEnterDashboard.call(this);
+  if (origEnterDashboardV2 && typeof origEnterDashboardV2 === 'function') {
+    origEnterDashboardV2.call(this);
   }
   
   // Make sure candidates render
@@ -5260,6 +5260,13 @@ window.getPreviousPeriodStats = function(){
 // FIX: initOverlayStats (Line 3907)
 window.initOverlayStats = async function(){
   try {
+    // Ensure apiCall exists before using it
+    if (typeof apiCall !== 'function') {
+      console.warn('apiCall not yet available, deferring initOverlayStats');
+      setTimeout(() => window.initOverlayStats(), 500);
+      return;
+    }
+    
     const data = await apiCall('/api/stats');
     if (!data.success) {
       console.error('Failed to get stats');
@@ -5434,18 +5441,12 @@ window.renderAnalyticsTab = async function(){
 };
 
 // Also make sure initOverlayStats is called (was at line 3916)
-// But only if the page is already loaded
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', async () => {
-    if (typeof initOverlayStats === 'function') {
-      await initOverlayStats();
-    }
-  });
-} else {
+// Defer to ensure all functions are initialized
+setTimeout(() => {
   if (typeof initOverlayStats === 'function') {
-    initOverlayStats();
+    initOverlayStats().catch(err => console.warn('initOverlayStats failed:', err));
   }
-}
+}, 100);
 
 console.log('✅ ALL DB references removed!');
 // ════════════════════════════════════════════════════════════════════════════
