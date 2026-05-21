@@ -2674,7 +2674,7 @@ async function registerUser(){
     document.getElementById("regPassword").value = '';
     document.getElementById("regConfirmPassword").value = '';
     
-    setTimeout(() => { if(typeof switchToLogin === 'function') switchToLogin(); }, 500);
+    setTimeout(() => document.getElementById("showLoginTab").click(), 500);
   } catch (error) {
     console.error('Reg error:', error);
     if(err) { err.textContent = 'Error occurred'; err.classList.add("show"); }
@@ -3883,21 +3883,12 @@ async function apiCall(endpoint, body = null) {
     if (body) options.body = JSON.stringify(body);
     
     const response = await fetch(endpoint, options);
-    
-    // ✅ If response is not JSON, return null instead of error
-    let data;
-    try {
-      data = await response.json();
-    } catch (e) {
-      console.warn(`Couldn't parse JSON from ${endpoint}`);
-      return { success: false, error: 'Invalid response' };
-    }
+    const data = await response.json();
     
     if (!response.ok) {
       console.error('API Error:', data);
-      return { success: false, error: data.error || 'API call failed' };
+      return { success: false, error: data.error || 'API failed' };
     }
-    
     return data;
   } catch (error) {
     console.error('Network Error:', error);
@@ -3963,7 +3954,7 @@ async function registerUser(){
     document.getElementById("regPassword").value = '';
     document.getElementById("regConfirmPassword").value = '';
     
-    setTimeout(() => { if(typeof switchToLogin === 'function') switchToLogin(); }, 500);
+    setTimeout(() => document.getElementById("showLoginTab").click(), 500);
   } catch (error) {
     console.error('Reg error:', error);
     if(err) { err.textContent = 'Error'; err.classList.add("show"); }
@@ -4336,120 +4327,6 @@ window.renderForumPosts = function(){
 };
 
 console.log('✅ FINAL FIX: Leaderboard & Forum ready!');
-// ════════════════════════════════════════════════════════════════════════════
-// RENDER CANDIDATES DIRECTLY (NO API NEEDED)
-// ════════════════════════════════════════════════════════════════════════════
-
-window.renderCandidates = function() {
-  const dashboardContent = document.getElementById('dashboardContent');
-  if (!dashboardContent) {
-    console.error('❌ dashboardContent not found');
-    return;
-  }
-  
-  console.log('📋 Rendering', CANDIDATES.length, 'candidates...');
-  
-  let html = '<div style="padding: 2rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem;">';
-  
-  CANDIDATES.forEach(c => {
-    html += `
-      <div class="candidate-card" data-candidate-id="${c.id}" style="
-        background: white;
-        border: 2px solid ${c.color};
-        border-radius: 12px;
-        padding: 1.5rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        transition: all 0.3s ease;
-      ">
-        <div style="text-align: center; margin-bottom: 1rem;">
-          <img src="${c.img}" alt="${c.name}" style="
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 4px solid ${c.color};
-            margin-bottom: 0.5rem;
-          ">
-          <h3 style="margin: 0.5rem 0 0 0; color: ${c.color}; font-size: 1.1rem;">${c.name}</h3>
-          <p style="margin: 0.3rem 0; color: #666; font-size: 0.9rem; font-weight: bold;">${c.party}</p>
-          ${c.incumbent ? '<span style="background: #ffd700; color: #333; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: bold;">INCUMBENT</span>' : ''}
-        </div>
-        
-        <div style="border-top: 1px solid #eee; padding-top: 1rem; margin-bottom: 1rem;">
-          <p style="margin: 0.5rem 0; color: #555; font-size: 0.9rem;">
-            <strong>📋 Bio:</strong> ${c.bio}
-          </p>
-          <p style="margin: 0.5rem 0; color: #555; font-size: 0.9rem;">
-            <strong>🎯 Vision:</strong> ${c.vision}
-          </p>
-          <p style="margin: 0.5rem 0; color: #555; font-size: 0.9rem;">
-            <strong>✅ Track:</strong> ${c.track}
-          </p>
-        </div>
-        
-        <button onclick="submitVote(${c.id}); return false;" style="
-          width: 100%;
-          background: ${c.color};
-          color: white;
-          border: none;
-          padding: 0.75rem 1.5rem;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: bold;
-          font-size: 1rem;
-          margin-top: 1rem;
-          transition: all 0.2s ease;
-        " 
-        onmouseover="this.style.backgroundColor='${c.color}'; this.style.transform='scale(1.02)';"
-        onmouseout="this.style.backgroundColor='${c.color}'; this.style.transform='scale(1)';"
-        >
-          🗳️ VOTE
-        </button>
-      </div>
-    `;
-  });
-  
-  html += '</div>';
-  dashboardContent.innerHTML = html;
-  
-  console.log('✅ Candidates rendered successfully!');
-};
-
-// Override the dashboard render to show candidates
-const _origRenderDashboard = window.renderDashboard;
-window.renderDashboard = async function() {
-  console.log('🚀 renderDashboard called');
-  
-  // Render candidates first (no API needed)
-  renderCandidates();
-  
-  // Then try to call original if it exists
-  if (_origRenderDashboard && typeof _origRenderDashboard === 'function') {
-    try {
-      await _origRenderDashboard();
-    } catch (e) {
-      console.warn('Original renderDashboard error (ignored):', e.message);
-    }
-  }
-};
-
-// Also make sure candidates render after dashboard loads
-const origEnterDashboardV2 = window.enterDashboard;
-window.enterDashboard = function() {
-  console.log('🚀 enterDashboard called');
-  
-  if (origEnterDashboardV2 && typeof origEnterDashboardV2 === 'function') {
-    origEnterDashboardV2.call(this);
-  }
-  
-  // Make sure candidates render
-  setTimeout(() => {
-    console.log('⏱️ Rendering candidates after dashboard load...');
-    renderCandidates();
-  }, 500);
-};
-
-console.log('✅ Candidate rendering system ready!');
 
 console.log("%c\n╔══════════════════════════════════════════╗\n║  NGOLIBA INFOTRACK v4.0               ║\n║  ✅ DB Layer + Daraja M-Pesa           ║\n║  ✅ Analytics + AI Insights            ║\n║  ✅ Gamification + Leaderboard         ║\n║  ✅ Community Forum                    ║\n║  ✅ Promise Tracker                    ║\n║  ✅ Live Ticker + PWA Ready            ║\n╚══════════════════════════════════════════╝\n","color:#40c27a;font-family:monospace;");
 </script>
@@ -5260,13 +5137,6 @@ window.getPreviousPeriodStats = function(){
 // FIX: initOverlayStats (Line 3907)
 window.initOverlayStats = async function(){
   try {
-    // Ensure apiCall exists before using it
-    if (typeof apiCall !== 'function') {
-      console.warn('apiCall not yet available, deferring initOverlayStats');
-      setTimeout(() => window.initOverlayStats(), 500);
-      return;
-    }
-    
     const data = await apiCall('/api/stats');
     if (!data.success) {
       console.error('Failed to get stats');
@@ -5441,95 +5311,20 @@ window.renderAnalyticsTab = async function(){
 };
 
 // Also make sure initOverlayStats is called (was at line 3916)
-// Defer to ensure all functions are initialized
-setTimeout(() => {
+// But only if the page is already loaded
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', async () => {
+    if (typeof initOverlayStats === 'function') {
+      await initOverlayStats();
+    }
+  });
+} else {
   if (typeof initOverlayStats === 'function') {
-    initOverlayStats().catch(err => console.warn('initOverlayStats failed:', err));
+    initOverlayStats();
   }
-}, 100);
+}
 
 console.log('✅ ALL DB references removed!');
-// ════════════════════════════════════════════════════════════════════════════
-// RENDER CANDIDATES (Safe version - doesn't break login)
-// ════════════════════════════════════════════════════════════════════════════
-
-window.renderCandidates = function() {
-  const dashboardContent = document.getElementById('dashboardContent');
-  if (!dashboardContent) {
-    console.error('❌ dashboardContent not found');
-    return;
-  }
-  
-  console.log('📋 Rendering', CANDIDATES.length, 'candidates...');
-  
-  let html = '<div style="padding: 2rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem;">';
-  
-  CANDIDATES.forEach(c => {
-    html += `
-      <div class="candidate-card" data-candidate-id="${c.id}" style="
-        background: white;
-        border: 2px solid ${c.color};
-        border-radius: 12px;
-        padding: 1.5rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-      ">
-        <div style="text-align: center; margin-bottom: 1rem;">
-          <img src="${c.img}" alt="${c.name}" style="
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 4px solid ${c.color};
-            margin-bottom: 0.5rem;
-          ">
-          <h3 style="margin: 0.5rem 0 0 0; color: ${c.color}; font-size: 1.1rem;">${c.name}</h3>
-          <p style="margin: 0.3rem 0; color: #666; font-size: 0.9rem; font-weight: bold;">${c.party}</p>
-        </div>
-        
-        <div style="border-top: 1px solid #eee; padding-top: 1rem; margin-bottom: 1rem;">
-          <p style="margin: 0.5rem 0; color: #555; font-size: 0.9rem;"><strong>Vision:</strong> ${c.vision}</p>
-          <p style="margin: 0.5rem 0; color: #555; font-size: 0.9rem;"><strong>Track:</strong> ${c.track}</p>
-        </div>
-        
-        <button onclick="submitVote(${c.id}); return false;" style="
-          width: 100%;
-          background: ${c.color};
-          color: white;
-          border: none;
-          padding: 0.75rem;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: bold;
-        ">🗳️ VOTE</button>
-      </div>
-    `;
-  });
-  
-  html += '</div>';
-  dashboardContent.innerHTML = html;
-  console.log('✅ Candidates rendered!');
-};
-
-// Hook into existing renderDashboard WITHOUT redeclaring
-if (typeof window.renderDashboard === 'function') {
-  const originalRender = window.renderDashboard;
-  window.renderDashboard = async function() {
-    await originalRender();
-    renderCandidates();
-  };
-}
-
-// Hook into existing enterDashboard WITHOUT redeclaring
-if (typeof window.enterDashboard === 'function') {
-  const originalEnter = window.enterDashboard;
-  window.enterDashboard = function() {
-    originalEnter.call(this);
-    setTimeout(() => renderCandidates(), 500);
-  };
-}
-
-console.log('✅ Candidate renderer ready (safe version)!');
-
 </script>
 
 <style id="uxGlassStyles">
