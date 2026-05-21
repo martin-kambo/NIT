@@ -351,6 +351,7 @@ app.post('/api/auth', async (req, res) => {
   const { action, phone, password } = req.body;
 
   // LOGIN
+  // LOGIN
   if (action === 'login') {
     if (!phone || !password)
       return res.status(400).json({ error: 'Phone and password are required' });
@@ -366,10 +367,13 @@ app.post('/api/auth', async (req, res) => {
 
       const ttlDays = req.body.remember ? 30 : 7;
       const sessionToken = createSession(phone, user.id, ttlDays);
+      
+      // ✅ FIX: Conditional Secure flag + use it
       const isHttps = req.protocol === 'https' || process.env.NODE_ENV === 'production';
       const secureFlagStr = isHttps ? 'Secure; ' : '';
-
-      res.setHeader('Set-Cookie', `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttlDays * 24 * 3600}`);
+      
+      res.setHeader('Set-Cookie', `session=${sessionToken}; HttpOnly; ${secureFlagStr}SameSite=Lax; Path=/; Max-Age=${ttlDays * 24 * 3600}`);
+      
       return res.json({ success: true, user: sanitizeUser(user) });
     } catch (e) {
       console.error('Login error:', e);
@@ -377,6 +381,7 @@ app.post('/api/auth', async (req, res) => {
     }
   }
 
+  // REGISTER
   // REGISTER
   if (action === 'register') {
     const { firstName, surname, dob, sublocation, email, nationalId, language } = req.body;
@@ -418,10 +423,12 @@ app.post('/api/auth', async (req, res) => {
       }
 
       const sessionToken = createSession(phone, id, 7);
+      
+      // ✅ FIX: Conditional Secure flag + use it
       const isHttps = req.protocol === 'https' || process.env.NODE_ENV === 'production';
       const secureFlagStr = isHttps ? 'Secure; ' : '';
-
-      res.setHeader('Set-Cookie', `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${7 * 24 * 3600}`);
+      
+      res.setHeader('Set-Cookie', `session=${sessionToken}; HttpOnly; ${secureFlagStr}SameSite=Lax; Path=/; Max-Age=${7 * 24 * 3600}`);
 
       const user = {
         id, phone, first_name: firstName, surname, dob: dob || null, sublocation: sublocation || null,
