@@ -366,6 +366,9 @@ app.post('/api/auth', async (req, res) => {
 
       const ttlDays = req.body.remember ? 30 : 7;
       const sessionToken = createSession(phone, user.id, ttlDays);
+      const isHttps = req.protocol === 'https' || process.env.NODE_ENV === 'production';
+      const secureFlagStr = isHttps ? 'Secure; ' : '';
+
       res.setHeader('Set-Cookie', `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${ttlDays * 24 * 3600}`);
       return res.json({ success: true, user: sanitizeUser(user) });
     } catch (e) {
@@ -415,6 +418,9 @@ app.post('/api/auth', async (req, res) => {
       }
 
       const sessionToken = createSession(phone, id, 7);
+      const isHttps = req.protocol === 'https' || process.env.NODE_ENV === 'production';
+      const secureFlagStr = isHttps ? 'Secure; ' : '';
+
       res.setHeader('Set-Cookie', `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${7 * 24 * 3600}`);
 
       const user = {
