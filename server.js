@@ -286,16 +286,35 @@ const CANDIDATES = [
 // ROUTE: /api/me
 // ════════════════════════════════════════════════
 app.get('/api/me', async (req, res) => {
-  const session = verifySession(req.headers.cookie || '');
-  if (!session) return res.status(401).json({ error: 'Unauthorized' });
   try {
+    // ✅ EXTRACT SESSION TOKEN FROM COOKIE
+    const cookieHeader = req.headers.cookie || '';
+    const sessionMatch = cookieHeader.match(/session=([^;]*)/);
+    const sessionToken = sessionMatch ? sessionMatch[1] : null;
+    
+    if (!sessionToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    // ✅ VERIFY THE TOKEN
+    const session = verifySession(sessionToken);
+    if (!session) {
+      return res.status(401).json({ error: 'Invalid session' });
+    }
+    
+    // ✅ GET USER FROM DATABASE
     const result = await pool.query(
       'SELECT id, phone, first_name, surname, dob, sublocation, email, national_id, language, voter_number, profile_photo, created_at, updated_at FROM users WHERE phone = $1',
       [session.phone]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
     const user = result.rows[0];
     res.json({ success: true, user: sanitizeUser(user) });
+    
   } catch (e) {
     console.error('/api/me error:', e);
     res.status(500).json({ error: 'Internal server error' });
