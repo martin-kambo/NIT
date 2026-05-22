@@ -232,10 +232,37 @@ async function testDBConnection() {
   const connected = await testDBConnection();
   if (connected) {
     await initDB();
+    await ensureActivePeriod();
   } else {
     console.warn('⚠️  Continuing without database. Some features may not work.');
   }
 })();
+
+// ── Ensure Active Voting Period ──
+async function ensureActivePeriod() {
+  try {
+    const existing = await pool.query(
+      'SELECT * FROM voting_periods WHERE is_active = true LIMIT 1'
+    );
+    
+    if (existing.rows.length === 0) {
+      console.log('📝 Creating initial voting period...');
+      const now = new Date();
+      const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
+      
+      await pool.query(`
+        INSERT INTO voting_periods (period_start, period_end, is_active, total_votes)
+        VALUES ($1, $2, true, 0)
+      `, [now, endTime]);
+      
+      console.log('✅ Active voting period created');
+    } else {
+      console.log('✅ Active voting period already exists');
+    }
+  } catch (e) {
+    console.error('Failed to ensure active period:', e);
+  }
+}
 
 // ── Middleware ──
 app.use(cors({
@@ -547,18 +574,33 @@ app.get('/api/polling-results', async (req, res) => {
     if (periodResult.rows.length === 0) {
       return res
         .set('Cache-Control', 'public, max-age=5')
-        .json({ periodId: null, totalVotes: 0, votesByCandidate: {}, isActive: false });
+        .json({ 
+          periodId: null, 
+          totalVotes: 0, 
+          votesByCandidate: {}, 
+          isActive: false 
+        });
     }
 
     const period = periodResult.rows[0];
     const votesResult = await pool.query(
-      'SELECT candidate_id, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
+      'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
       [period.id]
     );
 
+    // Build structure with sublocations and total
     const votesByCandidate = {};
     votesResult.rows.forEach(row => {
-      votesByCandidate[row.candidate_id] = parseInt(row.count);
+      if (!votesByCandidate[row.candidate_id]) {
+        votesByCandidate[row.candidate_id] = { 
+          total: 0, 
+          sublocations: {} 
+        };
+      }
+      const count = parseInt(row.count);
+      votesByCandidate[row.candidate_id].total += count;
+      const sublocKey = row.sublocation || 'Unknown';
+      votesByCandidate[row.candidate_id].sublocations[sublocKey] = count;
     });
 
     return res
@@ -569,11 +611,59 @@ app.get('/api/polling-results', async (req, res) => {
         periodEnd: period.period_end,
         isActive: period.is_active,
         totalVotes: parseInt(period.total_votes),
-        votesByCandidate
+        votesByCandidate: votesByCandidate,
+        votesByUser: []
       });
   } catch (e) {
     console.error('/api/polling-results error:', e);
     return res.status(500).json({ error: 'Failed to fetch results' });
+  }
+});
+
+// ════════════════════════════════════════════════
+// ROUTE: /api/history
+// ════════════════════════════════════════════════
+app.get('/api/history', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    
+    const periodsResult = await pool.query(`
+      SELECT id, period_start, period_end, total_votes 
+      FROM voting_periods 
+      ORDER BY id DESC 
+      LIMIT $1
+    `, [limit]);
+    
+    const periods = [];
+    for (const period of periodsResult.rows) {
+      const votesResult = await pool.query(
+        'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
+        [period.id]
+      );
+      
+      const votesByCandidate = {};
+      votesResult.rows.forEach(row => {
+        if (!votesByCandidate[row.candidate_id]) {
+          votesByCandidate[row.candidate_id] = { total: 0, sublocations: {} };
+        }
+        const count = parseInt(row.count);
+        votesByCandidate[row.candidate_id].total += count;
+        votesByCandidate[row.candidate_id].sublocations[row.sublocation || 'Unknown'] = count;
+      });
+      
+      periods.push({
+        periodId: period.id,
+        periodStart: period.period_start,
+        periodEnd: period.period_end,
+        totalVotes: period.total_votes,
+        votesByCandidate: votesByCandidate
+      });
+    }
+    
+    return res.json({ success: true, periods });
+  } catch (e) {
+    console.error('/api/history error:', e);
+    return res.status(500).json({ error: 'Failed to fetch history' });
   }
 });
 
