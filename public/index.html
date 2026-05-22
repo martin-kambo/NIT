@@ -2851,8 +2851,12 @@ function renderHistoricalChart(){
   const archive=JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]");
   const labels=archive.map(p=>new Date(p.periodStart).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));
   const datasets=CANDIDATES.map(c=>({label:c.name.split(" ")[0],data:archive.map(p=>p.votesByCandidate[c.id]?.total||0),borderColor:c.color,backgroundColor:c.color+"22",tension:0.4,fill:false,pointRadius:3,pointHoverRadius:6}));
-  const ctx=document.getElementById("analyticsHistoricalChart").getContext("2d");
-  if(historyChart)historyChart.destroy();
+  const canvas2=document.getElementById("analyticsHistoricalChart");
+  if(!canvas2) return;
+  const existing2=Chart.getChart(canvas2);
+  if(existing2) existing2.destroy();
+  historyChart=null;
+  const ctx=canvas2.getContext("2d");
   historyChart=new Chart(ctx,{type:"line",data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:11}}}},scales:{y:{beginAtZero:true,grid:{color:"rgba(0,0,0,0.04)"}},x:{grid:{display:false}}}}});
 }
 
@@ -3009,9 +3013,12 @@ function renderAnalyticsChart(type){
       return{label:s,data:archive.map(p=>{ const sv=Object.values(p.votesByCandidate||{}).reduce((sum,v)=>sum+(v.sublocations?.[s]||0),0); return Math.round((sv/total)*100); }),borderColor:colors[i],tension:0.4,fill:false,pointRadius:3};
     });
   }
-  const ctx=document.getElementById("analyticsHistoricalChart")?.getContext("2d");
-  if(!ctx) return;
-  if(analyticsChart)analyticsChart.destroy();
+  const canvas=document.getElementById("analyticsHistoricalChart");
+  if(!canvas) return;
+  const existing=Chart.getChart(canvas);
+  if(existing) existing.destroy();
+  analyticsChart=null;
+  const ctx=canvas.getContext("2d");
   analyticsChart=new Chart(ctx,{type:"line",data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:11}}}},scales:{y:{beginAtZero:true,grid:{color:"rgba(0,0,0,0.04)"}},x:{grid:{display:false}}}}});
 }
 
@@ -4105,7 +4112,42 @@ async function likePost(postId){
   }
 }
 
-// enterDashboard is defined below in the final patch block
+// 8. FIX ENTER DASHBOARD (Remove DB references)
+const _origEnterDashboard = window.enterDashboard || function(){};
+window.enterDashboard = function(){
+  if (!currentUser) {
+    console.error('currentUser not set');
+    return;
+  }
+  
+  ["authContainer"].forEach(id=>document.getElementById(id)?.classList.add("hidden"));
+  ["heroBand","countdownStrip","headerNav","avatarWrap","notifBell","logoutBtn","livePulse"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
+  
+  if (typeof showPane === 'function') showPane("dashboardContent");
+  if (typeof renderDashboard === 'function') renderDashboard();
+  if (typeof showWelcomePopup === 'function') showWelcomePopup();
+  if (typeof initLiveTicker === 'function') initLiveTicker();
+  if (typeof initPWAInstall === 'function') initPWAInstall();
+  if (typeof seedInitialNotifications === 'function') seedInitialNotifications();
+  if (typeof renderNotifBell === 'function') renderNotifBell();
+  if (typeof initAdRequestChat === 'function') initAdRequestChat();
+  
+  if(typeof faceoffInterval !== 'undefined' && faceoffInterval) clearInterval(faceoffInterval);
+  if(typeof faceoffInterval !== 'undefined') {
+    faceoffInterval = setInterval(()=>{
+      if (typeof updateFaceoff === 'function') updateFaceoff();
+      if (typeof updateLiveTicker === 'function') updateLiveTicker();
+    }, 3000);
+  }
+  
+  if (typeof startCountdown === 'function') startCountdown();
+  if(typeof showToast === 'function') showToast(`Welcome, ${currentUser.firstName || currentUser.first_name}! 👋`, "success");
+  
+  const lp = document.getElementById("livePulse");
+  if(lp) lp.style.display = "flex";
+  
+  setInterval(()=>{ const n = Math.floor(Math.random()*12)+3; const el = document.getElementById("liveViewers"); if(el) el.innerText = `${n} viewing live`; }, 8000);
+};
 
 console.log('✅ API Integration Ready!');
 // ════════════════════════════════════════════════════════════════════════════
@@ -4944,34 +4986,13 @@ window.initLiveTicker = function(){
 
 const origRenderDashboard = window.renderDashboard;
 window.renderDashboard = async function(){
-  if(!currentUser) { document.getElementById("authContainer")?.classList.remove("hidden"); return; }
   try {
-    // Fetch live data from server
-    const periodRes = await fetch('/api/polling-results');
-    const periodData = await periodRes.json();
-    window.currentPeriodId = periodData.periodId;
-
-    const historyRes = await fetch('/api/history?limit=10');
-    const historyData = await historyRes.json();
-
-    const hasVoted = periodData.votesByUser?.includes(currentUser.id) ?? false;
-
-    // Render candidates grid — THIS is what was missing
-    if(typeof renderCandidatesGrid === 'function') renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
-
-    // Render supporting sections
     if(typeof renderTurnout === 'function') await renderTurnout();
     if(typeof renderFaceoff === 'function') await renderFaceoff();
     if(typeof renderVoterRegistry === 'function') await renderVoterRegistry();
     if(typeof renderLeaderboard === 'function') await renderLeaderboard();
-    if(typeof renderPeriodSummary === 'function') renderPeriodSummary(periodData);
-    if(typeof renderHistoricalChart === 'function') renderHistoricalChart(historyData.periods);
-
-    const el = document.getElementById("currentPeriodEnd");
-    if(el && periodData.periodEnd) el.innerText = new Date(periodData.periodEnd).toLocaleTimeString();
-
   } catch (error) {
-    console.error('Dashboard render error:', error);
+    console.error('Dashboard error:', error);
   }
 };
 
