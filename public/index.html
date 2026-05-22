@@ -2596,23 +2596,6 @@ function getEarnedBadges(user){
   return [];
 }
 
-
-// 3. On app startup (in DOMContentLoaded):
-document.addEventListener('DOMContentLoaded', async () => {
-  // Initialize app
-  document.getElementById("authContainer")?.classList.remove("hidden");
-  
-  // Try to restore session from cookie
-  try {
-    const data = await fetch('/api/me').then(r => r.json());
-    if (data.success) {
-      currentUser = data.user;
-      enterDashboard();
-    }
-  } catch (error) {
-    console.log('No active session');
-  }
-});
 // ═══ AUTH  //  API call ═══
 
 async function registerUser(){
@@ -2724,22 +2707,16 @@ async function loadSession(){
   try {
     const res = await fetch('/api/me');
     if(res.ok){ 
-      const d = await res.json(); 
-      SESSION.setCurrentUser(d.user); 
-      return d.user; 
+      const d = await res.json();
+      const u = d.user;
+      // Normalize server snake_case to camelCase
+      u.firstName = u.first_name;
+      SESSION.setCurrentUser(u); 
+      return u; 
     }
   } catch(e) {
     console.error('Session load failed:', e);
   }
-  return null;
-}
-
-// ═══ ENTRY POINT ═══
-async function loadSession(){
-  try {
-    const res = await fetch('/api/me');
-    if(res.ok){ const d = await res.json(); SESSION.setCurrentUser(d.user); return d.user; }
-  } catch(e) {}
   return null;
 }
 
@@ -2785,7 +2762,7 @@ function switchFeatureTab(tabId){
 
 // ═══ DASHBOARD (Vote tab) ═══
 async function renderDashboard(){
- if(!currentUser) { showTab('tabAuth'); return; }
+ if(!currentUser) { document.getElementById("authContainer")?.classList.remove("hidden"); return; }
   
   try {
     // ━━━ 1. FETCH ACTIVE PERIOD ━━━
@@ -3941,7 +3918,8 @@ async function registerUser(){
       return;
     }
     
-    currentUser = data.user;
+  currentUser = data.user;
+  currentUser.firstName = currentUser.first_name;
     btn.disabled = false;
     btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
     if(err) err.classList.remove("show");
@@ -3991,6 +3969,7 @@ async function loginUser(){
     }
     
     currentUser = data.user;
+    currentUser.firstName = currentUser.first_name;
     document.getElementById("loginSpinner").classList.add("hidden");
     btn.disabled = false;
     if(err) err.classList.remove("show");
