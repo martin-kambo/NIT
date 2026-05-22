@@ -2792,6 +2792,9 @@ async function renderDashboard(){
     const periodRes = await fetch('/api/polling-results');
     const periodData = await periodRes.json();
     
+    // ━━━ STORE PERIOD ID FOR VOTING ━━━
+    window.currentPeriodId = periodData.periodId;
+    
     // ━━━ 2. FETCH VOTING HISTORY ━━━
     const historyRes = await fetch('/api/history?limit=10');
     const historyData = await historyRes.json();
@@ -2833,10 +2836,9 @@ function renderTurnout(){
   }).join("");
 }
 
-function renderCandidatesGrid(disableVote){
+function renderCandidatesGrid(disableVote, serverVotes){
   const container=document.getElementById("candidatesGrid"); if(!container) return;
-  const agg=getCurrentPeriodAggregated();
-  const sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
+  const sorted=CANDIDATES.map(c=>({...c,votes:serverVotes?.[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
   container.innerHTML="";
   sorted.forEach((cand,idx)=>{
     const rankClass=idx===0?"rank-1":idx===1?"rank-2":idx===2?"rank-3":"rank-other";
