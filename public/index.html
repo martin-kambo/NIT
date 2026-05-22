@@ -2851,9 +2851,46 @@ function renderHistoricalChart(){
   const archive=JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]");
   const labels=archive.map(p=>new Date(p.periodStart).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));
   const datasets=CANDIDATES.map(c=>({label:c.name.split(" ")[0],data:archive.map(p=>p.votesByCandidate[c.id]?.total||0),borderColor:c.color,backgroundColor:c.color+"22",tension:0.4,fill:false,pointRadius:3,pointHoverRadius:6}));
-  const ctx=document.getElementById("analyticsHistoricalChart").getContext("2d");
-  if(window.historyChart)window.historyChart.destroy();
-  window.historyChart=new Chart(ctx,{type:"line",data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:11}}}},scales:{y:{beginAtZero:true,grid:{color:"rgba(0,0,0,0.04)"}},x:{grid:{display:false}}}}});
+  
+  // ✅ STEP 1: Destroy both stored instances (historyChart AND analyticsChart since they share canvas)
+  if(window.historyChart){
+    try{
+      window.historyChart.destroy();
+      window.historyChart=null;
+    }catch(e){}
+  }
+  if(analyticsChart){
+    try{
+      analyticsChart.destroy();
+      analyticsChart=null;
+    }catch(e){}
+  }
+  
+  // ✅ STEP 2: Find the parent container
+  const chartWrap=document.querySelector(".chart-wrap");
+  if(!chartWrap) return;
+  
+  // ✅ STEP 3: Replace canvas element completely
+  const oldCanvas=document.getElementById("analyticsHistoricalChart");
+  if(oldCanvas){
+    const newCanvas=document.createElement("canvas");
+    newCanvas.id="analyticsHistoricalChart";
+    oldCanvas.parentNode.replaceChild(newCanvas,oldCanvas);
+  }
+  
+  // ✅ STEP 4: Get fresh reference
+  const canvas=document.getElementById("analyticsHistoricalChart");
+  if(!canvas) return;
+  
+  const ctx=canvas.getContext("2d");
+  if(!ctx) return;
+  
+  // ✅ STEP 5: Create chart
+  try{
+    window.historyChart=new Chart(ctx,{type:"line",data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:11}}}},scales:{y:{beginAtZero:true,grid:{color:"rgba(0,0,0,0.04)"}},x:{grid:{display:false}}}}});
+  }catch(e){
+    console.error("Historical chart creation failed:",e);
+  }
 }
 
 function updateFaceoff(){
