@@ -2642,6 +2642,7 @@ async function registerUser(){
     }
     
     currentUser = data.user;
+    currentUser.firstName = currentUser.first_name;
     btn.disabled = false;
     btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
     if(err) err.classList.remove("show");
@@ -3985,37 +3986,6 @@ async function loginUser(){
   }
 }
 
-// 4. VOTE
-async function submitVote(candidateId) {
-  if(!currentUser) { if(typeof showToast === 'function') showToast("Login first", "warning"); return false; }
-  
-  const btn = event?.target;
-  if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Voting...'; }
-  
-  try {
-    const data = await apiCall('/api/votes', {
-      action: 'cast_vote',
-      candidateId: candidateId,
-      sublocation: currentUser.sublocation
-    });
-    
-    if (data.success) {
-      if(typeof showToast === 'function') showToast(`✅ Vote submitted!`, "success");
-      if(typeof renderDashboard === 'function') await renderDashboard();
-      return true;
-    }
-    
-    if(typeof showToast === 'function') showToast(data.error || 'Vote failed', "warning");
-    return false;
-  } catch(error) {
-    console.error('Vote error:', error);
-    if(typeof showToast === 'function') showToast("Network error", "error");
-    return false;
-  } finally {
-    if(btn) { btn.disabled = false; btn.innerHTML = 'CAST VOTE'; }
-  }
-}
-
 // 5. REFRESH STATS
 async function refreshDashboardStats(){
   try {
@@ -4955,19 +4925,6 @@ window.seedInitialNotifications = function(){
 
 window.renderNotifBell = function(){
   // Notifications - optional
-};
-
-// 3. FIX CRITICAL FUNCTIONS
-
-window.renderDashboard = async function(){
-  try {
-    if(typeof renderTurnout === 'function') await renderTurnout();
-    if(typeof renderFaceoff === 'function') await renderFaceoff();
-    if(typeof renderVoterRegistry === 'function') await renderVoterRegistry();
-    if(typeof renderLeaderboard === 'function') await renderLeaderboard();
-  } catch (error) {
-    console.error('Dashboard error:', error);
-  }
 };
 
 window.updateFaceoff = async function(){
