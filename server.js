@@ -11,7 +11,7 @@ const { Pool } = require('pg');
 const axios = require('axios');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 // ── PostgreSQL Connection Pool ──
 // Increased timeout for Render's free tier (which hibernates)
