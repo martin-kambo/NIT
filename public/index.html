@@ -696,7 +696,7 @@ select.field-input option { background: #1a2535; color: white; }
 .card-body { padding: 1rem 1.1rem; flex: 1; display: flex; flex-direction: column; }
 .card-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; color: var(--text-dark); margin-bottom: 0.15rem; }
 .card-party { font-size: 0.72rem; color: var(--mid-gray); margin-bottom: 0.6rem; }
-.card-bio { font-size: 0.78rem; color: var(--text-mid); line-height: 1.5; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-bio { font-size: 0.78rem; color: var(--text-mid); line-height: 1.5; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-vote-btn {
   display: flex; align-items: center; justify-content: center; gap: 0.4rem;
   width: 100%; margin-top: 0.9rem; padding: 0.65rem;
@@ -1535,7 +1535,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 }
 .notice-card-desc {
   font-size: 0.8rem; color: var(--text-mid); line-height: 1.55;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 .notice-card-footer {
   padding: 0.75rem 1.1rem; border-top: 1px solid var(--light-gray);
