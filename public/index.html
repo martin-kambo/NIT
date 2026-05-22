@@ -3010,35 +3010,41 @@ function renderAnalyticsChart(type){
     });
   }
   
-  const canvas=document.getElementById("analyticsHistoricalChart");
-  if(!canvas) return;
-  
-  // ✅ STEP 1: Destroy stored chart instance
+  // ✅ STEP 1: Destroy stored instance
   if(analyticsChart){
     try{
       analyticsChart.destroy();
+      analyticsChart=null;
     }catch(e){}
-    analyticsChart=null;
   }
   
-  // ✅ STEP 2: Completely reset the canvas element (clears all cached state)
-  // This is the KEY fix - reassigning width/height clears the canvas completely
-  canvas.width=canvas.offsetWidth;
-  canvas.height=canvas.offsetHeight;
+  // ✅ STEP 2: Get the chart wrapper container
+  const chartWrap=document.querySelector(".chart-wrap");
+  if(!chartWrap) return;
   
-  // ✅ STEP 3: Remove all child nodes from canvas (if any)
-  while(canvas.firstChild){
-    canvas.removeChild(canvas.firstChild);
+  // ✅ STEP 3: NUCLEAR FIX - Replace canvas element completely
+  // This forces Chart.js to release all references to the old canvas
+  const oldCanvas=document.getElementById("analyticsHistoricalChart");
+  if(oldCanvas){
+    // Create brand new canvas with same ID
+    const newCanvas=document.createElement("canvas");
+    newCanvas.id="analyticsHistoricalChart";
+    // Replace old with new
+    oldCanvas.parentNode.replaceChild(newCanvas,oldCanvas);
   }
+  
+  // ✅ STEP 4: Get reference to new canvas
+  const canvas=document.getElementById("analyticsHistoricalChart");
+  if(!canvas) return;
   
   const ctx=canvas.getContext("2d");
   if(!ctx) return;
   
-  // ✅ STEP 4: Create fresh chart instance
+  // ✅ STEP 5: Create chart on fresh canvas
   try{
     analyticsChart=new Chart(ctx,{type:"line",data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:11}}}},scales:{y:{beginAtZero:true,grid:{color:"rgba(0,0,0,0.04)"}},x:{grid:{display:false}}}}});
   }catch(e){
-    console.error("Failed to create chart:",e);
+    console.error("Chart creation failed:",e);
   }
 }
 
