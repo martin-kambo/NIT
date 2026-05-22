@@ -2785,7 +2785,7 @@ function switchFeatureTab(tabId){
 
 // ═══ DASHBOARD (Vote tab) ═══
 async function renderDashboard(){
-  if(!currentUser) return;
+ if(!currentUser) { showTab('tabAuth'); return; }
   
   try {
     // ━━━ 1. FETCH ACTIVE PERIOD ━━━

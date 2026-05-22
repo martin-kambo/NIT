@@ -349,13 +349,13 @@ async function getNextVoterNumber() {
 }
 
 const CANDIDATES = [
-  { id: 0, name: 'Hon. James Mwangi' },
-  { id: 1, name: 'Grace Wanjiku' },
-  { id: 2, name: 'Peter Kimani' },
-  { id: 3, name: 'Sarah Nduati' },
-  { id: 4, name: 'John Otieno' },
-  { id: 5, name: 'Mary Wambui' },
-  { id: 6, name: 'David Kiprotich' }
+  { id: 0, name: 'Hon. James Mwangi', party: 'Jubilee', bio: 'Incumbent MCA, serving second term.', img: 'https://ui-avatars.com/api/?name=James+Mwangi&background=0d2818&color=40c27a&size=120' },
+  { id: 1, name: 'Grace Wanjiku',     party: 'ODM',     bio: 'Community health advocate.', img: 'https://ui-avatars.com/api/?name=Grace+Wanjiku&background=1a3f28&color=e9c46a&size=120' },
+  { id: 2, name: 'Peter Kimani',      party: 'UDA',     bio: 'Former ward administrator.', img: 'https://ui-avatars.com/api/?name=Peter+Kimani&background=2d6a4f&color=fff&size=120' },
+  { id: 3, name: 'Sarah Nduati',      party: 'Wiper',   bio: 'Women rights campaigner.', img: 'https://ui-avatars.com/api/?name=Sarah+Nduati&background=4361ee&color=fff&size=120' },
+  { id: 4, name: 'John Otieno',       party: 'ANC',     bio: 'Youth empowerment champion.', img: 'https://ui-avatars.com/api/?name=John+Otieno&background=e63946&color=fff&size=120' },
+  { id: 5, name: 'Mary Wambui',       party: 'Ford-K',  bio: 'Education sector advocate.', img: 'https://ui-avatars.com/api/?name=Mary+Wambui&background=c9a027&color=fff&size=120' },
+  { id: 6, name: 'David Kiprotich',   party: 'Independent', bio: 'Farmer and entrepreneur.', img: 'https://ui-avatars.com/api/?name=David+Kiprotich&background=6b7280&color=fff&size=120' }
 ];
 
 // ════════════════════════════════════════════════
