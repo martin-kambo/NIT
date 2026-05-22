@@ -3013,44 +3013,33 @@ function renderAnalyticsChart(type){
   const canvas=document.getElementById("analyticsHistoricalChart");
   if(!canvas) return;
   
-  try{
-    // ✅ CRITICAL: Destroy the stored chart instance first
-    if(analyticsChart){
+  // ✅ STEP 1: Destroy stored chart instance
+  if(analyticsChart){
+    try{
       analyticsChart.destroy();
-      analyticsChart=null;
-    }
-  }catch(e){
-    console.warn("Chart destroy error:",e);
+    }catch(e){}
+    analyticsChart=null;
   }
   
-  try{
-    // ✅ CRITICAL: Also destroy via Chart.js's registry using Chart.helpers if available
-    if(window.Chart && window.Chart.helpers){
-      const toDelete=[];
-      window.Chart.instances.forEach((chart,i)=>{
-        if(chart && chart.canvas===canvas){
-          toDelete.push(i);
-        }
-      });
-      // Delete in reverse order to maintain indices
-      toDelete.reverse().forEach(i=>{
-        window.Chart.instances[i].destroy();
-        window.Chart.instances.splice(i,1);
-      });
-    }
-  }catch(e){
-    console.warn("Chart registry cleanup error:",e);
-  }
+  // ✅ STEP 2: Completely reset the canvas element (clears all cached state)
+  // This is the KEY fix - reassigning width/height clears the canvas completely
+  canvas.width=canvas.offsetWidth;
+  canvas.height=canvas.offsetHeight;
   
-  // ✅ CRITICAL: Reset canvas width/height to clear any cached state
-  canvas.width=canvas.width;
-  canvas.height=canvas.height;
+  // ✅ STEP 3: Remove all child nodes from canvas (if any)
+  while(canvas.firstChild){
+    canvas.removeChild(canvas.firstChild);
+  }
   
   const ctx=canvas.getContext("2d");
   if(!ctx) return;
   
-  // ✅ Create new chart instance
-  analyticsChart=new Chart(ctx,{type:"line",data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:11}}}},scales:{y:{beginAtZero:true,grid:{color:"rgba(0,0,0,0.04)"}},x:{grid:{display:false}}}}});
+  // ✅ STEP 4: Create fresh chart instance
+  try{
+    analyticsChart=new Chart(ctx,{type:"line",data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:11}}}},scales:{y:{beginAtZero:true,grid:{color:"rgba(0,0,0,0.04)"}},x:{grid:{display:false}}}}});
+  }catch(e){
+    console.error("Failed to create chart:",e);
+  }
 }
 
 // ═══ LEADERBOARD TAB ═══
