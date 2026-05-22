@@ -3279,51 +3279,89 @@ function handleForumPost(){
 
 // ═══ PROMISE TRACKER ═══
 // ═══ NOTICEBOARD ═══
-const NOTICES=[
-  {id:1,cat:"business",sponsored:true,emoji:"🛒",title:"Ngoliba Farmers' Market — Every Saturday",desc:"Fresh produce, dairy, and crafts from local farmers. Open 7AM–1PM at the Ngoliba Market grounds. Bring your own bag. Bulk orders welcome — call ahead.",contact:"0712 111 222",cta:"Get Directions",ctaHref:"#",date:"May 2025"},
-  {id:2,cat:"event",sponsored:false,emoji:"🎉",title:"Ngoliba Ward Youth Sports Day",desc:"Annual inter-sublocation football and athletics tournament. All youth aged 14–30 welcome to register. Prizes for top teams in each sublocation. Sponsored by Ngoliba Youth Fund.",contact:"Ward Office",cta:"Register Now",ctaHref:"#",date:"15 Jun 2025"},
-  {id:3,cat:"public",sponsored:false,emoji:"📢",title:"Water Rationing Notice — Kilimambogo",desc:"Kenya Water Authority advises that Kilimambogo sublocation will experience reduced water supply Mon–Wed each week for the next 30 days due to pipeline maintenance. Residents should store water accordingly.",contact:"0800 723 232",cta:"More Info",ctaHref:"#",date:"Ongoing"},
-  {id:4,cat:"jobs",sponsored:true,emoji:"💼",title:"Boda Boda Riders Wanted — Ngoliba Express",desc:"Ngoliba Express Logistics is recruiting 10 boda boda riders for parcel delivery within Ngoliba, Gatiiguru, and Kilimambogo. Must have valid licence. Earn KES 800–1,500 daily. Apply in person.",contact:"0798 456 789",cta:"Apply Today",ctaHref:"#",date:"Open now"},
-  {id:5,cat:"business",sponsored:true,emoji:"🏥",title:"Mama Care Clinic — New Branch Open",desc:"Quality maternal and child health services now available in Ngoliba Town. NHIF accepted. Ante-natal, postnatal, immunisation, and family planning services. Walk-ins welcome Monday–Saturday 8AM–6PM.",contact:"0700 987 654",cta:"Book Appointment",ctaHref:"#",date:"Jun 2025"},
-  {id:6,cat:"event",sponsored:false,emoji:"📚",title:"Free Adult Literacy Classes",desc:"The Linda Future Initiative is running free adult literacy and numeracy classes every Tuesday and Thursday evening at Ngoliba Primary School. All adults welcome. No registration fee.",contact:"Linda Future Initiative",cta:"Learn More",ctaHref:"#",date:"Ongoing"},
-];
+// ══ NOTICEBOARD — Live API-driven ══
+let activeNoticeFilter = "all";
+let _noticeCache = [];
 
-let activeNoticeFilter="all";
+const NOTICE_EMOJI = {
+  business: "🛒", event: "🎉", public: "📢", jobs: "💼", general: "📌"
+};
 
-function renderNoticeboardTab(){
-  // Filter buttons
-  document.querySelectorAll(".notice-filter").forEach(btn=>{
-    btn.onclick=()=>{
-      activeNoticeFilter=btn.dataset.nf;
-      document.querySelectorAll(".notice-filter").forEach(b=>b.classList.toggle("active",b.dataset.nf===activeNoticeFilter));
-      buildNotices();
+async function renderNoticeboardTab() {
+  // Wire filter buttons
+  document.querySelectorAll(".notice-filter").forEach(btn => {
+    btn.onclick = () => {
+      activeNoticeFilter = btn.dataset.nf;
+      document.querySelectorAll(".notice-filter").forEach(b =>
+        b.classList.toggle("active", b.dataset.nf === activeNoticeFilter));
+      buildNotices(_noticeCache);
     };
   });
-  buildNotices();
+
+  const grid = document.getElementById("noticesGrid");
+  if (grid) grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--mid-gray)"><i class="fas fa-spinner fa-spin"></i>&nbsp; Loading notices...</div>';
+
+  try {
+    const res = await fetch('/api/notices');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.success) {
+      _noticeCache = data.notices;
+      buildNotices(_noticeCache);
+    } else {
+      throw new Error(data.error || 'Unknown error');
+    }
+  } catch (err) {
+    console.error('Noticeboard fetch error:', err);
+    if (grid) grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--mid-gray)">⚠️ Could not load notices. Please refresh.</div>';
+  }
 }
 
-function buildNotices(){
-  const filtered=activeNoticeFilter==="all"?NOTICES:NOTICES.filter(n=>n.cat===activeNoticeFilter);
-  const grid=document.getElementById("noticesGrid");
-  const empty=document.getElementById("noticeEmpty");
-  if(!filtered.length){grid.innerHTML="";empty.classList.remove("hidden");return;}
-  empty.classList.add("hidden");
-  const catMap={business:{label:"Business",cls:"ncat-business"},event:{label:"Event",cls:"ncat-event"},public:{label:"Public Notice",cls:"ncat-public"},jobs:{label:"Jobs",cls:"ncat-jobs"}};
-  grid.innerHTML=filtered.map(n=>{
-    const cm=catMap[n.cat]||{label:n.cat,cls:""};
+function buildNotices(notices) {
+  const grid  = document.getElementById("noticesGrid");
+  const empty = document.getElementById("noticeEmpty");
+  if (!grid) return;
+
+  const filtered = activeNoticeFilter === "all"
+    ? notices
+    : notices.filter(n => n.category === activeNoticeFilter);
+
+  if (!filtered.length) {
+    grid.innerHTML = "";
+    if (empty) empty.classList.remove("hidden");
+    return;
+  }
+  if (empty) empty.classList.add("hidden");
+
+  const catMap = {
+    business: { label: "Business",      cls: "ncat-business" },
+    event:    { label: "Event",          cls: "ncat-event"    },
+    public:   { label: "Public Notice",  cls: "ncat-public"   },
+    jobs:     { label: "Jobs",           cls: "ncat-jobs"     },
+    general:  { label: "General",        cls: ""              }
+  };
+
+  grid.innerHTML = filtered.map(n => {
+    const cm      = catMap[n.category] || { label: n.category, cls: "" };
+    const emoji   = NOTICE_EMOJI[n.category] || "📌";
+    const isUrgent = n.priority === "high";
+    const dateStr = n.created_at
+      ? new Date(n.created_at).toLocaleDateString("en-KE", { day:"numeric", month:"short", year:"numeric" })
+      : "";
+    const safeTitle = n.title.replace(/'/g, "\'");
     return `<div class="notice-card scroll-reveal">
       <div class="notice-card-top">
         <span class="notice-cat-badge ${cm.cls}">${cm.label}</span>
-        ${n.sponsored?'<span class="notice-sponsored">Sponsored</span>':""}
+        ${isUrgent ? '<span class="notice-sponsored" style="background:#e63946;color:#fff">⚠ Urgent</span>' : ""}
       </div>
-      <div class="notice-card-img-placeholder">${n.emoji}</div>
+      <div class="notice-card-img-placeholder">${emoji}</div>
       <div class="notice-card-body">
         <div class="notice-card-title">${n.title}</div>
-        <div class="notice-card-desc">${n.desc}</div>
+        <div class="notice-card-desc">${n.content}</div>
       </div>
       <div class="notice-card-footer">
-        <div class="notice-meta"><strong>${n.contact}</strong><br>${n.date}</div>
-        <button class="notice-cta-btn" onclick="showToast('📌 ${n.title}','info')">${n.cta} →</button>
+        <div class="notice-meta"><strong>Posted</strong><br>${dateStr}</div>
+        <button class="notice-cta-btn" onclick="showToast('📌 ${safeTitle}','info')">Read More →</button>
       </div>
     </div>`;
   }).join("");

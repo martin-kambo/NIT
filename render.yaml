@@ -31,6 +31,10 @@ services:
       - key: ADMIN_PASSWORD_HASH
         sync: false
       
+      # Admin secret for notice management
+      - key: ADMIN_SECRET
+        sync: false  # Set manually in Render Dashboard
+
       # Optional - Africa's Talking
       - key: AFRICASTALKING_USERNAME
         sync: false

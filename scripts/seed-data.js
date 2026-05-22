@@ -87,6 +87,61 @@ async function seedForumSamplePosts() {
     }
 }
 
+
+async function seedNotices() {
+    console.log('📌 Seeding noticeboard notices...');
+
+    const notices = [
+        {
+            title: "Ngoliba Farmers Market - Every Saturday",
+            content: "Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at the Ngoliba Market grounds. Bring your own bag. Bulk orders welcome - call ahead. Contact: 0712 111 222",
+            category: "business", priority: "normal", days: 90
+        },
+        {
+            title: "Ngoliba Ward Youth Sports Day",
+            content: "Annual inter-sublocation football and athletics tournament. All youth aged 14-30 welcome to register. Prizes for top teams in each sublocation. Sponsored by Ngoliba Youth Fund. Contact: Ward Office",
+            category: "event", priority: "normal", days: 30
+        },
+        {
+            title: "Water Rationing Notice - Kilimambogo",
+            content: "Kenya Water Authority advises that Kilimambogo sublocation will experience reduced water supply Mon-Wed each week for the next 30 days due to pipeline maintenance. Residents should store water accordingly. Helpline: 0800 723 232",
+            category: "public", priority: "high", days: 30
+        },
+        {
+            title: "Boda Boda Riders Wanted - Ngoliba Express",
+            content: "Ngoliba Express Logistics is recruiting 10 boda boda riders for parcel delivery within Ngoliba, Gatiiguru, and Kilimambogo. Must have valid licence. Earn KES 800-1,500 daily. Apply in person at Ngoliba Town Centre. Contact: 0798 456 789",
+            category: "jobs", priority: "normal", days: 60
+        },
+        {
+            title: "Mama Care Clinic - New Branch Open",
+            content: "Quality maternal and child health services now available in Ngoliba Town. NHIF accepted. Ante-natal, postnatal, immunisation, and family planning services. Walk-ins welcome Monday-Saturday 8AM-6PM. Contact: 0700 987 654",
+            category: "business", priority: "normal", days: 90
+        },
+        {
+            title: "Free Adult Literacy Classes",
+            content: "The Linda Future Initiative is running free adult literacy and numeracy classes every Tuesday and Thursday evening at Ngoliba Primary School. All adults welcome. No registration fee required. Contact: Linda Future Initiative",
+            category: "event", priority: "normal", days: 60
+        }
+    ];
+
+    for (const n of notices) {
+        const exists = await pool.query(
+            'SELECT id FROM notices WHERE title = $1 LIMIT 1',
+            [n.title]
+        );
+        if (exists.rows.length === 0) {
+            await pool.query(
+                `INSERT INTO notices (title, content, category, priority, expires_at, created_by)
+                 VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL, 'seed')`,
+                [n.title, n.content, n.category, n.priority, String(n.days)]
+            );
+            console.log(`   Added notice: ${n.title}`);
+        } else {
+            console.log(`   Skipped (exists): ${n.title}`);
+        }
+    }
+}
+
 async function main() {
     try {
         console.log('🚀 Starting data seeding...\n');
@@ -95,6 +150,7 @@ async function main() {
         await seedAdminUser();
         await createInitialPeriod();
         await seedForumSamplePosts();
+        await seedNotices();
         
         console.log('\n✅ Seeding completed successfully!');
     } catch (error) {

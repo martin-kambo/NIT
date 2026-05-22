@@ -819,6 +819,81 @@ app.get('/api/faceoff', async (req, res) => {
   }
 });
 
+
+// ══════════════════════════════════════════════
+// GET /api/notices — fetch all active notices
+// ══════════════════════════════════════════════
+app.get('/api/notices', async (req, res) => {
+  try {
+    const { cat } = req.query;
+    let result;
+    if (cat && cat !== 'all') {
+      result = await pool.query(
+        `SELECT * FROM notices
+         WHERE (expires_at IS NULL OR expires_at > NOW())
+           AND category = $1
+         ORDER BY
+           CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+           created_at DESC`,
+        [cat]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT * FROM notices
+         WHERE (expires_at IS NULL OR expires_at > NOW())
+         ORDER BY
+           CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+           created_at DESC`
+      );
+    }
+    res.json({ success: true, notices: result.rows });
+  } catch (error) {
+    console.error('/api/notices GET error:', error);
+    res.status(500).json({ success: false, notices: [], error: error.message });
+  }
+});
+
+// ══════════════════════════════════════════════
+// POST /api/notices — admin: add a new notice
+// ══════════════════════════════════════════════
+app.post('/api/notices', async (req, res) => {
+  try {
+    const { title, content, category, priority, days, adminSecret } = req.body;
+    const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+    if (adminSecret !== secret) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+    if (!title || !content) {
+      return res.status(400).json({ success: false, error: 'title and content are required' });
+    }
+    const result = await pool.query(
+      `INSERT INTO notices (title, content, category, priority, expires_at, created_by)
+       VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL, 'admin')
+       RETURNING *`,
+      [title, content, category || 'general', priority || 'normal', String(days || 30)]
+    );
+    res.json({ success: true, notice: result.rows[0] });
+  } catch (error) {
+    console.error('/api/notices POST error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/notices/:id — admin: remove a notice
+app.delete('/api/notices/:id', async (req, res) => {
+  try {
+    const { adminSecret } = req.body;
+    const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+    if (adminSecret !== secret) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+    await pool.query('DELETE FROM notices WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 const server = app.listen(PORT, () => {
   console.log(`✅ Ngoliba InfoTrack server running on port ${PORT}`);
   console.log(`📚 Database: PostgreSQL (check connection above)`);
