@@ -4712,7 +4712,7 @@ window.renderLeaderboard = async function(){
         <div class="lb-row" style="animation-delay: ${i * 0.05}s;">
           <span class="lb-rank">#${i + 1}</span>
           <div class="lb-candidate">
-            <img src="${c.photo}" alt="${c.name}" class="lb-photo">
+            <img src="${c.img}" alt="${c.name}" class="lb-photo">
             <span class="lb-name">${c.name}</span>
           </div>
           <span class="lb-votes">${votesByCandidate[c.id] || 0}</span>
@@ -4949,13 +4949,13 @@ window.renderFaceoff = async function(){
       if (container) {
         container.innerHTML = `
           <div class="faceoff-card" data-candidate-id="${first.id}">
-            <img src="${first.photo}" alt="${first.name}">
+            <img src="${first.img}" alt="${first.name}">
             <h3>${first.name}</h3>
             <p class="votes">${votesByCandidate[first.id] || 0} votes</p>
           </div>
           <div class="faceoff-vs">VS</div>
           <div class="faceoff-card" data-candidate-id="${second.id}">
-            <img src="${second.photo}" alt="${second.name}">
+            <img src="${second.img}" alt="${second.name}">
             <h3>${second.name}</h3>
             <p class="votes">${votesByCandidate[second.id] || 0} votes</p>
           </div>
@@ -5095,7 +5095,7 @@ window.initOverlayStats = async function(){
     if (!strip) return;
     
     const chips = [...CANDIDATES, ...CANDIDATES]
-      .map(c => `<div class="overlay-cand-chip"><img src="${c.photo}" alt="${c.name}"><span>${c.name.split(" ")[0]}</span></div>`)
+      .map(c => `<div class="overlay-cand-chip"><img src="${c.img}" alt="${c.name}"><span>${c.name.split(" ")[0]}</span></div>`)
       .join("");
     strip.innerHTML = chips;
   } catch (error) {
