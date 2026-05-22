@@ -251,8 +251,11 @@ async function ensureActivePeriod() {
       const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
       
       await pool.query(`
-        INSERT INTO voting_periods (period_start, period_end, is_active, total_votes)
-        VALUES ($1, $2, true, 0)
+        INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+        VALUES (
+          COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
+          $1, $2, true, 0
+        )
       `, [now, endTime]);
       
       console.log('✅ Active voting period created');
