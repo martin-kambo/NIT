@@ -956,7 +956,27 @@ app.delete('/api/notices/:id', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+// ══ ADMIN AUTH ══
+app.post('/api/admin', async (req, res) => {
+  const { action, password, token } = req.body;
 
+  if (action === 'admin_login') {
+    const adminHash = process.env.ADMIN_PASSWORD_HASH;
+    const inputHash = crypto.createHash('sha256').update(password).digest('hex').toUpperCase();
+
+    if (!adminHash || inputHash !== adminHash.toUpperCase()) {
+      return res.status(401).json({ success: false, error: 'Invalid password' });
+    }
+
+    // Issue a signed admin token valid for 8 hours
+    const payload = { role: 'admin', exp: Date.now() + 8 * 60 * 60 * 1000 };
+    const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64');
+    const sig = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(payloadB64).digest('base64');
+    return res.json({ success: true, token: `${payloadB64}.${sig}` });
+  }
+
+  return res.status(400).json({ success: false, error: 'Unknown action' });
+});
 const server = app.listen(PORT, () => {
   console.log(`✅ Ngoliba InfoTrack server running on port ${PORT}`);
   console.log(`📚 Database: PostgreSQL (check connection above)`);
