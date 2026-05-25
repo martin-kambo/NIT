@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notice Board - Ngoliba InfoTrack</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1e40af;
+            --secondary: #64748b;
+            --success: #16a34a;
+            --danger: #dc2626;
+            --warning: #ea580c;
+            --info: #0284c7;
+            --light: #f1f5f9;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --radius: 8px;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* HEADER */
+        header {
+            background: white;
+            padding: 24px 0;
+            margin-bottom: 32px;
+            box-shadow: var(--shadow-lg);
+            border-radius: var(--radius);
+        }
+
+        header .container {
+            padding: 24px 20px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: var(--text-light);
+            font-size: 14px;
+        }
+
+        /* MAIN CONTENT */
+        main {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 32px;
+            align-items: start;
+        }
+
+        @media (max-width: 768px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* FILTERS SIDEBAR */
+        .filters-section {
+            background: white;
+            padding: 24px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            height: fit-content;
+            position: sticky;
+            top: 20px;
+        }
+
+        .filters-section h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: var(--text);
+        }
+
+        .filter-group {
+            margin-bottom: 24px;
+        }
+
+        .filter-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+            color: var(--text);
+            transition: all 0.2s;
+        }
+
+        .filter-group select:hover,
+        .filter-group input:hover {
+            border-color: var(--primary);
+        }
+
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-secondary {
+            background: var(--light);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: #e2e8f0;
+        }
+
+        /* CONTENT SECTION */
+        .content-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* NOTICE CARD */
+        .notice-card {
+            background: white;
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            border-left: 4px solid;
+            transition: all 0.3s ease;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .notice-card:hover {
+            box-shadow: var(--shadow-lg);
+            transform: translateY(-2px);
+        }
+
+        .notice-card.business {
+            border-left-color: var(--info);
+        }
+
+        .notice-card.event {
+            border-left-color: var(--success);
+        }
+
+        .notice-card.public {
+            border-left-color: var(--danger);
+        }
+
+        .notice-card.jobs {
+            border-left-color: var(--warning);
+        }
+
+        .notice-card.general {
+            border-left-color: var(--secondary);
+        }
+
+        .notice-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .notice-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text);
+            margin: 0;
+            flex: 1;
+        }
+
+        .notice-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .badge-category {
+            background: var(--light);
+            color: var(--text);
+            text-transform: capitalize;
+        }
+
+        .badge-priority-high {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .badge-priority-normal {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .badge-priority-low {
+            background: #f0fdf4;
+            color: #166534;
+        }
+
+        .notice-content {
+            color: var(--text);
+            margin-bottom: 16px;
+            line-height: 1.6;
+            max-height: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .notice-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-light);
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .notice-meta {
+            display: flex;
+            gap: 16px;
+        }
+
+        .notice-expiry {
+            font-weight: 600;
+        }
+
+        .notice-expiry.expiring-soon {
+            color: var(--danger);
+        }
+
+        /* EMPTY STATE */
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state h3 {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            color: var(--text-light);
+        }
+
+        /* PAGINATION */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            align-items: center;
+            padding: 24px;
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .pagination button {
+            width: 40px;
+            height: 40px;
+            border: 1px solid var(--border);
+            background: white;
+            color: var(--text);
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination button.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .pagination .page-info {
+            color: var(--text-light);
+            font-size: 14px;
+            margin: 0 12px;
+        }
+
+        /* LOADING STATE */
+        .loading {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            grid-column: 2;
+        }
+
+        @media (max-width: 768px) {
+            .loading {
+                grid-column: 1;
+            }
+        }
+
+        .loading-card {
+            background: white;
+            border-radius: var(--radius);
+            padding: 24px;
+            height: 200px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+
+        /* STATUS MESSAGE */
+        .status-message {
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-message.success {
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .status-message.info {
+            background: #dbeafe;
+            color: #0c4a6e;
+            border: 1px solid #bfdbfe;
+        }
+
+        .status-message.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        .status-message.hidden {
+            display: none;
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 480px) {
+            h1 {
+                font-size: 22px;
+            }
+
+            .notice-card {
+                padding: 16px;
+            }
+
+            .notice-title {
+                font-size: 16px;
+            }
+
+            .notice-header {
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .notice-badges {
+                justify-content: flex-start;
+            }
+
+            .pagination {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header>
+        <div class="container">
+            <h1>📢 Notice Board</h1>
+            <p class="subtitle">Community announcements, events, and important notices</p>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <div class="container">
+        <main>
+            <!-- FILTERS -->
+            <aside class="filters-section">
+                <h2>Filters</h2>
+
+                <!-- SEARCH -->
+                <div class="filter-group">
+                    <label for="search">Search Notices</label>
+                    <input 
+                        type="text" 
+                        id="search" 
+                        placeholder="Search by title or content..."
+                        autocomplete="off"
+                    >
+                </div>
+
+                <!-- CATEGORY FILTER -->
+                <div class="filter-group">
+                    <label for="category">Category</label>
+                    <select id="category">
+                        <option value="all">All Categories</option>
+                        <option value="business">🏪 Business</option>
+                        <option value="event">🎉 Events</option>
+                        <option value="public">📋 Public</option>
+                        <option value="jobs">💼 Jobs</option>
+                        <option value="general">📝 General</option>
+                    </select>
+                </div>
+
+                <!-- PRIORITY FILTER -->
+                <div class="filter-group">
+                    <label for="priority">Priority</label>
+                    <select id="priority">
+                        <option value="all">All Priorities</option>
+                        <option value="high">🔴 High</option>
+                        <option value="normal">⚪ Normal</option>
+                        <option value="low">🟢 Low</option>
+                    </select>
+                </div>
+
+                <!-- BUTTONS -->
+                <button class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
+                <button class="btn btn-secondary" style="margin-top: 8px;" onclick="clearFilters()">Clear All</button>
+
+                <hr style="margin: 24px 0; border: none; border-top: 1px solid var(--border);">
+
+                <!-- REAL-TIME STATUS -->
+                <div style="padding: 12px; background: var(--light); border-radius: 6px; font-size: 12px;">
+                    <div style="color: var(--success); font-weight: 600; margin-bottom: 4px;">
+                        ✓ Real-time Updates
+                    </div>
+                    <div style="color: var(--text-light);">
+                        New notices appear automatically
+                    </div>
+                </div>
+            </aside>
+
+            <!-- CONTENT -->
+            <section class="content-section">
+                <!-- STATUS MESSAGE -->
+                <div id="statusMessage" class="status-message hidden"></div>
+
+                <!-- NOTICES GRID -->
+                <div id="noticesContainer"></div>
+
+                <!-- EMPTY STATE -->
+                <div id="emptyState" class="empty-state hidden">
+                    <div class="empty-state-icon">📭</div>
+                    <h3>No Notices Found</h3>
+                    <p>Try adjusting your filters or check back later for updates</p>
+                </div>
+
+                <!-- PAGINATION -->
+                <div id="paginationContainer" class="hidden"></div>
+            </section>
+        </main>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script>
+        // ─────────────────────────────────────────
+        // STATE MANAGEMENT
+        // ─────────────────────────────────────────
+
+        const state = {
+            notices: [],
+            page: 1,
+            limit: 10,
+            total: 0,
+            totalPages: 0,
+            filters: {
+                category: 'all',
+                priority: 'all',
+                search: ''
+            },
+            isLoading: false
+        };
+
+        // ─────────────────────────────────────────
+        // API CALLS
+        // ─────────────────────────────────────────
+
+        /**
+         * Fetch notices from API with current filters
+         */
+        async function fetchNotices(pageNum = 1) {
+            try {
+                state.isLoading = true;
+                state.page = pageNum;
+
+                // Build query string
+                const params = new URLSearchParams();
+                params.append('page', pageNum);
+                params.append('limit', state.limit);
+
+                if (state.filters.category !== 'all') {
+                    params.append('category', state.filters.category);
+                }
+                if (state.filters.priority !== 'all') {
+                    params.append('priority', state.filters.priority);
+                }
+                if (state.filters.search.trim()) {
+                    params.append('search', state.filters.search);
+                }
+
+                const response = await fetch(`/api/notices?${params}`);
+                const json = await response.json();
+
+                if (!json.success) throw new Error(json.error);
+
+                state.notices = json.data.notices;
+                state.total = json.data.pagination.total;
+                state.totalPages = json.data.pagination.totalPages;
+
+                renderNotices();
+                renderPagination();
+
+                showStatus(`Loaded ${state.notices.length} notices`, 'success');
+
+            } catch (error) {
+                console.error('Error fetching notices:', error);
+                showStatus('Failed to load notices: ' + error.message, 'error');
+                renderEmptyState();
+            } finally {
+                state.isLoading = false;
+            }
+        }
+
+        // ─────────────────────────────────────────
+        // RENDERING
+        // ─────────────────────────────────────────
+
+        /**
+         * Render notices in grid
+         */
+        function renderNotices() {
+            const container = document.getElementById('noticesContainer');
+            const emptyState = document.getElementById('emptyState');
+
+            if (state.notices.length === 0) {
+                container.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+
+            container.innerHTML = state.notices.map(notice => `
+                <div class="notice-card ${notice.category}">
+                    <div class="notice-header">
+                        <h3 class="notice-title">${escapeHTML(notice.title)}</h3>
+                        <div class="notice-badges">
+                            <span class="badge badge-category">${notice.category}</span>
+                            <span class="badge badge-priority-${notice.priority}">
+                                ${notice.priority.charAt(0).toUpperCase() + notice.priority.slice(1)}
+                            </span>
+                        </div>
+                    </div>
+
+                    <p class="notice-content">${escapeHTML(notice.content)}</p>
+
+                    <div class="notice-footer">
+                        <div class="notice-meta">
+                            <div>📅 ${formatDate(notice.createdAt)}</div>
+                            ${notice.expiresAt ? `
+                                <div class="notice-expiry ${notice.daysUntilExpiry <= 7 ? 'expiring-soon' : ''}">
+                                    ⏰ Expires in ${notice.daysUntilExpiry} days
+                                </div>
+                            ` : '<div>♾️ No expiration</div>'}
+                        </div>
+                        <div>${notice.createdBy}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        /**
+         * Render pagination controls
+         */
+        function renderPagination() {
+            const container = document.getElementById('paginationContainer');
+
+            if (state.totalPages <= 1) {
+                container.classList.add('hidden');
+                return;
+            }
+
+            container.classList.remove('hidden');
+
+            let html = '<button onclick="fetchNotices(1)" ' + 
+                       (state.page === 1 ? 'disabled' : '') + 
+                       '>« First</button>';
+
+            html += '<button onclick="fetchNotices(' + (state.page - 1) + ')" ' +
+                    (state.page === 1 ? 'disabled' : '') +
+                    '>‹ Prev</button>';
+
+            // Show page numbers
+            const startPage = Math.max(1, state.page - 2);
+            const endPage = Math.min(state.totalPages, state.page + 2);
+
+            if (startPage > 1) html += '<span class="page-info">...</span>';
+
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button onclick="fetchNotices(${i})" class="${i === state.page ? 'active' : ''}">
+                    ${i}
+                </button>`;
+            }
+
+            if (endPage < state.totalPages) html += '<span class="page-info">...</span>';
+
+            html += '<button onclick="fetchNotices(' + (state.page + 1) + ')" ' +
+                    (state.page === state.totalPages ? 'disabled' : '') +
+                    '>Next ›</button>';
+
+            html += '<button onclick="fetchNotices(' + state.totalPages + ')" ' +
+                    (state.page === state.totalPages ? 'disabled' : '') +
+                    '>Last »</button>';
+
+            html += `<span class="page-info">Page ${state.page} of ${state.totalPages}</span>`;
+
+            container.innerHTML = html;
+        }
+
+        /**
+         * Show empty state
+         */
+        function renderEmptyState() {
+            document.getElementById('noticesContainer').innerHTML = '';
+            document.getElementById('emptyState').classList.remove('hidden');
+        }
+
+        // ─────────────────────────────────────────
+        // FILTER MANAGEMENT
+        // ─────────────────────────────────────────
+
+        function applyFilters() {
+            state.filters.category = document.getElementById('category').value;
+            state.filters.priority = document.getElementById('priority').value;
+            state.filters.search = document.getElementById('search').value;
+            fetchNotices(1); // Reset to page 1
+        }
+
+        function clearFilters() {
+            document.getElementById('category').value = 'all';
+            document.getElementById('priority').value = 'all';
+            document.getElementById('search').value = '';
+            state.filters = { category: 'all', priority: 'all', search: '' };
+            fetchNotices(1);
+        }
+
+        // ─────────────────────────────────────────
+        // REAL-TIME UPDATES (SSE)
+        // ─────────────────────────────────────────
+
+        function connectSSE() {
+            try {
+                const eventSource = new EventSource('/api/notices/stream');
+
+                eventSource.addEventListener('notice-created', (event) => {
+                    const notice = JSON.parse(event.data);
+                    console.log('Notice created:', notice);
+                    // Reload notices to show new one
+                    fetchNotices(1);
+                    showStatus('✨ New notice posted!', 'info');
+                });
+
+                eventSource.addEventListener('notice-updated', (event) => {
+                    const notice = JSON.parse(event.data);
+                    console.log('Notice updated:', notice);
+                    // Reload current page
+                    fetchNotices(state.page);
+                    showStatus('📝 Notice updated', 'info');
+                });
+
+                eventSource.addEventListener('notice-deleted', (event) => {
+                    const { id } = JSON.parse(event.data);
+                    console.log('Notice deleted:', id);
+                    // Reload current page
+                    fetchNotices(state.page);
+                    showStatus('🗑️ Notice removed', 'info');
+                });
+
+                eventSource.addEventListener('connected', () => {
+                    console.log('Connected to real-time updates');
+                });
+
+                eventSource.onerror = () => {
+                    console.error('SSE connection error');
+                    eventSource.close();
+                    // Retry after 5 seconds
+                    setTimeout(connectSSE, 5000);
+                };
+
+            } catch (error) {
+                console.error('SSE connection failed:', error);
+            }
+        }
+
+        // ─────────────────────────────────────────
+        // UTILITIES
+        // ─────────────────────────────────────────
+
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.className = `status-message ${type}`;
+            statusEl.innerHTML = `<span>${message}</span>`;
+            statusEl.classList.remove('hidden');
+
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                statusEl.classList.add('hidden');
+            }, 5000);
+        }
+
+        function escapeHTML(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+        }
+
+        // ─────────────────────────────────────────
+        // INITIALIZATION
+        // ─────────────────────────────────────────
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Load initial notices
+            fetchNotices(1);
+
+            // Connect to real-time updates
+            connectSSE();
+
+            // Add enter key to search input
+            document.getElementById('search').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    applyFilters();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

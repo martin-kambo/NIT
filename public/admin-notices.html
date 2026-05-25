@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Notice Board</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1e40af;
+            --danger: #dc2626;
+            --success: #16a34a;
+            --warning: #ea580c;
+            --light: #f1f5f9;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --radius: 8px;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* LOGIN SCREEN */
+        .login-screen {
+            background: white;
+            border-radius: var(--radius);
+            padding: 40px;
+            box-shadow: var(--shadow-lg);
+            max-width: 400px;
+            margin: 100px auto 0;
+        }
+
+        .login-screen h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .login-screen p {
+            color: var(--text-light);
+            margin-bottom: 32px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        input[type="password"],
+        input[type="text"],
+        input[type="email"],
+        input[type="date"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-secondary {
+            background: var(--light);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: #e2e8f0;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #b91c1c;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #15803d;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* ADMIN SCREEN */
+        .admin-screen {
+            display: none;
+        }
+
+        .admin-screen.active {
+            display: block;
+        }
+
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: var(--radius);
+            margin-bottom: 32px;
+            box-shadow: var(--shadow);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-size: 24px;
+            margin: 0;
+        }
+
+        .logout-btn {
+            background: var(--danger);
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .logout-btn:hover {
+            background: #b91c1c;
+        }
+
+        .admin-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 32px;
+            align-items: start;
+        }
+
+        @media (max-width: 768px) {
+            .admin-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* FORM PANEL */
+        .form-panel {
+            background: white;
+            padding: 32px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .form-panel h2 {
+            font-size: 20px;
+            margin-bottom: 24px;
+            color: var(--text);
+        }
+
+        /* NOTICES LIST */
+        .notices-list {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .notices-list-header {
+            background: var(--light);
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .notices-list-header h2 {
+            font-size: 18px;
+            margin: 0;
+        }
+
+        .notice-item {
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            transition: background 0.2s;
+        }
+
+        .notice-item:hover {
+            background: var(--light);
+        }
+
+        .notice-item:last-child {
+            border-bottom: none;
+        }
+
+        .notice-info h3 {
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        .notice-info p {
+            color: var(--text-light);
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .notice-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: var(--light);
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+
+        .notice-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* ALERT MESSAGES */
+        .alert {
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .alert.show {
+            display: block;
+        }
+
+        .alert-success {
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .alert-error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        .alert-info {
+            background: #dbeafe;
+            color: #0c4a6e;
+            border: 1px solid #bfdbfe;
+        }
+
+        /* LOADING STATE */
+        .spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* EMPTY STATE */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-light);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        /* MODAL CONFIRMATION */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 32px;
+            border-radius: var(--radius);
+            width: 90%;
+            max-width: 400px;
+        }
+
+        .modal-content h2 {
+            margin-bottom: 16px;
+        }
+
+        .modal-content p {
+            color: var(--text-light);
+            margin-bottom: 24px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        /* FORM SECTIONS */
+        .form-section {
+            margin-bottom: 32px;
+            padding-bottom: 32px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .form-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .form-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-light);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        @media (max-width: 480px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* CHARACTER COUNTER */
+        .char-counter {
+            font-size: 12px;
+            color: var(--text-light);
+            margin-top: 4px;
+        }
+
+        .char-counter.warning {
+            color: var(--warning);
+        }
+
+        .char-counter.error {
+            color: var(--danger);
+        }
+    </style>
+</head>
+<body>
+    <!-- LOGIN SCREEN -->
+    <div id="loginScreen" class="login-screen">
+        <h1>🔐 Admin Panel</h1>
+        <p>Enter your password to manage notices</p>
+        
+        <div id="loginAlert" class="alert"></div>
+        
+        <form onsubmit="handleLogin(event)">
+            <div class="form-group">
+                <label for="password">Admin Password</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    placeholder="Enter admin password"
+                    required
+                    autocomplete="off"
+                >
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <span id="loginBtn">Login</span>
+            </button>
+        </form>
+    </div>
+
+    <!-- ADMIN SCREEN -->
+    <div id="adminScreen" class="admin-screen">
+        <header>
+            <h1>📢 Admin Panel - Notice Management</h1>
+            <button class="logout-btn" onclick="handleLogout()">Logout</button>
+        </header>
+
+        <div class="container">
+            <div id="adminAlert" class="alert"></div>
+
+            <div class="admin-grid">
+                <!-- CREATE/EDIT FORM -->
+                <div class="form-panel">
+                    <h2 id="formTitle">Create New Notice</h2>
+
+                    <form id="noticeForm" onsubmit="handleSubmit(event)">
+                        <div class="form-section">
+                            <h3>Basic Information</h3>
+
+                            <div class="form-group">
+                                <label for="title">Title <span style="color: var(--danger);">*</span></label>
+                                <input 
+                                    type="text" 
+                                    id="title" 
+                                    placeholder="Notice title"
+                                    required
+                                    maxlength="200"
+                                >
+                                <div class="char-counter">
+                                    <span id="titleCount">0</span> / 200
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="content">Content <span style="color: var(--danger);">*</span></label>
+                                <textarea 
+                                    id="content" 
+                                    placeholder="Full notice content"
+                                    rows="6"
+                                    required
+                                    maxlength="5000"
+                                ></textarea>
+                                <div class="char-counter">
+                                    <span id="contentCount">0</span> / 5000
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h3>Classification</h3>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="category">Category <span style="color: var(--danger);">*</span></label>
+                                    <select id="category" required>
+                                        <option value="general">General</option>
+                                        <option value="business">🏪 Business</option>
+                                        <option value="event">🎉 Event</option>
+                                        <option value="public">📋 Public</option>
+                                        <option value="jobs">💼 Jobs</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="priority">Priority <span style="color: var(--danger);">*</span></label>
+                                    <select id="priority" required>
+                                        <option value="normal">Normal</option>
+                                        <option value="high">🔴 High</option>
+                                        <option value="low">🟢 Low</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h3>Expiration</h3>
+
+                            <div class="form-group">
+                                <label for="expiresAt">Expires At (optional)</label>
+                                <input 
+                                    type="datetime-local" 
+                                    id="expiresAt"
+                                >
+                                <p style="color: var(--text-light); font-size: 12px; margin-top: 8px;">
+                                    Leave empty for no expiration
+                                </p>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 8px;">
+                            <button type="submit" class="btn btn-success" id="submitBtn">Create Notice</button>
+                            <button type="button" class="btn btn-secondary" id="cancelBtn" onclick="resetForm()" style="display: none;">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- NOTICES LIST -->
+                <div class="notices-list">
+                    <div class="notices-list-header">
+                        <h2>Recent Notices</h2>
+                    </div>
+                    
+                    <div id="noticesContainer">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📭</div>
+                            <p>Loading notices...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DELETE CONFIRMATION MODAL -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <h2>Delete Notice?</h2>
+            <p>This action cannot be undone. The notice will be permanently archived.</p>
+            <p id="deleteNoticeTitle" style="font-weight: 600; color: var(--text);"></p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="confirmDelete()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ─────────────────────────────────────────
+        // STATE
+        // ─────────────────────────────────────────
+
+        const state = {
+            isAuthenticated: false,
+            adminPassword: '',
+            notices: [],
+            editingId: null,
+            deleteId: null
+        };
+
+        // ─────────────────────────────────────────
+        // AUTHENTICATION
+        // ─────────────────────────────────────────
+
+        function handleLogin(event) {
+            event.preventDefault();
+            const password = document.getElementById('password').value;
+            
+            if (!password) {
+                showAlert('loginAlert', 'Please enter a password', 'error');
+                return;
+            }
+
+            // Store password for API requests
+            state.adminPassword = password;
+            state.isAuthenticated = true;
+
+            // Hide login, show admin
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('adminScreen').classList.add('active');
+
+            // Load notices
+            loadNotices();
+        }
+
+        function handleLogout() {
+            state.isAuthenticated = false;
+            state.adminPassword = '';
+            state.editingId = null;
+
+            document.getElementById('loginScreen').style.display = 'block';
+            document.getElementById('adminScreen').classList.remove('active');
+            document.getElementById('password').value = '';
+            resetForm();
+        }
+
+        // ─────────────────────────────────────────
+        // API CALLS
+        // ─────────────────────────────────────────
+
+        async function loadNotices() {
+            try {
+                const response = await fetch('/api/admin/notices', {
+                    headers: {
+                        'x-admin-password': state.adminPassword
+                    }
+                });
+
+                const json = await response.json();
+
+                if (!json.success) {
+                    if (response.status === 401) {
+                        showAlert('adminAlert', 'Invalid password', 'error');
+                        handleLogout();
+                        return;
+                    }
+                    throw new Error(json.error);
+                }
+
+                state.notices = json.data.notices;
+                renderNotices();
+            } catch (error) {
+                showAlert('adminAlert', 'Failed to load notices: ' + error.message, 'error');
+            }
+        }
+
+        async function handleSubmit(event) {
+            event.preventDefault();
+
+            const title = document.getElementById('title').value.trim();
+            const content = document.getElementById('content').value.trim();
+            const category = document.getElementById('category').value;
+            const priority = document.getElementById('priority').value;
+            const expiresAt = document.getElementById('expiresAt').value;
+
+            // Validation
+            if (!title || title.length < 5) {
+                showAlert('adminAlert', 'Title must be at least 5 characters', 'error');
+                return;
+            }
+            if (!content || content.length < 10) {
+                showAlert('adminAlert', 'Content must be at least 10 characters', 'error');
+                return;
+            }
+
+            try {
+                const method = state.editingId ? 'PUT' : 'POST';
+                const url = state.editingId 
+                    ? `/api/admin/notices/${state.editingId}`
+                    : '/api/admin/notices';
+
+                const response = await fetch(url, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-admin-password': state.adminPassword
+                    },
+                    body: JSON.stringify({
+                        title,
+                        content,
+                        category,
+                        priority,
+                        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null
+                    })
+                });
+
+                const json = await response.json();
+
+                if (!json.success) {
+                    throw new Error(json.error);
+                }
+
+                showAlert('adminAlert', 
+                    state.editingId ? 'Notice updated successfully' : 'Notice created successfully', 
+                    'success'
+                );
+                
+                resetForm();
+                loadNotices();
+
+            } catch (error) {
+                showAlert('adminAlert', 'Failed to save notice: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteNotice(id) {
+            try {
+                const response = await fetch(`/api/admin/notices/${id}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'x-admin-password': state.adminPassword
+                    }
+                });
+
+                const json = await response.json();
+
+                if (!json.success) {
+                    throw new Error(json.error);
+                }
+
+                showAlert('adminAlert', 'Notice deleted successfully', 'success');
+                loadNotices();
+                closeModal();
+
+            } catch (error) {
+                showAlert('adminAlert', 'Failed to delete notice: ' + error.message, 'error');
+            }
+        }
+
+        // ─────────────────────────────────────────
+        // RENDERING
+        // ─────────────────────────────────────────
+
+        function renderNotices() {
+            const container = document.getElementById('noticesContainer');
+
+            if (state.notices.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <p>No notices yet. Create one above!</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = state.notices.map(notice => `
+                <div class="notice-item">
+                    <div class="notice-info">
+                        <h3>${escapeHTML(notice.title)}</h3>
+                        <p>${escapeHTML(notice.content.substring(0, 100))}...</p>
+                        <div class="notice-badges">
+                            <span class="badge">${notice.category}</span>
+                            <span class="badge">${notice.priority}</span>
+                            ${notice.isArchived ? '<span class="badge" style="background: #fecaca; color: #991b1b;">Archived</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="notice-actions">
+                        <button class="btn btn-secondary btn-small" onclick="editNotice('${notice.id}')">
+                            Edit
+                        </button>
+                        <button class="btn btn-danger btn-small" onclick="openDeleteModal('${notice.id}')">
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function editNotice(id) {
+            const notice = state.notices.find(n => n.id === id);
+            if (!notice) return;
+
+            state.editingId = id;
+
+            document.getElementById('formTitle').textContent = 'Edit Notice';
+            document.getElementById('title').value = notice.title;
+            document.getElementById('content').value = notice.content;
+            document.getElementById('category').value = notice.category;
+            document.getElementById('priority').value = notice.priority;
+            
+            if (notice.expiresAt) {
+                const date = new Date(notice.expiresAt);
+                document.getElementById('expiresAt').value = date.toISOString().slice(0, 16);
+            }
+
+            document.getElementById('submitBtn').textContent = 'Update Notice';
+            document.getElementById('cancelBtn').style.display = 'inline-block';
+
+            // Scroll to form
+            document.querySelector('.form-panel').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function resetForm() {
+            state.editingId = null;
+            document.getElementById('noticeForm').reset();
+            document.getElementById('formTitle').textContent = 'Create New Notice';
+            document.getElementById('submitBtn').textContent = 'Create Notice';
+            document.getElementById('cancelBtn').style.display = 'none';
+            document.getElementById('titleCount').textContent = '0';
+            document.getElementById('contentCount').textContent = '0';
+        }
+
+        // ─────────────────────────────────────────
+        // UTILITIES
+        // ─────────────────────────────────────────
+
+        function showAlert(elementId, message, type) {
+            const alert = document.getElementById(elementId);
+            alert.textContent = message;
+            alert.className = `alert alert-${type} show`;
+
+            setTimeout(() => {
+                alert.classList.remove('show');
+            }, 5000);
+        }
+
+        function escapeHTML(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function openDeleteModal(id) {
+            const notice = state.notices.find(n => n.id === id);
+            state.deleteId = id;
+            document.getElementById('deleteNoticeTitle').textContent = notice.title;
+            document.getElementById('deleteModal').classList.add('show');
+        }
+
+        function closeModal() {
+            document.getElementById('deleteModal').classList.remove('show');
+            state.deleteId = null;
+        }
+
+        function confirmDelete() {
+            if (state.deleteId) {
+                deleteNotice(state.deleteId);
+            }
+        }
+
+        // ─────────────────────────────────────────
+        // CHARACTER COUNTERS
+        // ─────────────────────────────────────────
+
+        document.getElementById('title').addEventListener('input', (e) => {
+            document.getElementById('titleCount').textContent = e.target.value.length;
+        });
+
+        document.getElementById('content').addEventListener('input', (e) => {
+            document.getElementById('contentCount').textContent = e.target.value.length;
+        });
+
+        // ─────────────────────────────────────────
+        // INITIALIZATION
+        // ─────────────────────────────────────────
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('password').focus();
+        });
+    </script>
+</body>
+</html>

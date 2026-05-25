@@ -151,12 +151,15 @@ async function initDB() {
 
       CREATE TABLE IF NOT EXISTS notices (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        title VARCHAR(200),
-        content TEXT,
+        title VARCHAR(200) NOT NULL,
+        content TEXT NOT NULL,
         category VARCHAR(50) DEFAULT 'general',
         priority VARCHAR(20) DEFAULT 'normal',
-        expires_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT NOW()
+        expires_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        created_by VARCHAR(100),
+        is_archived BOOLEAN DEFAULT FALSE
       );
 
       CREATE TABLE IF NOT EXISTS ad_requests (
@@ -198,6 +201,66 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    
+    // ✅ FIX 2: Create indexes for better query performance
+    console.log('📊 Creating database indexes...');
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_notices_category ON notices(category);
+      CREATE INDEX IF NOT EXISTS idx_notices_priority ON notices(priority);
+      CREATE INDEX IF NOT EXISTS idx_notices_expires ON notices(expires_at) WHERE expires_at IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_notices_created ON notices(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_notices_archived ON notices(is_archived);
+    `);
+    
+    // ✅ FIX 3: Insert sample notices data for testing
+    console.log('📋 Seeding sample notices...');
+    const noticeCount = await pool.query('SELECT COUNT(*) FROM notices');
+    if (parseInt(noticeCount.rows[0].count) === 0) {
+      await pool.query(`
+        INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
+        (
+          'Ngoliba Farmers Market - Every Saturday',
+          'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at the Ngoliba Market grounds. Bulk orders welcome. Contact: 0712 111 222',
+          'business',
+          'normal',
+          NOW() + INTERVAL '90 days',
+          'system'
+        ),
+        (
+          'Water Rationing Notice - Kilimambogo',
+          'Kenya Water Authority advises that Kilimambogo sublocation will experience reduced water supply Mon-Wed for 30 days due to pipeline maintenance. Residents should store water accordingly. Helpline: 0800 723 232',
+          'public',
+          'high',
+          NOW() + INTERVAL '30 days',
+          'system'
+        ),
+        (
+          'Boda Boda Riders Wanted - Ngoliba Express',
+          'Ngoliba Express Logistics is recruiting 10 boda boda riders for parcel delivery. Must have valid licence. Earn KES 800-1,500 daily. Apply in person at Ngoliba Town Centre. Contact: 0798 456 789',
+          'jobs',
+          'normal',
+          NOW() + INTERVAL '60 days',
+          'system'
+        ),
+        (
+          'Community Health Camp - Mwea Ward',
+          'Free health screening and vaccination services. Dates: First Saturday of every month. Location: Mwea Ward Market. Services: Blood pressure check, BMI assessment, Immunizations. Bring ID. Contact: 0789 654 321',
+          'health',
+          'normal',
+          NOW() + INTERVAL '120 days',
+          'system'
+        ),
+        (
+          'Road Maintenance - Ngoliba-Ruiru Highway',
+          'Notice: The Ngoliba-Ruiru main highway will be under maintenance from June 15-22, 2024. Expect delays. Alternative routes recommended. Updates: www.krb.go.ke',
+          'public',
+          'high',
+          NOW() + INTERVAL '45 days',
+          'system'
+        );
+      `);
+      console.log('✅ Sample notices inserted');
+    }
     
     // Initialize metadata
     await pool.query(
