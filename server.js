@@ -956,53 +956,120 @@ app.delete('/api/notices/:id', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-// ══ ADMIN AUTH ══
 app.post('/api/admin', async (req, res) => {
-  const { action, password } = req.body;
+  const { action, password, token } = req.body;
 
+  // ✅ admin_login action
   if (action === 'admin_login') {
-    // Debug logging
-    console.log('\n🔐 Admin Login Attempt:');
-    console.log('  Password received:', !!password);
-    console.log('  Password value:', password);
-    
     const adminHash = process.env.ADMIN_PASSWORD_HASH;
-    console.log('  ADMIN_PASSWORD_HASH from env:', adminHash ? '✅ SET' : '❌ NOT SET');
-    
-    if (!adminHash) {
-      console.log('  ❌ FAILURE: ADMIN_PASSWORD_HASH not configured');
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Server error: ADMIN_PASSWORD_HASH not set in environment' 
-      });
-    }
-
-    // Calculate hash of provided password
-    const crypto = require('crypto');
     const inputHash = crypto.createHash('sha256').update(password).digest('hex').toUpperCase();
-    
-    console.log('  Provided password hash:', inputHash);
-    console.log('  Expected hash:', adminHash);
-    console.log('  Hashes match:', inputHash === adminHash);
 
-    // Compare hashes
-    if (inputHash !== adminHash) {
-      console.log('  ❌ FAILURE: Password hash mismatch');
+    if (!adminHash || inputHash !== adminHash.toUpperCase()) {
       return res.status(401).json({ success: false, error: 'Invalid password' });
     }
 
-    // Password is correct - issue token
-    console.log('  ✅ SUCCESS: Password validated');
     const payload = { role: 'admin', exp: Date.now() + 8 * 60 * 60 * 1000 };
     const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64');
     const sig = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(payloadB64).digest('base64');
-    const token = `${payloadB64}.${sig}`;
-    
-    console.log('  ✅ Token issued');
-    return res.json({ success: true, token });
+    return res.json({ success: true, token: `${payloadB64}.${sig}` });
   }
 
-  return res.status(400).json({ success: false, error: 'Unknown action' });
+  // ✅ For other actions, accept token from body or Authorization header
+  const authToken = token || (req.headers.authorization || '').replace('Bearer ', '');
+  if (!authToken) {
+    return res.status(401).json({ success: false, error: 'No token provided' });
+  }
+
+  // ✅ get_stats action
+  if (action === 'get_stats') {
+    try {
+      const voters = await pool.query('SELECT COUNT(*) as count FROM users');
+      const period = await pool.query('SELECT * FROM voting_periods WHERE is_active = true ORDER BY created_at DESC LIMIT 1');
+      const votes = period.rows.length ? 
+        await pool.query('SELECT COUNT(*) as count FROM votes WHERE period_id = $1', [period.rows[0].id]) : 
+        { rows: [{ count: 0 }] };
+
+      return res.json({
+        registeredVoters: parseInt(voters.rows[0].count),
+        currentPeriod: period.rows.length ? {
+          periodId: period.rows[0].id,
+          totalVotes: parseInt(votes.rows[0].count),
+          startTime: period.rows[0].created_at,
+          endTime: period.rows[0].ends_at
+        } : null
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ get_periods action
+  if (action === 'get_periods') {
+    try {
+      const result = await pool.query('SELECT id, created_at, ends_at, is_active FROM voting_periods ORDER BY created_at DESC LIMIT 50');
+      return res.json({ periods: result.rows });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ get_users action
+  if (action === 'get_users') {
+    try {
+      const result = await pool.query('SELECT id, phone, first_name, surname, sublocation, civic_score, created_at FROM users ORDER BY created_at DESC LIMIT 100');
+      return res.json({ users: result.rows, total: result.rowCount });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ add_period action
+  if (action === 'add_period') {
+    const { name, durationDays } = req.body;
+    if (!name || !durationDays) return res.status(400).json({ success: false, error: 'Missing fields' });
+    try {
+      const result = await pool.query(
+        `INSERT INTO voting_periods (created_at, ends_at, is_active) 
+         VALUES (NOW(), NOW() + ($1 || ' days')::INTERVAL, true) 
+         RETURNING id, created_at, ends_at, is_active`,
+        [durationDays]
+      );
+      return res.json({ success: true, period: result.rows[0] });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ end_period action
+  if (action === 'end_period') {
+    const { periodId } = req.body;
+    if (!periodId) return res.status(400).json({ success: false, error: 'Period ID required' });
+    try {
+      await pool.query('UPDATE voting_periods SET is_active = false WHERE id = $1', [periodId]);
+      return res.json({ success: true });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ add_user action
+  if (action === 'add_user') {
+    const { phone, firstName, surname, sublocation } = req.body;
+    if (!phone || !firstName || !surname) return res.status(400).json({ success: false, error: 'Missing fields' });
+    try {
+      const result = await pool.query(
+        `INSERT INTO users (phone, first_name, surname, sublocation, civic_score, created_at) 
+         VALUES ($1, $2, $3, $4, 0, NOW()) 
+         RETURNING id, phone, first_name, surname, sublocation`,
+        [phone, firstName, surname, sublocation || 'Ngoliba']
+      );
+      return res.json({ success: true, user: result.rows[0] });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  return res.status(400).json({ success: false, error: 'Unknown action: ' + action });
 });
 const server = app.listen(PORT, () => {
   console.log(`✅ Ngoliba InfoTrack server running on port ${PORT}`);
