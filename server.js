@@ -956,10 +956,122 @@ app.delete('/api/notices/:id', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ✅ GET /api/admin/notices - List all notices (admin only)
+app.get('/api/admin/notices', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Missing token' });
+    }
+
+    const result = await pool.query(
+      'SELECT id, title, content, category, priority, expires_at, created_at, created_by, is_archived FROM notices ORDER BY created_at DESC'
+    );
+    res.json({ success: true, notices: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ✅ POST /api/admin/notices - Create notice (admin only)
+app.post('/api/admin/notices', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Missing token' });
+    }
+
+    const { title, content, category, priority, days } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ success: false, error: 'Title and content required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO notices (title, content, category, priority, expires_at, created_by, created_at, updated_at, is_archived)
+       VALUES ($1, $2, $3, $4, NOW() + ($5 || '30')::INTERVAL, 'admin', NOW(), NOW(), FALSE)
+       RETURNING id, title, content, category, priority, expires_at, created_at`,
+      [title, content, category || 'general', priority || 'normal', days || 30]
+    );
+    res.json({ success: true, notice: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ✅ DELETE /api/admin/notices/:id - Delete notice (admin only)
+app.delete('/api/admin/notices/:id', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Missing token' });
+    }
+
+    const { id } = req.params;
+    await pool.query('DELETE FROM notices WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ✅ PUT /api/admin/notices/:id - Update notice (admin only)
+app.put('/api/admin/notices/:id', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Missing token' });
+    }
+
+    const { id } = req.params;
+    const { title, content, category, priority, expires_at, is_archived } = req.body;
+
+    const result = await pool.query(
+      `UPDATE notices 
+       SET title = COALESCE($1, title),
+           content = COALESCE($2, content),
+           category = COALESCE($3, category),
+           priority = COALESCE($4, priority),
+           expires_at = COALESCE($5, expires_at),
+           is_archived = COALESCE($6, is_archived),
+           updated_at = NOW()
+       WHERE id = $7
+       RETURNING *`,
+      [title, content, category, priority, expires_at, is_archived, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, error: 'Notice not found' });
+    }
+
+    res.json({ success: true, notice: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ══ ADMIN AUTH ══
+// ✅ Helper function to verify admin token
+function verifyAdminToken(token) {
+  try {
+    const [payloadB64, sig] = token.split('.');
+    if (!payloadB64 || !sig) return false;
+
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
+    if (payload.exp && payload.exp < Date.now()) return false;
+    if (payload.role !== 'admin') return false;
+
+    const expectedSig = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(payloadB64).digest('base64');
+    return sig === expectedSig;
+  } catch {
+    return false;
+  }
+}
+
 app.post('/api/admin', async (req, res) => {
   const { action, password, token } = req.body;
 
+  // ✅ EXISTING: admin_login
   if (action === 'admin_login') {
     const adminHash = process.env.ADMIN_PASSWORD_HASH;
     const inputHash = crypto.createHash('sha256').update(password).digest('hex').toUpperCase();
@@ -973,6 +1085,101 @@ app.post('/api/admin', async (req, res) => {
     const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64');
     const sig = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(payloadB64).digest('base64');
     return res.json({ success: true, token: `${payloadB64}.${sig}` });
+  }
+
+  // ✅ NEW: Verify token for other actions
+  const adminToken = (req.headers.authorization || '').replace('Bearer ', '');
+  if (!adminToken || !verifyAdminToken(adminToken)) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  // ✅ NEW: get_stats (dashboard statistics)
+  if (action === 'get_stats') {
+    try {
+      const voters = await pool.query('SELECT COUNT(*) FROM users');
+      const period = await pool.query('SELECT * FROM voting_periods WHERE is_active = true ORDER BY created_at DESC LIMIT 1');
+      const votes = period.rows.length ? 
+        await pool.query('SELECT COUNT(*) FROM votes WHERE period_id = $1', [period.rows[0].id]) : 
+        { rows: [{ count: 0 }] };
+
+      return res.json({
+        registeredVoters: parseInt(voters.rows[0].count),
+        currentPeriod: period.rows.length ? {
+          periodId: period.rows[0].id,
+          totalVotes: parseInt(votes.rows[0].count),
+          startTime: period.rows[0].created_at,
+          endTime: period.rows[0].ends_at
+        } : null
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ NEW: get_periods (list all voting periods)
+  if (action === 'get_periods') {
+    try {
+      const result = await pool.query('SELECT id, created_at, ends_at, is_active FROM voting_periods ORDER BY created_at DESC');
+      return res.json({ periods: result.rows });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ NEW: get_users (list all users)
+  if (action === 'get_users') {
+    try {
+      const result = await pool.query('SELECT id, phone, first_name, surname, sublocation, created_at FROM users ORDER BY created_at DESC LIMIT 100');
+      return res.json({ users: result.rows, total: result.rowCount });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ NEW: add_period (create voting period)
+  if (action === 'add_period') {
+    const { name, durationDays } = req.body;
+    if (!name || !durationDays) return res.status(400).json({ success: false, error: 'Missing fields' });
+    try {
+      const result = await pool.query(
+        `INSERT INTO voting_periods (created_at, ends_at, is_active) 
+         VALUES (NOW(), NOW() + ($1 || ' days')::INTERVAL, true) 
+         RETURNING id, created_at, ends_at, is_active`,
+        [durationDays]
+      );
+      return res.json({ success: true, period: result.rows[0] });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ NEW: end_period (end current voting period)
+  if (action === 'end_period') {
+    const { periodId } = req.body;
+    if (!periodId) return res.status(400).json({ success: false, error: 'Period ID required' });
+    try {
+      await pool.query('UPDATE voting_periods SET is_active = false WHERE id = $1', [periodId]);
+      return res.json({ success: true });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  // ✅ NEW: add_user (create user)
+  if (action === 'add_user') {
+    const { phone, firstName, surname, sublocation } = req.body;
+    if (!phone || !firstName || !surname) return res.status(400).json({ success: false, error: 'Missing fields' });
+    try {
+      const result = await pool.query(
+        `INSERT INTO users (phone, first_name, surname, sublocation, civic_score, created_at) 
+         VALUES ($1, $2, $3, $4, 0, NOW()) 
+         RETURNING id, phone, first_name, surname, sublocation`,
+        [phone, firstName, surname, sublocation || 'Ngoliba']
+      );
+      return res.json({ success: true, user: result.rows[0] });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
   }
 
   return res.status(400).json({ success: false, error: 'Unknown action' });
