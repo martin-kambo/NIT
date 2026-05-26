@@ -340,8 +340,9 @@ async function loadDashboard() {
   document.getElementById('statPeriod').textContent = data.currentPeriod ? `#${data.currentPeriod.periodId}` : '—';
 
   // Timer
-  if (data.currentPeriod?.periodEnd) {
-    currentPeriodEnd = new Date(data.currentPeriod.periodEnd);
+  // Timer (use endTime instead of periodEnd)
+if (data.currentPeriod?.endTime) {
+  currentPeriodEnd = new Date(data.currentPeriod.endTime);
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(updateTimer, 500);
     updateTimer();
@@ -401,30 +402,31 @@ async function loadPeriods() {
 
 // ── USERS ──
 async function loadUsers() {
-  const data = await adminFetch({ action: 'list_users' });
+  const data = await adminFetch({ action: 'get_users' });
   if (!data) return;
   const tbody = document.getElementById('usersTable');
   if (!data.users?.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mid-gray);padding:2rem;">No users found</td></tr>'; return; }
   tbody.innerHTML = data.users.map(u => `
     <tr>
-      <td style="font-family:'JetBrains Mono',monospace;">#${u.voterNumber}</td>
-      <td style="font-weight:600;">${u.firstName} ${u.surname}</td>
-      <td style="font-size:0.8rem;">${u.phone}</td>
-      <td><span class="badge badge-green">${u.sublocation || '—'}</span></td>
-      <td style="font-size:0.78rem;">${new Date(u.createdAt).toLocaleDateString()}</td>
-      <td><button class="btn-sm btn-red" onclick="confirmDeleteUser('${u.phone}','${u.firstName} ${u.surname}')"><i class="fas fa-trash"></i></button></td>
-    </tr>`).join('');
+    <td style="font-family:'JetBrains Mono',monospace;">#${u.id}</td>
+    <td style="font-weight:600;">${u.first_name} ${u.surname}</td>
+    <td style="font-size:0.8rem;">${u.phone}</td>
+    <td><span class="badge badge-green">${u.sublocation || '—'}</span></td>
+    <td style="font-size:0.78rem;">${new Date(u.created_at).toLocaleDateString()}</td>
+    <td><button class="btn-sm btn-red" onclick="confirmDeleteUser('${u.phone}','${u.first_name} ${u.surname}')"><i class="fas fa-trash"></i></button></td>
+  </tr>`).join('');
 }
 
 // ── ACTIONS ──
 function confirmResetPeriod() {
-  document.getElementById('confirmTitle').textContent = 'Reset Voting Period?';
-  document.getElementById('confirmMsg').textContent = 'This will immediately end the current cycle and start a fresh 5-minute period. All current votes will be archived.';
+  document.getElementById('confirmTitle').textContent = 'End Voting Period?';
+  document.getElementById('confirmMsg').textContent = 'This will immediately end the current cycle and archive the results.';
   document.getElementById('confirmYes').onclick = async () => {
     closeModal();
-    const data = await adminFetch({ action: 'reset_period' });
-    if (data?.success) { showToast('✅ Period reset successfully', 'success'); loadDashboard(); }
-    else showToast('Reset failed', 'error');
+    // Get current period ID (you need to store this globally)
+    const data = await adminFetch({ action: 'end_period', periodId: currentPeriodId });
+    if (data?.success) { showToast('✅ Period ended successfully', 'success'); loadDashboard(); }
+    else showToast('Failed to end period', 'error');
   };
   openModal();
 }

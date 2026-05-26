@@ -27,8 +27,9 @@ const pool = new Pool({
 });
 
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle client', err);
+  console.error('Database error:', err);
 });
+
 
 // ── Initialize Database Tables ──
 // ✅ NOW WITH BETTER ERROR HANDLING & SKIP IF TABLES EXIST
@@ -476,7 +477,7 @@ app.get('/api/me', async (req, res) => {
 // ROUTE: /api/auth
 // ════════════════════════════════════════════════
 app.post('/api/auth', async (req, res) => {
-  const { action, phone, password } = req.body;
+  const { action, password, phone, token } = req.body;
 
   // LOGIN
   if (action === 'login') {
@@ -984,7 +985,7 @@ app.post('/api/admin', async (req, res) => {
   if (action === 'get_stats') {
     try {
       const voters = await pool.query('SELECT COUNT(*) as count FROM users');
-      const period = await pool.query('SELECT * FROM voting_periods WHERE is_active = true ORDER BY created_at DESC LIMIT 1');
+      const period = await pool.query('SELECT * FROM voting_periods WHERE is_active = true ORDER BY period_start DESC LIMIT 1');
       const votes = period.rows.length ? 
         await pool.query('SELECT COUNT(*) as count FROM votes WHERE period_id = $1', [period.rows[0].id]) : 
         { rows: [{ count: 0 }] };
@@ -994,8 +995,8 @@ app.post('/api/admin', async (req, res) => {
         currentPeriod: period.rows.length ? {
           periodId: period.rows[0].id,
           totalVotes: parseInt(votes.rows[0].count),
-          startTime: period.rows[0].created_at,
-          endTime: period.rows[0].ends_at
+          startTime: period.rows[0].period_start,
+          endTime: period.rows[0].period_end
         } : null
       });
     } catch (error) {
@@ -1006,7 +1007,7 @@ app.post('/api/admin', async (req, res) => {
   // ✅ get_periods action
   if (action === 'get_periods') {
     try {
-      const result = await pool.query('SELECT id, created_at, ends_at, is_active FROM voting_periods ORDER BY created_at DESC LIMIT 50');
+      const result = await pool.query('SELECT id, period_start, period_end, is_active FROM voting_periods ORDER BY period_start DESC LIMIT 50');
       return res.json({ periods: result.rows });
     } catch (error) {
       return res.status(500).json({ success: false, error: error.message });
@@ -1016,7 +1017,7 @@ app.post('/api/admin', async (req, res) => {
   // ✅ get_users action
   if (action === 'get_users') {
     try {
-      const result = await pool.query('SELECT id, phone, first_name, surname, sublocation, civic_score, created_at FROM users ORDER BY created_at DESC LIMIT 100');
+      const result = await pool.query('SELECT id, phone, first_name, surname, sublocation, period_start FROM users ORDER BY created_at DESC LIMIT 100');
       return res.json({ users: result.rows, total: result.rowCount });
     } catch (error) {
       return res.status(500).json({ success: false, error: error.message });
@@ -1029,9 +1030,9 @@ app.post('/api/admin', async (req, res) => {
     if (!name || !durationDays) return res.status(400).json({ success: false, error: 'Missing fields' });
     try {
       const result = await pool.query(
-        `INSERT INTO voting_periods (created_at, ends_at, is_active) 
+        `INSERT INTO voting_periods (period_start, period_end, is_active) 
          VALUES (NOW(), NOW() + ($1 || ' days')::INTERVAL, true) 
-         RETURNING id, created_at, ends_at, is_active`,
+         RETURNING id, period_start, period_end, is_active`,
         [durationDays]
       );
       return res.json({ success: true, period: result.rows[0] });
@@ -1051,6 +1052,21 @@ app.post('/api/admin', async (req, res) => {
       return res.status(500).json({ success: false, error: error.message });
     }
   }
+  // ✅ DELETE USER
+if (action === 'delete_user') {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
+  try {
+    await pool.query('DELETE FROM users WHERE phone = $1', [phone]);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error in delete_user:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+// Default: Unknown action
+return res.status(400).json({ success: false, error: 'Unknown action' });
 
   // ✅ add_user action
   if (action === 'add_user') {
@@ -1070,6 +1086,15 @@ app.post('/api/admin', async (req, res) => {
   }
 
   return res.status(400).json({ success: false, error: 'Unknown action: ' + action });
+});
+// Add this right before the app.listen() line (around line 980):
+app.get('/api/debug/check-env', (req, res) => {
+  res.json({
+    ADMIN_PASSWORD_HASH: process.env.ADMIN_PASSWORD_HASH ? 'SET (length: ' + process.env.ADMIN_PASSWORD_HASH.length + ')' : 'NOT SET',
+    SESSION_SECRET: process.env.SESSION_SECRET ? 'SET' : 'NOT SET',
+    DATABASE_URL: process.env.DATABASE_URL ? 'SET' : 'NOT SET',
+    NODE_ENV: process.env.NODE_ENV
+  });
 });
 const server = app.listen(PORT, () => {
   console.log(`✅ Ngoliba InfoTrack server running on port ${PORT}`);
