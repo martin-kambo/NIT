@@ -981,77 +981,81 @@ app.post('/api/admin', async (req, res) => {
     return res.status(401).json({ success: false, error: 'No token provided' });
   }
 
-  // ✅ get_stats action
-  if (action === 'get_stats') {
-    try {
-      const voters = await pool.query('SELECT COUNT(*) as count FROM users');
-      const period = await pool.query('SELECT * FROM voting_periods WHERE is_active = true ORDER BY period_start DESC LIMIT 1');
-      const votes = period.rows.length ? 
-        await pool.query('SELECT COUNT(*) as count FROM votes WHERE period_id = $1', [period.rows[0].id]) : 
-        { rows: [{ count: 0 }] };
+  // ✅ GET STATS - Fixed column names (period_start, period_end instead of created_at, ends_at)
+if (action === 'get_stats') {
+  try {
+    const voters = await pool.query('SELECT COUNT(*) as count FROM users');
+    const period = await pool.query('SELECT * FROM voting_periods WHERE is_active = true ORDER BY period_start DESC LIMIT 1');
+    const votes = period.rows.length ? 
+      await pool.query('SELECT COUNT(*) as count FROM votes WHERE period_id = $1', [period.rows[0].id]) : 
+      { rows: [{ count: 0 }] };
 
-      return res.json({
-        registeredVoters: parseInt(voters.rows[0].count),
-        currentPeriod: period.rows.length ? {
-          periodId: period.rows[0].id,
-          totalVotes: parseInt(votes.rows[0].count),
-          startTime: period.rows[0].period_start,
-          endTime: period.rows[0].period_end
-        } : null
-      });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
+    return res.json({
+      success: true,
+      registeredVoters: parseInt(voters.rows[0].count),
+      currentPeriod: period.rows.length ? {
+        periodId: period.rows[0].id,
+        totalVotes: parseInt(votes.rows[0].count),
+        startTime: period.rows[0].period_start,
+        endTime: period.rows[0].period_end
+      } : null
+    });
+  } catch (error) {
+    console.error('Error in get_stats:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
   }
+}
 
-  // ✅ get_periods action
-  if (action === 'get_periods') {
-    try {
-      const result = await pool.query('SELECT id, period_start, period_end, is_active FROM voting_periods ORDER BY period_start DESC LIMIT 50');
-      return res.json({ periods: result.rows });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
+ // ✅ GET PERIODS - Fixed column references
+if (action === 'get_periods') {
+  try {
+    const result = await pool.query('SELECT id, period_start, period_end, is_active FROM voting_periods ORDER BY period_start DESC LIMIT 50');
+    return res.json({ success: true, periods: result.rows });
+  } catch (error) {
+    console.error('Error in get_periods:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
   }
+}
+  // ✅ GET USERS - Removed non-existent civic_score column
+if (action === 'get_users') {
+  try {
+    const result = await pool.query('SELECT id, phone, first_name, surname, sublocation, created_at FROM users ORDER BY created_at DESC LIMIT 100');
+    return res.json({ success: true, users: result.rows, total: result.rowCount });
+  } catch (error) {
+    console.error('Error in get_users:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
 
-  // ✅ get_users action
-  if (action === 'get_users') {
-    try {
-      const result = await pool.query('SELECT id, phone, first_name, surname, sublocation, period_start FROM users ORDER BY created_at DESC LIMIT 100');
-      return res.json({ users: result.rows, total: result.rowCount });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
+  // ✅ ADD PERIOD - Fixed INSERT and RETURNING clauses
+if (action === 'add_period') {
+  const { durationDays } = req.body;
+  if (!durationDays) return res.status(400).json({ success: false, error: 'Duration required' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO voting_periods (period_start, period_end, is_active) 
+       VALUES (NOW(), NOW() + ($1 || ' days')::INTERVAL, true) 
+       RETURNING id, period_start, period_end, is_active`,
+      [durationDays]
+    );
+    return res.json({ success: true, period: result.rows[0] });
+  } catch (error) {
+    console.error('Error in add_period:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
   }
-
-  // ✅ add_period action
-  if (action === 'add_period') {
-    const { name, durationDays } = req.body;
-    if (!name || !durationDays) return res.status(400).json({ success: false, error: 'Missing fields' });
-    try {
-      const result = await pool.query(
-        `INSERT INTO voting_periods (period_start, period_end, is_active) 
-         VALUES (NOW(), NOW() + ($1 || ' days')::INTERVAL, true) 
-         RETURNING id, period_start, period_end, is_active`,
-        [durationDays]
-      );
-      return res.json({ success: true, period: result.rows[0] });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
+}
+// ✅ END PERIOD
+if (action === 'end_period') {
+  const { periodId } = req.body;
+  if (!periodId) return res.status(400).json({ success: false, error: 'Period ID required' });
+  try {
+    await pool.query('UPDATE voting_periods SET is_active = false WHERE id = $1', [periodId]);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error in end_period:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
   }
-
-  // ✅ end_period action
-  if (action === 'end_period') {
-    const { periodId } = req.body;
-    if (!periodId) return res.status(400).json({ success: false, error: 'Period ID required' });
-    try {
-      await pool.query('UPDATE voting_periods SET is_active = false WHERE id = $1', [periodId]);
-      return res.json({ success: true });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
-  }
+}
   // ✅ DELETE USER
 if (action === 'delete_user') {
   const { phone } = req.body;
