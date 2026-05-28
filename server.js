@@ -151,19 +151,21 @@ async function initDB() {
         PRIMARY KEY (reply_id, user_id)
       );
 
-      CREATE TABLE IF NOT EXISTS notices (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        title VARCHAR(200) NOT NULL,
-        content TEXT NOT NULL,
-        category VARCHAR(50) DEFAULT 'general',
-        priority VARCHAR(20) DEFAULT 'normal',
-        expires_at TIMESTAMP WITH TIME ZONE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        created_by VARCHAR(100),
-        is_archived BOOLEAN DEFAULT FALSE
-      );
+ CREATE TABLE IF NOT EXISTS notices (
+  id SERIAL PRIMARY KEY,
+  title VARCHAR(200) NOT NULL,
+  content TEXT NOT NULL,
+  category VARCHAR(20) DEFAULT 'general',
+  priority VARCHAR(10) DEFAULT 'normal',
+  created_by VARCHAR(100),
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  expires_at TIMESTAMP,
+  is_archived BOOLEAN DEFAULT false
+);
 
+CREATE INDEX IF NOT EXISTS idx_notices_archived ON notices(is_archived);
+CREATE INDEX IF NOT EXISTS idx_notices_expires ON notices(expires_at);
       CREATE TABLE IF NOT EXISTS ad_requests (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         business_name VARCHAR(100),
@@ -1116,6 +1118,7 @@ app.get('/api/debug/check-env', (req, res) => {
     NODE_ENV: process.env.NODE_ENV
   });
 });
+
 const server = app.listen(PORT, () => {
   console.log(`✅ Ngoliba InfoTrack server running on port ${PORT}`);
   console.log(`📚 Database: PostgreSQL (check connection above)`);
