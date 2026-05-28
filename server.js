@@ -965,9 +965,18 @@ app.post('/api/admin', async (req, res) => {
     const adminHash = process.env.ADMIN_PASSWORD_HASH;
     const inputHash = crypto.createHash('sha256').update(password).digest('hex').toUpperCase();
 
+    console.log('[DEBUG] admin_login attempt');
+    console.log('  - Password received (length):', password?.length || 'undefined');
+    console.log('  - Input hash:', inputHash);
+    console.log('  - Stored hash:', adminHash);
+    console.log('  - Stored hash (uppercase):', adminHash?.toUpperCase());
+    console.log('  - Hashes match:', inputHash === adminHash?.toUpperCase());
+
     if (!adminHash || inputHash !== adminHash.toUpperCase()) {
+      console.log('[DEBUG] Login FAILED - hash mismatch or missing env var');
       return res.status(401).json({ success: false, error: 'Invalid password' });
     }
+    console.log('[DEBUG] Login SUCCESS - generating token');
 
     const payload = { role: 'admin', exp: Date.now() + 8 * 60 * 60 * 1000 };
     const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64');
