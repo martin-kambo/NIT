@@ -15,5 +15,11 @@
   },
   "engines": {
     "node": "20.x"
+  },
+ 
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "supertest": "^6.3.0"
   }
 }
+

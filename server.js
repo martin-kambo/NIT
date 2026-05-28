@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { Pool } = require('pg');
 const axios = require('axios');
+const noticesRouter = require('./routes/notices');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -290,6 +291,12 @@ async function testDBConnection() {
     return false;
   }
 }
+
+app.use((req, res, next) => {
+  req.pool = pool;
+  next();
+});
+
 
 // Initialize on startup
 (async () => {
@@ -737,7 +744,7 @@ app.get('/api/history', async (req, res) => {
 // ════════════════════════════════════════════════
 // CATCH-ALL & ERROR HANDLING
 // ════════════════════════════════════════════════
-
+app.use(noticesRouter);
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
