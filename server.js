@@ -321,6 +321,7 @@ async function ensureNoticesTable() {
         budget VARCHAR(50),
         duration VARCHAR(50) DEFAULT '7 days',
         status VARCHAR(20) DEFAULT 'pending',
+        fee INTEGER DEFAULT 0,
         submitted_at TIMESTAMP DEFAULT NOW(),
         reviewed_at TIMESTAMP,
         reviewed_by VARCHAR(50),
@@ -332,6 +333,8 @@ async function ensureNoticesTable() {
       ALTER TABLE ad_requests
         ALTER COLUMN id SET DEFAULT gen_random_uuid()
     `);
+    // Add fee column for existing deployments
+    await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS fee INTEGER DEFAULT 0`);
 
     // Seed sample notices only if table is empty
     const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
