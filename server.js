@@ -297,39 +297,41 @@ async function ensureNoticesTable() {
         is_archived BOOLEAN DEFAULT false
       )
     `);
-    // ── Column migrations: add missing columns from older schema versions ──
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW()`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS created_by  VARCHAR(100)`);
-    console.log('✅ notices columns verified/migrated');
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_archived  ON notices(is_archived)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_expires   ON notices(expires_at) WHERE expires_at IS NOT NULL`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_priority  ON notices(priority)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_created   ON notices(created_at DESC)`);
 
+    // ── Fix broken SERIAL sequence before seeding (sequence can desync on table recreation) ──
+    await pool.query(`SELECT setval(pg_get_serial_sequence('notices','id'), COALESCE(MAX(id),0)+1, false) FROM notices`);
+
     // Seed sample notices only if table is empty
-    const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
-    if (parseInt(rows[0].count) === 0) {
-      await pool.query(`
-        INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
-        ('Ngoliba Farmers Market - Every Saturday',
-         'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at the Ngoliba Market grounds.',
-         'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
-        ('Water Rationing Notice - Kilimambogo',
-         'Kenya Water Authority advises reduced supply Mon-Wed for 30 days due to pipeline maintenance. Store water accordingly. Helpline: 0800 723 232',
-         'public', 'high', NOW() + INTERVAL '30 days', 'system'),
-        ('Boda Boda Riders Wanted - Ngoliba Express',
-         'Ngoliba Express Logistics recruiting 10 boda boda riders for parcel delivery. Must have valid licence. Earn KES 800-1,500 daily. Apply: Ngoliba Town Centre.',
-         'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
-        ('Community Health Camp - Mwea Ward',
-         'Free health screening and vaccination. First Saturday of every month, Mwea Ward Market. Bring ID.',
-         'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
-        ('Road Maintenance - Ngoliba-Ruiru Highway',
-         'The Ngoliba-Ruiru highway will be under maintenance June 15-22. Expect delays. Use alternative routes.',
-         'public', 'high', NOW() + INTERVAL '45 days', 'system')
-      `);
-      console.log('✅ notices table seeded with sample data');
+    try {
+      const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
+      if (parseInt(rows[0].count) === 0) {
+        await pool.query(`
+          INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
+          ('Ngoliba Farmers Market - Every Saturday',
+           'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at Ngoliba Market grounds.',
+           'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
+          ('Water Rationing Notice - Kilimambogo',
+           'Kenya Water Authority advises reduced supply Mon-Wed for 30 days due to pipeline maintenance. Store water accordingly. Helpline: 0800 723 232',
+           'public', 'high', NOW() + INTERVAL '30 days', 'system'),
+          ('Boda Boda Riders Wanted - Ngoliba Express',
+           'Ngoliba Express recruiting 10 boda boda riders for parcel delivery. Valid licence required. Earn KES 800-1,500 daily. Apply: Ngoliba Town Centre.',
+           'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
+          ('Community Health Camp - Mwea Ward',
+           'Free health screening and vaccination. First Saturday every month, Mwea Ward Market. Bring ID.',
+           'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
+          ('Road Maintenance - Ngoliba-Ruiru Highway',
+           'Ngoliba-Ruiru highway under maintenance June 15-22. Expect delays. Use alternative routes.',
+           'public', 'high', NOW() + INTERVAL '45 days', 'system')
+        `);
+        console.log('✅ notices table seeded with sample data');
+      }
+    } catch (seedErr) {
+      console.error('❌ notices seed error (non-fatal):', seedErr.message);
     }
     console.log('✅ notices table ready');
   } catch (err) {
