@@ -2732,7 +2732,6 @@ function enterDashboard(){
   seedInitialNotifications();
   renderNotifBell();
   initAdRequestChat();
-  renderNoticeboardTab(); // ✅ FIX: tabNotice is the default active tab but was never fetched on load
   if(faceoffInterval)clearInterval(faceoffInterval);
   faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();updateLiveTicker();},3000);
   startCountdown();
@@ -3366,6 +3365,11 @@ function buildNotices(notices) {
       </div>
     </div>`;
   }).join("");
+
+  // ✅ FIX: .scroll-reveal starts at opacity:0. Without calling initScrollReveal() here,
+  // the IntersectionObserver never fires on the newly injected cards and they stay invisible.
+  // Every other tab (Analytics, AI, Promises) calls this after rendering — this was the only one missing it.
+  initScrollReveal();
 }
 
 // ═══ NOTIFICATION SYSTEM ═══
