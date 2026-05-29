@@ -648,7 +648,23 @@
 
             emptyState.classList.add('hidden');
 
-            container.innerHTML = state.notices.map(notice => `
+            container.innerHTML = state.notices.map(notice => {
+                // ✅ FIX 1: DB returns snake_case — use created_at not createdAt
+                const postedStr = formatDate(notice.created_at);
+
+                // ✅ FIX 2 & 3: DB returns expires_at (snake_case), and daysUntilExpiry
+                // is never sent by the server — compute it client-side from expires_at
+                let expiryHTML = '<div>♾️ No expiration</div>';
+                if (notice.expires_at) {
+                    const msLeft = new Date(notice.expires_at) - Date.now();
+                    const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
+                    const expiringSoon = daysLeft <= 7;
+                    expiryHTML = `<div class="notice-expiry ${expiringSoon ? 'expiring-soon' : ''}">
+                        ⏰ Expires in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}
+                    </div>`;
+                }
+
+                return `
                 <div class="notice-card ${notice.category}">
                     <div class="notice-header">
                         <h3 class="notice-title">${escapeHTML(notice.title)}</h3>
@@ -664,17 +680,13 @@
 
                     <div class="notice-footer">
                         <div class="notice-meta">
-                            <div>📅 ${formatDate(notice.createdAt)}</div>
-                            ${notice.expiresAt ? `
-                                <div class="notice-expiry ${notice.daysUntilExpiry <= 7 ? 'expiring-soon' : ''}">
-                                    ⏰ Expires in ${notice.daysUntilExpiry} days
-                                </div>
-                            ` : '<div>♾️ No expiration</div>'}
+                            <div>📅 ${postedStr}</div>
+                            ${expiryHTML}
                         </div>
-                        <div>${notice.createdBy}</div>
+                        <div>${notice.created_by || ''}</div>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
         }
 
         /**

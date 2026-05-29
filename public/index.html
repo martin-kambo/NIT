@@ -2732,6 +2732,7 @@ function enterDashboard(){
   seedInitialNotifications();
   renderNotifBell();
   initAdRequestChat();
+  renderNoticeboardTab(); // ✅ FIX: tabNotice is the default active tab but was never fetched on load
   if(faceoffInterval)clearInterval(faceoffInterval);
   faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();updateLiveTicker();},3000);
   startCountdown();
