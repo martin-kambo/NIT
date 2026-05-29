@@ -809,8 +809,8 @@
             document.getElementById('category').value = notice.category;
             document.getElementById('priority').value = notice.priority;
             
-            if (notice.expiresAt) {
-                const date = new Date(notice.expiresAt);
+            if (notice.expires_at) { // ✅ FIX: was notice.expiresAt — DB returns snake_case
+                const date = new Date(notice.expires_at);
                 document.getElementById('expiresAt').value = date.toISOString().slice(0, 16);
             }
 

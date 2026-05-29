@@ -353,6 +353,16 @@ async function testDBConnection() {
   }
 }
 
+// ── Middleware ── (must come before routes AND before pool middleware)
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-password'] // ✅ FIX: added x-admin-password
+}));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
 app.use((req, res, next) => {
   req.pool = pool;
   next();
@@ -400,15 +410,7 @@ async function ensureActivePeriod() {
   }
 }
 
-// ── Middleware ──
-app.use(cors({
-  origin: true,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(express.json({ limit: '5mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// ── Middleware already registered above (before routes) ──
 
 // ── Shared Utilities ──
 function hashPassword(password, salt) {
@@ -955,12 +957,13 @@ app.get('/api/faceoff', async (req, res) => {
 // ══════════════════════════════════════════════
 app.get('/api/notices', async (req, res) => {
   try {
-    const { cat } = req.query;
+    const { cat, category } = req.query;
+    const catFilter = category || cat; // ✅ FIX: accept both ?category= (notice-board) and ?cat= (legacy)
     let result;
-    if (cat && cat !== 'all') {
+    if (catFilter && catFilter !== 'all') {
       result = await pool.query(
         `SELECT * FROM notices WHERE (expires_at IS NULL OR expires_at > NOW()) AND COALESCE(is_archived,false)=false AND category = $1 ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`,
-        [cat]
+        [catFilter]
       );
     } else {
       result = await pool.query(
