@@ -1065,10 +1065,8 @@ app.post('/api/admin/notices', async (req, res) => {
   }
   try {
     const result = await pool.query(
-      `INSERT INTO notices (id, title, content, category, priority, expires_at, created_by)
-       VALUES (gen_random_uuid(), , , , , , 'admin')
-       RETURNING *`,
-      [title, content, category || 'general', priority || 'normal', expiresAt || null]
+'INSERT INTO notices (id, title, content, category, priority, expires_at, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [crypto.randomUUID(), title, content, category || 'general', priority || 'normal', expiresAt || null, 'admin']
     );
     res.json({ success: true, notice: result.rows[0] });
   } catch (err) {
@@ -1086,10 +1084,7 @@ app.put('/api/admin/notices/:id', async (req, res) => {
   }
   try {
     const result = await pool.query(
-      `UPDATE notices
-       SET title=, content=, category=, priority=, expires_at=, updated_at=NOW()
-       WHERE id=
-       RETURNING *`,
+'UPDATE notices SET title=$1, content=$2, category=$3, priority=$4, expires_at=$5, updated_at=NOW() WHERE id=$6 RETURNING *',
       [title, content, category || 'general', priority || 'normal', expiresAt || null, req.params.id]
     );
     if (result.rows.length === 0) {
