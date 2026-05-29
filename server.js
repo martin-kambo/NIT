@@ -297,6 +297,11 @@ async function ensureNoticesTable() {
         is_archived BOOLEAN DEFAULT false
       )
     `);
+    // ── Column migrations: add missing columns from older schema versions ──
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW()`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS created_by  VARCHAR(100)`);
+    console.log('✅ notices columns verified/migrated');
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_archived  ON notices(is_archived)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_expires   ON notices(expires_at) WHERE expires_at IS NOT NULL`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category)`);
