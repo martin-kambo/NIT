@@ -160,6 +160,78 @@
             display: block;
         }
 
+        /* TAB NAV */
+        .admin-tab-nav {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            background: white;
+            padding: 8px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+        .admin-tab-btn {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            background: transparent;
+            color: var(--text-light);
+            transition: all 0.2s;
+        }
+        .admin-tab-btn.active {
+            background: var(--primary);
+            color: white;
+        }
+        .admin-tab-btn .badge {
+            display: inline-block;
+            background: var(--danger);
+            color: white;
+            border-radius: 50px;
+            font-size: 11px;
+            padding: 1px 7px;
+            margin-left: 6px;
+            font-weight: 700;
+        }
+        .admin-tab-pane { display: none; }
+        .admin-tab-pane.active { display: block; }
+
+        /* AD REQUEST CARDS */
+        .ar-card {
+            background: white;
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow);
+            border-left: 4px solid var(--border);
+        }
+        .ar-card.status-pending  { border-left-color: var(--warning); }
+        .ar-card.status-approved { border-left-color: var(--success); }
+        .ar-card.status-rejected { border-left-color: var(--danger); }
+        .ar-card.status-completed{ border-left-color: var(--primary); }
+        .ar-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+        .ar-business-name { font-weight: 700; font-size: 15px; color: var(--text); }
+        .ar-status-badge {
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+            padding: 3px 10px; border-radius: 50px; white-space: nowrap;
+        }
+        .ar-status-badge.pending  { background: #fff7ed; color: var(--warning); }
+        .ar-status-badge.approved { background: #f0fdf4; color: var(--success); }
+        .ar-status-badge.rejected { background: #fef2f2; color: var(--danger); }
+        .ar-status-badge.completed{ background: #eff6ff; color: var(--primary); }
+        .ar-content { font-size: 13px; color: var(--text); margin-bottom: 10px; line-height: 1.5; }
+        .ar-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--text-light); margin-bottom: 12px; }
+        .ar-meta span { display: flex; align-items: center; gap: 4px; }
+        .ar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .ar-notes-input {
+            flex: 1; min-width: 160px;
+            padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+            font-size: 13px; font-family: inherit;
+        }
+        .ar-notes-input:focus { outline: none; border-color: var(--primary); }
+
         header {
             background: white;
             padding: 20px;
@@ -469,6 +541,16 @@
         <div class="container">
             <div id="adminAlert" class="alert"></div>
 
+            <!-- TAB NAV -->
+            <div class="admin-tab-nav">
+                <button class="admin-tab-btn active" onclick="switchAdminTab('notices')">📝 Notices</button>
+                <button class="admin-tab-btn" id="adRequestsTabBtn" onclick="switchAdminTab('adRequests')">
+                    📣 Ad Requests <span class="badge" id="pendingAdBadge" style="display:none;">0</span>
+                </button>
+            </div>
+
+            <!-- TAB: NOTICES -->
+            <div class="admin-tab-pane active" id="paneNotices">
             <div class="admin-grid">
                 <!-- CREATE/EDIT FORM -->
                 <div class="form-panel">
@@ -569,6 +651,29 @@
                     </div>
                 </div>
             </div>
+            </div><!-- /paneNotices -->
+
+            <!-- TAB: AD REQUESTS -->
+            <div class="admin-tab-pane" id="paneAdRequests">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                    <h2 style="font-size:18px;">📣 Ad Slot Requests</h2>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <select id="arStatusFilter" onchange="renderAdRequests()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+                            <option value="all">All Statuses</option>
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="completed">Completed</option>
+                        </select>
+                        <button class="btn btn-secondary btn-small" onclick="loadAdRequests()">↻ Refresh</button>
+                    </div>
+                </div>
+                <div id="adRequestAlert" class="alert"></div>
+                <div id="adRequestsContainer">
+                    <div class="empty-state"><div class="empty-state-icon">📭</div><p>Loading ad requests...</p></div>
+                </div>
+            </div><!-- /paneAdRequests -->
+
         </div>
     </div>
 
@@ -632,6 +737,7 @@
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('adminScreen').classList.add('active');
             loadNotices();
+            loadAdRequests(); // ✅ load on login so pending badge shows
         }
         function handleLogout() {
             state.isAuthenticated = false;
@@ -809,8 +915,8 @@
             document.getElementById('category').value = notice.category;
             document.getElementById('priority').value = notice.priority;
             
-            if (notice.expires_at) { // ✅ FIX: was notice.expiresAt — DB returns snake_case
-                const date = new Date(notice.expires_at);
+            if (notice.expiresAt) {
+                const date = new Date(notice.expiresAt);
                 document.getElementById('expiresAt').value = date.toISOString().slice(0, 16);
             }
 
@@ -866,6 +972,111 @@
         function confirmDelete() {
             if (state.deleteId) {
                 deleteNotice(state.deleteId);
+            }
+        }
+
+        // ─────────────────────────────────────────
+        // TAB SWITCHING
+        // ─────────────────────────────────────────
+
+        function switchAdminTab(tab) {
+            document.querySelectorAll('.admin-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.admin-tab-pane').forEach(p => p.classList.remove('active'));
+
+            if (tab === 'notices') {
+                document.querySelectorAll('.admin-tab-btn')[0].classList.add('active');
+                document.getElementById('paneNotices').classList.add('active');
+            } else {
+                document.getElementById('adRequestsTabBtn').classList.add('active');
+                document.getElementById('paneAdRequests').classList.add('active');
+                loadAdRequests();
+            }
+        }
+
+        // ─────────────────────────────────────────
+        // AD REQUESTS
+        // ─────────────────────────────────────────
+
+        let allAdRequests = [];
+
+        async function loadAdRequests() {
+            const container = document.getElementById('adRequestsContainer');
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⏳</div><p>Loading...</p></div>';
+            try {
+                const res = await fetch('/api/admin/ad-requests', {
+                    headers: { 'x-admin-password': state.adminPassword }
+                });
+                const json = await res.json();
+                if (!json.success) throw new Error(json.error);
+                allAdRequests = json.adRequests;
+                // Update pending badge
+                const pendingCount = allAdRequests.filter(r => r.status === 'pending').length;
+                const badge = document.getElementById('pendingAdBadge');
+                if (pendingCount > 0) {
+                    badge.textContent = pendingCount;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+                renderAdRequests();
+            } catch (err) {
+                container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">⚠️</div><p>${err.message}</p></div>`;
+            }
+        }
+
+        function renderAdRequests() {
+            const filter    = document.getElementById('arStatusFilter').value;
+            const container = document.getElementById('adRequestsContainer');
+            const list      = filter === 'all' ? allAdRequests : allAdRequests.filter(r => r.status === filter);
+
+            if (!list.length) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>No ad requests in this category.</p></div>';
+                return;
+            }
+
+            const statusLabel = { pending: '⏳ Pending', approved: '✅ Approved', rejected: '❌ Rejected', completed: '🏁 Completed' };
+
+            container.innerHTML = list.map(r => `
+                <div class="ar-card status-${r.status}" id="arCard-${r.id}">
+                    <div class="ar-card-header">
+                        <div class="ar-business-name">🏢 ${escapeHTML(r.business_name)}</div>
+                        <span class="ar-status-badge ${r.status}">${statusLabel[r.status] || r.status}</span>
+                    </div>
+                    <div class="ar-content">${escapeHTML(r.ad_content)}</div>
+                    <div class="ar-meta">
+                        <span>📁 ${r.category || '—'}</span>
+                        <span>⏱ ${r.duration || '7 days'}</span>
+                        <span>📞 ${escapeHTML(r.contact_phone)}</span>
+                        ${r.contact_email ? `<span>✉️ ${escapeHTML(r.contact_email)}</span>` : ''}
+                        ${r.budget ? `<span>💰 ${escapeHTML(r.budget)}</span>` : ''}
+                        <span>📅 Submitted: ${new Date(r.submitted_at).toLocaleDateString('en-KE', {day:'numeric',month:'short',year:'numeric'})}</span>
+                        ${r.reviewed_at ? `<span>🕐 Reviewed: ${new Date(r.reviewed_at).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'})}</span>` : ''}
+                    </div>
+                    ${r.notes ? `<div style="font-size:13px;color:var(--text-light);background:var(--light);padding:8px 10px;border-radius:6px;margin-bottom:10px;">📝 <em>${escapeHTML(r.notes)}</em></div>` : ''}
+                    <div class="ar-actions">
+                        <input class="ar-notes-input" id="arNotes-${r.id}" placeholder="Add notes (optional)…" value="${r.notes ? escapeHTML(r.notes) : ''}">
+                        <button class="btn btn-success btn-small" onclick="updateAdRequest('${r.id}','approved')">✅ Approve</button>
+                        <button class="btn btn-secondary btn-small" onclick="updateAdRequest('${r.id}','completed')">🏁 Complete</button>
+                        <button class="btn btn-danger btn-small" onclick="updateAdRequest('${r.id}','rejected')">❌ Reject</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function updateAdRequest(id, status) {
+            const notes = document.getElementById(`arNotes-${id}`)?.value.trim() || '';
+            try {
+                const res = await fetch(`/api/admin/ad-requests/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-password': state.adminPassword },
+                    body: JSON.stringify({ status, notes })
+                });
+                const json = await res.json();
+                if (!json.success) throw new Error(json.error);
+                showAlert('adRequestAlert', `Request marked as "${status}" successfully.`, 'success');
+                loadAdRequests(); // Refresh the list + badge
+            } catch (err) {
+                showAlert('adRequestAlert', 'Failed to update: ' + err.message, 'error');
             }
         }
 

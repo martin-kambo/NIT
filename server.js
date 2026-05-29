@@ -353,16 +353,6 @@ async function testDBConnection() {
   }
 }
 
-// ── Middleware ── (must come before routes AND before pool middleware)
-app.use(cors({
-  origin: true,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-password'] // ✅ FIX: added x-admin-password
-}));
-app.use(express.json({ limit: '5mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-
 app.use((req, res, next) => {
   req.pool = pool;
   next();
@@ -410,7 +400,15 @@ async function ensureActivePeriod() {
   }
 }
 
-// ── Middleware already registered above (before routes) ──
+// ── Middleware ──
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Shared Utilities ──
 function hashPassword(password, salt) {
@@ -957,13 +955,12 @@ app.get('/api/faceoff', async (req, res) => {
 // ══════════════════════════════════════════════
 app.get('/api/notices', async (req, res) => {
   try {
-    const { cat, category } = req.query;
-    const catFilter = category || cat; // ✅ FIX: accept both ?category= (notice-board) and ?cat= (legacy)
+    const { cat } = req.query;
     let result;
-    if (catFilter && catFilter !== 'all') {
+    if (cat && cat !== 'all') {
       result = await pool.query(
         `SELECT * FROM notices WHERE (expires_at IS NULL OR expires_at > NOW()) AND COALESCE(is_archived,false)=false AND category = $1 ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`,
-        [catFilter]
+        [cat]
       );
     } else {
       result = await pool.query(
@@ -1225,6 +1222,64 @@ app.get('/api/debug/check-env', (req, res) => {
     DATABASE_URL: process.env.DATABASE_URL ? 'SET' : 'NOT SET',
     NODE_ENV: process.env.NODE_ENV
   });
+});
+
+// ══════════════════════════════════════════════════════
+// AD REQUESTS — public submission + admin management
+// ══════════════════════════════════════════════════════
+
+// POST /api/ad-requests — any logged-in user submits an ad request
+app.post('/api/ad-requests', async (req, res) => {
+  const { businessName, adContent, category, contactPhone, contactEmail, budget, duration } = req.body;
+  if (!businessName || !adContent || !contactPhone) {
+    return res.status(400).json({ success: false, error: 'businessName, adContent and contactPhone are required' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO ad_requests (business_name, ad_content, contact_phone, contact_email, budget, duration, status, submitted_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW()) RETURNING id, submitted_at`,
+      [businessName, adContent, contactPhone, contactEmail || null, budget || null, duration || '7 days']
+    );
+    res.json({ success: true, id: result.rows[0].id, submittedAt: result.rows[0].submitted_at });
+  } catch (err) {
+    console.error('POST /api/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/admin/ad-requests — admin: list all ad requests
+app.get('/api/admin/ad-requests', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  try {
+    const result = await pool.query(
+      `SELECT * FROM ad_requests ORDER BY submitted_at DESC`
+    );
+    res.json({ success: true, adRequests: result.rows });
+  } catch (err) {
+    console.error('GET /api/admin/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/ad-requests/:id — admin: update status + notes
+app.patch('/api/admin/ad-requests/:id', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  const { status, notes } = req.body;
+  const allowed = ['pending', 'approved', 'rejected', 'completed'];
+  if (!status || !allowed.includes(status)) {
+    return res.status(400).json({ success: false, error: `status must be one of: ${allowed.join(', ')}` });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE ad_requests SET status=$1, notes=$2, reviewed_at=NOW(), reviewed_by='admin' WHERE id=$3 RETURNING *`,
+      [status, notes || null, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
+    res.json({ success: true, adRequest: result.rows[0] });
+  } catch (err) {
+    console.error('PATCH /api/admin/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // ── Catch-all: serve index.html for any unmatched GET ──
