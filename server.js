@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { Pool } = require('pg');
 const axios = require('axios');
-// NOTE: notices routes are defined inline below — no separate router file needed
+// notices routes are defined inline — no separate router file needed
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -280,6 +280,58 @@ CREATE INDEX IF NOT EXISTS idx_notices_expires ON notices(expires_at);
   }
 }
 
+// ── Ensure notices table exists (runs every startup, independent of initDB early-exit) ──
+async function ensureNoticesTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notices (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(200) NOT NULL,
+        content TEXT NOT NULL,
+        category VARCHAR(20) DEFAULT 'general',
+        priority VARCHAR(10) DEFAULT 'normal',
+        created_by VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        expires_at TIMESTAMP,
+        is_archived BOOLEAN DEFAULT false
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_archived  ON notices(is_archived)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_expires   ON notices(expires_at) WHERE expires_at IS NOT NULL`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_priority  ON notices(priority)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_created   ON notices(created_at DESC)`);
+
+    // Seed sample notices only if table is empty
+    const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
+    if (parseInt(rows[0].count) === 0) {
+      await pool.query(`
+        INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
+        ('Ngoliba Farmers Market - Every Saturday',
+         'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at the Ngoliba Market grounds.',
+         'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
+        ('Water Rationing Notice - Kilimambogo',
+         'Kenya Water Authority advises reduced supply Mon-Wed for 30 days due to pipeline maintenance. Store water accordingly. Helpline: 0800 723 232',
+         'public', 'high', NOW() + INTERVAL '30 days', 'system'),
+        ('Boda Boda Riders Wanted - Ngoliba Express',
+         'Ngoliba Express Logistics recruiting 10 boda boda riders for parcel delivery. Must have valid licence. Earn KES 800-1,500 daily. Apply: Ngoliba Town Centre.',
+         'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
+        ('Community Health Camp - Mwea Ward',
+         'Free health screening and vaccination. First Saturday of every month, Mwea Ward Market. Bring ID.',
+         'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
+        ('Road Maintenance - Ngoliba-Ruiru Highway',
+         'The Ngoliba-Ruiru highway will be under maintenance June 15-22. Expect delays. Use alternative routes.',
+         'public', 'high', NOW() + INTERVAL '45 days', 'system')
+      `);
+      console.log('✅ notices table seeded with sample data');
+    }
+    console.log('✅ notices table ready');
+  } catch (err) {
+    console.error('❌ ensureNoticesTable error:', err.message);
+  }
+}
+
 // Test database connection
 async function testDBConnection() {
   try {
@@ -305,6 +357,7 @@ app.use((req, res, next) => {
   const connected = await testDBConnection();
   if (connected) {
     await initDB();
+    await ensureNoticesTable();
     await ensureActivePeriod();
   } else {
     console.warn('⚠️  Continuing without database. Some features may not work.');
