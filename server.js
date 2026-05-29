@@ -952,21 +952,12 @@ app.get('/api/notices', async (req, res) => {
     let result;
     if (cat && cat !== 'all') {
       result = await pool.query(
-        `SELECT * FROM notices
-         WHERE (expires_at IS NULL OR expires_at > NOW())
-           AND category = $1
-         ORDER BY
-           CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
-           created_at DESC`,
+        `SELECT * FROM notices WHERE (expires_at IS NULL OR expires_at > NOW()) AND COALESCE(is_archived,false)=false AND category = $1 ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`,
         [cat]
       );
     } else {
       result = await pool.query(
-        `SELECT * FROM notices
-         WHERE (expires_at IS NULL OR expires_at > NOW())
-         ORDER BY
-           CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
-           created_at DESC`
+        `SELECT * FROM notices WHERE (expires_at IS NULL OR expires_at > NOW()) AND COALESCE(is_archived,false)=false ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`
       );
     }
     res.json({ success: true, notices: result.rows });
@@ -1016,12 +1007,9 @@ app.delete('/api/notices/:id', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
 // ══════════════════════════════════════════════════════
 // /api/admin/notices — notice management endpoints
-// Auth: x-admin-password header checked against ADMIN_SECRET
 // ══════════════════════════════════════════════════════
-
 function checkNoticeAdminAuth(req, res) {
   const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
   const provided = req.headers['x-admin-password'];
@@ -1032,23 +1020,17 @@ function checkNoticeAdminAuth(req, res) {
   return true;
 }
 
-// POST /api/admin/notices/verify — check password without side effects
 app.post('/api/admin/notices/verify', (req, res) => {
   const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
   const provided = req.headers['x-admin-password'];
-  if (provided && provided === secret) {
-    return res.json({ success: true });
-  }
+  if (provided && provided === secret) return res.json({ success: true });
   return res.status(401).json({ success: false, error: 'Invalid password' });
 });
 
-// GET /api/admin/notices — list all notices including expired/archived
 app.get('/api/admin/notices', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
   try {
-    const result = await pool.query(
-      `SELECT * FROM notices ORDER BY created_at DESC`
-    );
+    const result = await pool.query('SELECT * FROM notices ORDER BY created_at DESC');
     res.json({ success: true, data: { notices: result.rows } });
   } catch (err) {
     console.error('GET /api/admin/notices error:', err.message);
@@ -1056,17 +1038,14 @@ app.get('/api/admin/notices', async (req, res) => {
   }
 });
 
-// POST /api/admin/notices — create a notice
 app.post('/api/admin/notices', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
   const { title, content, category, priority, expiresAt } = req.body;
-  if (!title || !content) {
-    return res.status(400).json({ success: false, error: 'title and content are required' });
-  }
+  if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
   try {
     const result = await pool.query(
-'INSERT INTO notices (id, title, content, category, priority, expires_at, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [crypto.randomUUID(), title, content, category || 'general', priority || 'normal', expiresAt || null, 'admin']
+      'INSERT INTO notices (id,title,content,category,priority,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [crypto.randomUUID(), title, content, category||'general', priority||'normal', expiresAt||null, 'admin']
     );
     res.json({ success: true, notice: result.rows[0] });
   } catch (err) {
@@ -1075,21 +1054,16 @@ app.post('/api/admin/notices', async (req, res) => {
   }
 });
 
-// PUT /api/admin/notices/:id — update a notice
 app.put('/api/admin/notices/:id', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
   const { title, content, category, priority, expiresAt } = req.body;
-  if (!title || !content) {
-    return res.status(400).json({ success: false, error: 'title and content are required' });
-  }
+  if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
   try {
     const result = await pool.query(
-'UPDATE notices SET title=$1, content=$2, category=$3, priority=$4, expires_at=$5, updated_at=NOW() WHERE id=$6 RETURNING *',
-      [title, content, category || 'general', priority || 'normal', expiresAt || null, req.params.id]
+      'UPDATE notices SET title=$1,content=$2,category=$3,priority=$4,expires_at=$5,updated_at=NOW() WHERE id=$6 RETURNING *',
+      [title, content, category||'general', priority||'normal', expiresAt||null, req.params.id]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Notice not found' });
-    }
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Notice not found' });
     res.json({ success: true, notice: result.rows[0] });
   } catch (err) {
     console.error('PUT /api/admin/notices error:', err.message);
@@ -1097,11 +1071,10 @@ app.put('/api/admin/notices/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/admin/notices/:id — delete a notice
 app.delete('/api/admin/notices/:id', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
   try {
-    await pool.query('DELETE FROM notices WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM notices WHERE id=$1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /api/admin/notices error:', err.message);
