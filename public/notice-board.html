@@ -610,9 +610,10 @@
 
                 if (!json.success) throw new Error(json.error);
 
-                state.notices = json.data.notices;
-                state.total = json.data.pagination.total;
-                state.totalPages = json.data.pagination.totalPages;
+                // Server returns flat { success, notices:[] } with no data wrapper or pagination
+                state.notices = json.notices || [];
+                state.total = state.notices.length;
+                state.totalPages = 1;
 
                 renderNotices();
                 renderPagination();
@@ -756,47 +757,8 @@
         // ─────────────────────────────────────────
 
         function connectSSE() {
-            try {
-                const eventSource = new EventSource('/api/notices/stream');
-
-                eventSource.addEventListener('notice-created', (event) => {
-                    const notice = JSON.parse(event.data);
-                    console.log('Notice created:', notice);
-                    // Reload notices to show new one
-                    fetchNotices(1);
-                    showStatus('✨ New notice posted!', 'info');
-                });
-
-                eventSource.addEventListener('notice-updated', (event) => {
-                    const notice = JSON.parse(event.data);
-                    console.log('Notice updated:', notice);
-                    // Reload current page
-                    fetchNotices(state.page);
-                    showStatus('📝 Notice updated', 'info');
-                });
-
-                eventSource.addEventListener('notice-deleted', (event) => {
-                    const { id } = JSON.parse(event.data);
-                    console.log('Notice deleted:', id);
-                    // Reload current page
-                    fetchNotices(state.page);
-                    showStatus('🗑️ Notice removed', 'info');
-                });
-
-                eventSource.addEventListener('connected', () => {
-                    console.log('Connected to real-time updates');
-                });
-
-                eventSource.onerror = () => {
-                    console.error('SSE connection error');
-                    eventSource.close();
-                    // Retry after 5 seconds
-                    setTimeout(connectSSE, 5000);
-                };
-
-            } catch (error) {
-                console.error('SSE connection failed:', error);
-            }
+            // SSE endpoint not yet implemented — poll every 30 s instead
+            setInterval(() => fetchNotices(state.page), 30000);
         }
 
         // ─────────────────────────────────────────
