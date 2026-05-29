@@ -167,7 +167,7 @@ async function initDB() {
 CREATE INDEX IF NOT EXISTS idx_notices_archived ON notices(is_archived);
 CREATE INDEX IF NOT EXISTS idx_notices_expires ON notices(expires_at);
       CREATE TABLE IF NOT EXISTS ad_requests (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         business_name VARCHAR(100),
         ad_content TEXT,
         contact_phone VARCHAR(20),
@@ -309,6 +309,29 @@ async function ensureNoticesTable() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_priority  ON notices(priority)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_created   ON notices(created_at DESC)`);
+
+    // ✅ Ensure ad_requests table exists with the correct UUID default (no uuid-ossp dependency)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ad_requests (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        business_name VARCHAR(100),
+        ad_content TEXT,
+        contact_phone VARCHAR(20),
+        contact_email VARCHAR(255),
+        budget VARCHAR(50),
+        duration VARCHAR(50) DEFAULT '7 days',
+        status VARCHAR(20) DEFAULT 'pending',
+        submitted_at TIMESTAMP DEFAULT NOW(),
+        reviewed_at TIMESTAMP,
+        reviewed_by VARCHAR(50),
+        notes TEXT
+      )
+    `);
+    // Fix the default on existing deployments where uuid_generate_v4() was used
+    await pool.query(`
+      ALTER TABLE ad_requests
+        ALTER COLUMN id SET DEFAULT gen_random_uuid()
+    `);
 
     // Seed sample notices only if table is empty
     const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
@@ -1236,8 +1259,8 @@ app.post('/api/ad-requests', async (req, res) => {
   }
   try {
     const result = await pool.query(
-      `INSERT INTO ad_requests (business_name, ad_content, contact_phone, contact_email, budget, duration, status, submitted_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW()) RETURNING id, submitted_at`,
+      `INSERT INTO ad_requests (id, business_name, ad_content, contact_phone, contact_email, budget, duration, status, submitted_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'pending', NOW()) RETURNING id, submitted_at`,
       [businessName, adContent, contactPhone, contactEmail || null, budget || null, duration || '7 days']
     );
     res.json({ success: true, id: result.rows[0].id, submittedAt: result.rows[0].submitted_at });
