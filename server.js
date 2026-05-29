@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { Pool } = require('pg');
 const axios = require('axios');
-const noticesRouter = require('./routes/notices');
+// NOTE: notices routes are defined inline below — no separate router file needed
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -746,15 +746,12 @@ app.get('/api/history', async (req, res) => {
 // ════════════════════════════════════════════════
 // CATCH-ALL & ERROR HANDLING
 // ════════════════════════════════════════════════
-app.use(noticesRouter);
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
 
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
+
 // ════════════════════════════════════════════════════════════════════════════
 // MISSING ENDPOINTS - Add these
 // ════════════════════════════════════════════════════════════════════════════
@@ -1089,26 +1086,8 @@ if (action === 'delete_user') {
 
 // Default: Unknown action
 return res.status(400).json({ success: false, error: 'Unknown action' });
-
-  // ✅ add_user action
-  if (action === 'add_user') {
-    const { phone, firstName, surname, sublocation } = req.body;
-    if (!phone || !firstName || !surname) return res.status(400).json({ success: false, error: 'Missing fields' });
-    try {
-      const result = await pool.query(
-        `INSERT INTO users (phone, first_name, surname, sublocation, civic_score, created_at) 
-         VALUES ($1, $2, $3, $4, 0, NOW()) 
-         RETURNING id, phone, first_name, surname, sublocation`,
-        [phone, firstName, surname, sublocation || 'Ngoliba']
-      );
-      return res.json({ success: true, user: result.rows[0] });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
-  }
-
-  return res.status(400).json({ success: false, error: 'Unknown action: ' + action });
 });
+
 // Add this right before the app.listen() line (around line 980):
 app.get('/api/debug/check-env', (req, res) => {
   res.json({
@@ -1117,6 +1096,11 @@ app.get('/api/debug/check-env', (req, res) => {
     DATABASE_URL: process.env.DATABASE_URL ? 'SET' : 'NOT SET',
     NODE_ENV: process.env.NODE_ENV
   });
+});
+
+// ── Catch-all: serve index.html for any unmatched GET ──
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const server = app.listen(PORT, () => {

@@ -285,6 +285,7 @@ const CANDIDATES = [
 let adminToken = sessionStorage.getItem('adminToken') || null;
 let timerInterval = null;
 let currentPeriodEnd = null;
+let currentPeriodId = null;
 
 // ── AUTH ──
 async function login() {
@@ -338,6 +339,7 @@ async function loadDashboard() {
   document.getElementById('statVoters').textContent = data.registeredVoters;
   document.getElementById('statVotes').textContent = data.currentPeriod?.totalVotes ?? 0;
   document.getElementById('statPeriod').textContent = data.currentPeriod ? `#${data.currentPeriod.periodId}` : '—';
+  currentPeriodId = data.currentPeriod?.periodId ?? null; // ✅ Bug 5 fix: store for end_period action
 
   // Timer
   // Timer (use endTime instead of periodEnd)
@@ -381,7 +383,7 @@ function updateTimer() {
 
 // ── PERIODS ──
 async function loadPeriods() {
-  const res = await fetch('/.netlify/functions/get-history?limit=10');
+  const res = await fetch('/api/history?limit=10');
   const data = await res.json();
   if (!data.periods) return;
   const tbody = document.getElementById('periodsTable');
