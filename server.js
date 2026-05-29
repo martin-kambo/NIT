@@ -283,99 +283,48 @@ CREATE INDEX IF NOT EXISTS idx_notices_expires ON notices(expires_at);
 // ── Ensure notices table exists (runs every startup, independent of initDB early-exit) ──
 async function ensureNoticesTable() {
   try {
-    // Detect whether 'id' column is UUID or SERIAL so we handle both schema versions
-    const idTypeResult = await pool.query(`
-      SELECT data_type FROM information_schema.columns
-      WHERE table_name = 'notices' AND column_name = 'id'
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notices (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(200) NOT NULL,
+        content TEXT NOT NULL,
+        category VARCHAR(20) DEFAULT 'general',
+        priority VARCHAR(10) DEFAULT 'normal',
+        created_by VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        expires_at TIMESTAMP,
+        is_archived BOOLEAN DEFAULT false
+      )
     `);
-    const idIsUuid = idTypeResult.rows.length > 0 && idTypeResult.rows[0].data_type === 'uuid';
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_archived  ON notices(is_archived)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_expires   ON notices(expires_at) WHERE expires_at IS NOT NULL`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_priority  ON notices(priority)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_created   ON notices(created_at DESC)`);
 
-    // Create table only if it does not exist (idempotent)
-    if (idIsUuid) {
-      // Existing DB has UUID id — keep as-is, do not recreate
-      console.log('✅ notices table exists (UUID id schema)');
-    } else {
+    // Seed sample notices only if table is empty
+    const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
+    if (parseInt(rows[0].count) === 0) {
       await pool.query(`
-        CREATE TABLE IF NOT EXISTS notices (
-          id SERIAL PRIMARY KEY,
-          title VARCHAR(200) NOT NULL,
-          content TEXT NOT NULL,
-          category VARCHAR(20) DEFAULT 'general',
-          priority VARCHAR(10) DEFAULT 'normal',
-          created_by VARCHAR(100),
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW(),
-          expires_at TIMESTAMP,
-          is_archived BOOLEAN DEFAULT false
-        )
+        INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
+        ('Ngoliba Farmers Market - Every Saturday',
+         'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at the Ngoliba Market grounds.',
+         'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
+        ('Water Rationing Notice - Kilimambogo',
+         'Kenya Water Authority advises reduced supply Mon-Wed for 30 days due to pipeline maintenance. Store water accordingly. Helpline: 0800 723 232',
+         'public', 'high', NOW() + INTERVAL '30 days', 'system'),
+        ('Boda Boda Riders Wanted - Ngoliba Express',
+         'Ngoliba Express Logistics recruiting 10 boda boda riders for parcel delivery. Must have valid licence. Earn KES 800-1,500 daily. Apply: Ngoliba Town Centre.',
+         'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
+        ('Community Health Camp - Mwea Ward',
+         'Free health screening and vaccination. First Saturday of every month, Mwea Ward Market. Bring ID.',
+         'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
+        ('Road Maintenance - Ngoliba-Ruiru Highway',
+         'The Ngoliba-Ruiru highway will be under maintenance June 15-22. Expect delays. Use alternative routes.',
+         'public', 'high', NOW() + INTERVAL '45 days', 'system')
       `);
-    }
-
-    // ── Column migrations: add any columns missing from older schema versions ──
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW()`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS created_by  VARCHAR(100)`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS priority    VARCHAR(10) DEFAULT 'normal'`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS category    VARCHAR(20) DEFAULT 'general'`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS expires_at  TIMESTAMP`);
-    console.log('✅ notices columns verified/migrated');
-
-    // Indexes (all IF NOT EXISTS — safe to re-run)
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_archived ON notices(is_archived)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_expires  ON notices(expires_at) WHERE expires_at IS NOT NULL`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category ON notices(category)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_priority ON notices(priority)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_created  ON notices(created_at DESC)`);
-
-    // Seed only if table is empty — isolated so a seed failure never blocks startup
-    try {
-      const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
-      if (parseInt(rows[0].count) === 0) {
-        if (idIsUuid) {
-          // UUID id schema: supply explicit gen_random_uuid() for each row
-          await pool.query(`
-            INSERT INTO notices (id, title, content, category, priority, expires_at, created_by) VALUES
-            (gen_random_uuid(), 'Ngoliba Farmers Market - Every Saturday',
-             'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at Ngoliba Market grounds.',
-             'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
-            (gen_random_uuid(), 'Water Rationing Notice - Kilimambogo',
-             'Kenya Water Authority advises reduced supply Mon-Wed for 30 days. Store water. Helpline: 0800 723 232',
-             'public', 'high', NOW() + INTERVAL '30 days', 'system'),
-            (gen_random_uuid(), 'Boda Boda Riders Wanted - Ngoliba Express',
-             'Ngoliba Express recruiting 10 boda boda riders. Valid licence required. Earn KES 800-1,500/day. Apply: Ngoliba Town Centre.',
-             'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
-            (gen_random_uuid(), 'Community Health Camp - Mwea Ward',
-             'Free health screening and vaccination. First Saturday every month, Mwea Ward Market. Bring ID.',
-             'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
-            (gen_random_uuid(), 'Road Maintenance - Ngoliba-Ruiru Highway',
-             'Ngoliba-Ruiru highway under maintenance June 15-22. Expect delays. Use alternative routes.',
-             'public', 'high', NOW() + INTERVAL '45 days', 'system')
-          `);
-        } else {
-          // SERIAL id schema: omit id, let the sequence handle it
-          await pool.query(`
-            INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
-            ('Ngoliba Farmers Market - Every Saturday',
-             'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at Ngoliba Market grounds.',
-             'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
-            ('Water Rationing Notice - Kilimambogo',
-             'Kenya Water Authority advises reduced supply Mon-Wed for 30 days. Store water. Helpline: 0800 723 232',
-             'public', 'high', NOW() + INTERVAL '30 days', 'system'),
-            ('Boda Boda Riders Wanted - Ngoliba Express',
-             'Ngoliba Express recruiting 10 boda boda riders. Valid licence required. Earn KES 800-1,500/day. Apply: Ngoliba Town Centre.',
-             'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
-            ('Community Health Camp - Mwea Ward',
-             'Free health screening and vaccination. First Saturday every month, Mwea Ward Market. Bring ID.',
-             'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
-            ('Road Maintenance - Ngoliba-Ruiru Highway',
-             'Ngoliba-Ruiru highway under maintenance June 15-22. Expect delays. Use alternative routes.',
-             'public', 'high', NOW() + INTERVAL '45 days', 'system')
-          `);
-        }
-        console.log('✅ notices table seeded with sample data');
-      }
-    } catch (seedErr) {
-      console.error('❌ notices seed error (non-fatal):', seedErr.message);
+      console.log('✅ notices table seeded with sample data');
     }
     console.log('✅ notices table ready');
   } catch (err) {
@@ -1067,6 +1016,104 @@ app.delete('/api/notices/:id', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ══════════════════════════════════════════════════════
+// /api/admin/notices — notice management endpoints
+// Auth: x-admin-password header checked against ADMIN_SECRET
+// ══════════════════════════════════════════════════════
+
+function checkNoticeAdminAuth(req, res) {
+  const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+  const provided = req.headers['x-admin-password'];
+  if (!provided || provided !== secret) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+// POST /api/admin/notices/verify — check password without side effects
+app.post('/api/admin/notices/verify', (req, res) => {
+  const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+  const provided = req.headers['x-admin-password'];
+  if (provided && provided === secret) {
+    return res.json({ success: true });
+  }
+  return res.status(401).json({ success: false, error: 'Invalid password' });
+});
+
+// GET /api/admin/notices — list all notices including expired/archived
+app.get('/api/admin/notices', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  try {
+    const result = await pool.query(
+      `SELECT * FROM notices ORDER BY created_at DESC`
+    );
+    res.json({ success: true, data: { notices: result.rows } });
+  } catch (err) {
+    console.error('GET /api/admin/notices error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/admin/notices — create a notice
+app.post('/api/admin/notices', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  const { title, content, category, priority, expiresAt } = req.body;
+  if (!title || !content) {
+    return res.status(400).json({ success: false, error: 'title and content are required' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO notices (id, title, content, category, priority, expires_at, created_by)
+       VALUES (gen_random_uuid(), , , , , , 'admin')
+       RETURNING *`,
+      [title, content, category || 'general', priority || 'normal', expiresAt || null]
+    );
+    res.json({ success: true, notice: result.rows[0] });
+  } catch (err) {
+    console.error('POST /api/admin/notices error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/admin/notices/:id — update a notice
+app.put('/api/admin/notices/:id', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  const { title, content, category, priority, expiresAt } = req.body;
+  if (!title || !content) {
+    return res.status(400).json({ success: false, error: 'title and content are required' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE notices
+       SET title=, content=, category=, priority=, expires_at=, updated_at=NOW()
+       WHERE id=
+       RETURNING *`,
+      [title, content, category || 'general', priority || 'normal', expiresAt || null, req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Notice not found' });
+    }
+    res.json({ success: true, notice: result.rows[0] });
+  } catch (err) {
+    console.error('PUT /api/admin/notices error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/admin/notices/:id — delete a notice
+app.delete('/api/admin/notices/:id', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  try {
+    await pool.query('DELETE FROM notices WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/admin/notices error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/admin', async (req, res) => {
   const { action, password, token } = req.body;
 

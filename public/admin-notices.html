@@ -602,27 +602,37 @@
         // AUTHENTICATION
         // ─────────────────────────────────────────
 
-        function handleLogin(event) {
+        async function handleLogin(event) {
             event.preventDefault();
             const password = document.getElementById('password').value;
-            
+
             if (!password) {
                 showAlert('loginAlert', 'Please enter a password', 'error');
                 return;
             }
 
-            // Store password for API requests
+            // Verify password against server before granting access
+            try {
+                const res = await fetch('/api/admin/notices/verify', {
+                    method: 'POST',
+                    headers: { 'x-admin-password': password }
+                });
+                const json = await res.json();
+                if (!json.success) {
+                    showAlert('loginAlert', 'Invalid password', 'error');
+                    return;
+                }
+            } catch (err) {
+                showAlert('loginAlert', 'Could not reach server. Try again.', 'error');
+                return;
+            }
+
             state.adminPassword = password;
             state.isAuthenticated = true;
-
-            // Hide login, show admin
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('adminScreen').classList.add('active');
-
-            // Load notices
             loadNotices();
         }
-
         function handleLogout() {
             state.isAuthenticated = false;
             state.adminPassword = '';
