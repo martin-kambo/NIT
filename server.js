@@ -283,51 +283,95 @@ CREATE INDEX IF NOT EXISTS idx_notices_expires ON notices(expires_at);
 // ── Ensure notices table exists (runs every startup, independent of initDB early-exit) ──
 async function ensureNoticesTable() {
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS notices (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(200) NOT NULL,
-        content TEXT NOT NULL,
-        category VARCHAR(20) DEFAULT 'general',
-        priority VARCHAR(10) DEFAULT 'normal',
-        created_by VARCHAR(100),
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW(),
-        expires_at TIMESTAMP,
-        is_archived BOOLEAN DEFAULT false
-      )
+    // Detect whether 'id' column is UUID or SERIAL so we handle both schema versions
+    const idTypeResult = await pool.query(`
+      SELECT data_type FROM information_schema.columns
+      WHERE table_name = 'notices' AND column_name = 'id'
     `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_archived  ON notices(is_archived)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_expires   ON notices(expires_at) WHERE expires_at IS NOT NULL`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_priority  ON notices(priority)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_created   ON notices(created_at DESC)`);
+    const idIsUuid = idTypeResult.rows.length > 0 && idTypeResult.rows[0].data_type === 'uuid';
 
-    // ── Fix broken SERIAL sequence before seeding (sequence can desync on table recreation) ──
-    await pool.query(`SELECT setval(pg_get_serial_sequence('notices','id'), COALESCE(MAX(id),0)+1, false) FROM notices`);
+    // Create table only if it does not exist (idempotent)
+    if (idIsUuid) {
+      // Existing DB has UUID id — keep as-is, do not recreate
+      console.log('✅ notices table exists (UUID id schema)');
+    } else {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS notices (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(200) NOT NULL,
+          content TEXT NOT NULL,
+          category VARCHAR(20) DEFAULT 'general',
+          priority VARCHAR(10) DEFAULT 'normal',
+          created_by VARCHAR(100),
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW(),
+          expires_at TIMESTAMP,
+          is_archived BOOLEAN DEFAULT false
+        )
+      `);
+    }
 
-    // Seed sample notices only if table is empty
+    // ── Column migrations: add any columns missing from older schema versions ──
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW()`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS created_by  VARCHAR(100)`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS priority    VARCHAR(10) DEFAULT 'normal'`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS category    VARCHAR(20) DEFAULT 'general'`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS expires_at  TIMESTAMP`);
+    console.log('✅ notices columns verified/migrated');
+
+    // Indexes (all IF NOT EXISTS — safe to re-run)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_archived ON notices(is_archived)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_expires  ON notices(expires_at) WHERE expires_at IS NOT NULL`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category ON notices(category)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_priority ON notices(priority)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_created  ON notices(created_at DESC)`);
+
+    // Seed only if table is empty — isolated so a seed failure never blocks startup
     try {
       const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
       if (parseInt(rows[0].count) === 0) {
-        await pool.query(`
-          INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
-          ('Ngoliba Farmers Market - Every Saturday',
-           'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at Ngoliba Market grounds.',
-           'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
-          ('Water Rationing Notice - Kilimambogo',
-           'Kenya Water Authority advises reduced supply Mon-Wed for 30 days due to pipeline maintenance. Store water accordingly. Helpline: 0800 723 232',
-           'public', 'high', NOW() + INTERVAL '30 days', 'system'),
-          ('Boda Boda Riders Wanted - Ngoliba Express',
-           'Ngoliba Express recruiting 10 boda boda riders for parcel delivery. Valid licence required. Earn KES 800-1,500 daily. Apply: Ngoliba Town Centre.',
-           'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
-          ('Community Health Camp - Mwea Ward',
-           'Free health screening and vaccination. First Saturday every month, Mwea Ward Market. Bring ID.',
-           'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
-          ('Road Maintenance - Ngoliba-Ruiru Highway',
-           'Ngoliba-Ruiru highway under maintenance June 15-22. Expect delays. Use alternative routes.',
-           'public', 'high', NOW() + INTERVAL '45 days', 'system')
-        `);
+        if (idIsUuid) {
+          // UUID id schema: supply explicit gen_random_uuid() for each row
+          await pool.query(`
+            INSERT INTO notices (id, title, content, category, priority, expires_at, created_by) VALUES
+            (gen_random_uuid(), 'Ngoliba Farmers Market - Every Saturday',
+             'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at Ngoliba Market grounds.',
+             'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
+            (gen_random_uuid(), 'Water Rationing Notice - Kilimambogo',
+             'Kenya Water Authority advises reduced supply Mon-Wed for 30 days. Store water. Helpline: 0800 723 232',
+             'public', 'high', NOW() + INTERVAL '30 days', 'system'),
+            (gen_random_uuid(), 'Boda Boda Riders Wanted - Ngoliba Express',
+             'Ngoliba Express recruiting 10 boda boda riders. Valid licence required. Earn KES 800-1,500/day. Apply: Ngoliba Town Centre.',
+             'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
+            (gen_random_uuid(), 'Community Health Camp - Mwea Ward',
+             'Free health screening and vaccination. First Saturday every month, Mwea Ward Market. Bring ID.',
+             'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
+            (gen_random_uuid(), 'Road Maintenance - Ngoliba-Ruiru Highway',
+             'Ngoliba-Ruiru highway under maintenance June 15-22. Expect delays. Use alternative routes.',
+             'public', 'high', NOW() + INTERVAL '45 days', 'system')
+          `);
+        } else {
+          // SERIAL id schema: omit id, let the sequence handle it
+          await pool.query(`
+            INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
+            ('Ngoliba Farmers Market - Every Saturday',
+             'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at Ngoliba Market grounds.',
+             'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
+            ('Water Rationing Notice - Kilimambogo',
+             'Kenya Water Authority advises reduced supply Mon-Wed for 30 days. Store water. Helpline: 0800 723 232',
+             'public', 'high', NOW() + INTERVAL '30 days', 'system'),
+            ('Boda Boda Riders Wanted - Ngoliba Express',
+             'Ngoliba Express recruiting 10 boda boda riders. Valid licence required. Earn KES 800-1,500/day. Apply: Ngoliba Town Centre.',
+             'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
+            ('Community Health Camp - Mwea Ward',
+             'Free health screening and vaccination. First Saturday every month, Mwea Ward Market. Bring ID.',
+             'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
+            ('Road Maintenance - Ngoliba-Ruiru Highway',
+             'Ngoliba-Ruiru highway under maintenance June 15-22. Expect delays. Use alternative routes.',
+             'public', 'high', NOW() + INTERVAL '45 days', 'system')
+          `);
+        }
         console.log('✅ notices table seeded with sample data');
       }
     } catch (seedErr) {
