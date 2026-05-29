@@ -297,6 +297,13 @@ async function ensureNoticesTable() {
         is_archived BOOLEAN DEFAULT false
       )
     `);
+    // ── Column migrations: idempotent, run every startup ──
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW()`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS created_by  VARCHAR(100)`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS priority    VARCHAR(10) DEFAULT 'normal'`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS category    VARCHAR(20) DEFAULT 'general'`);
+    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS expires_at  TIMESTAMP`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_archived  ON notices(is_archived)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_expires   ON notices(expires_at) WHERE expires_at IS NOT NULL`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category)`);
@@ -1044,8 +1051,8 @@ app.post('/api/admin/notices', async (req, res) => {
   if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
   try {
     const result = await pool.query(
-      'INSERT INTO notices (id,title,content,category,priority,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [crypto.randomUUID(), title, content, category||'general', priority||'normal', expiresAt||null, 'admin']
+      'INSERT INTO notices (title,content,category,priority,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [title, content, category||'general', priority||'normal', expiresAt||null, 'admin']
     );
     res.json({ success: true, notice: result.rows[0] });
   } catch (err) {
