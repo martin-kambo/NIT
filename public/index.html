@@ -211,7 +211,7 @@ body::before {
 .faceoff-section {
   background: var(--charcoal);
   position: relative; overflow: hidden;
-  margin: 1.25rem 0;
+  margin: 1rem 0;
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-deep);
 }
@@ -226,35 +226,35 @@ body::before {
                     linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
   background-size: 40px 40px;
 }
-.faceoff-inner { position: relative; z-index: 2; display: flex; min-height: 280px; flex-wrap: wrap; }
+.faceoff-inner { position: relative; z-index: 2; display: flex; min-height: 260px; flex-wrap: wrap; }
 .fo-candidate {
   flex: 1; min-width: 200px; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; padding: 1.5rem 1.5rem;
+  align-items: center; justify-content: center; padding: 1.25rem 1.5rem;
   position: relative;
 }
 .fo-left { background: linear-gradient(135deg, rgba(67,97,238,0.12), transparent); }
 .fo-right { background: linear-gradient(225deg, rgba(230,57,70,0.12), transparent); }
 .fo-vs-divider {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 1rem 0; position: relative; z-index: 3;
+  padding: 0.75rem 0; position: relative; z-index: 3;
 }
 .fo-vs-line {
   flex: 1; width: 2px;
   background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.2), transparent);
 }
 .fo-vs-badge {
-  width: 44px; height: 44px; border-radius: 50%;
+  width: 42px; height: 42px; border-radius: 50%;
   background: radial-gradient(circle, #333, #1a1a1a);
   border: 2px solid rgba(255,255,255,0.15);
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Syne', sans-serif; font-size: 0.72rem; font-weight: 800;
+  font-family: 'Syne', sans-serif; font-size: 0.7rem; font-weight: 800;
   color: white; letter-spacing: 0.05em; box-shadow: 0 0 30px rgba(0,0,0,0.5);
   animation: vs-pulse 3s ease-in-out infinite;
 }
 @keyframes vs-pulse { 0%,100% { box-shadow: 0 0 30px rgba(0,0,0,0.5); } 50% { box-shadow: 0 0 50px rgba(255,255,255,0.1), 0 0 30px rgba(0,0,0,0.5); } }
 .fo-portrait-ring {
-  width: 90px; height: 90px; border-radius: 50%; padding: 3px;
-  position: relative; cursor: none; margin-bottom: 0.6rem;
+  width: 85px; height: 85px; border-radius: 50%; padding: 3px;
+  position: relative; cursor: none; margin-bottom: 0.5rem;
   transition: transform 0.3s;
 }
 .fo-portrait-ring:hover { transform: scale(1.06); }
@@ -264,12 +264,12 @@ body::before {
   width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 3px solid #1a1a1a;
 }
 .fo-name {
-  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem;
-  color: white; text-align: center; margin-bottom: 0.15rem;
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem;
+  color: white; text-align: center; margin-bottom: 0.1rem;
 }
-.fo-party { font-size: 0.7rem; color: rgba(255,255,255,0.4); margin-bottom: 0.5rem; }
+.fo-party { font-size: 0.7rem; color: rgba(255,255,255,0.4); margin-bottom: 0.4rem; }
 .fo-votes {
-  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 2.4rem;
+  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 2.2rem;
   line-height: 1; text-align: center;
   transition: all 0.3s;
 }
@@ -278,7 +278,7 @@ body::before {
 .fo-votes-label { font-size: 0.7rem; color: rgba(255,255,255,0.3); letter-spacing: 0.15em; text-transform: uppercase; margin-top: 0.25rem; }
 .fo-footer {
   background: rgba(0,0,0,0.4); border-top: 1px solid rgba(255,255,255,0.06);
-  padding: 0.6rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
+  padding: 0.5rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 1rem;
 }
 .fo-progress-wrap { flex: 1; min-width: 200px; }
@@ -662,7 +662,7 @@ select.field-input option { background: #1a2535; color: white; }
 .section-action { font-size: 0.8rem; color: var(--forest-light); font-weight: 600; cursor: none; background: none; border: none; text-decoration: underline; font-family: 'Outfit', sans-serif; }
 
 /* CANDIDATES GRID */
-.candidates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.25rem; margin-bottom: 2.5rem; }
+.candidates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.85rem; margin-bottom: 2rem; }
 .candidate-card {
   background: white; border-radius: var(--radius-xl); overflow: hidden;
   box-shadow: var(--shadow-card); border: 1px solid rgba(0,0,0,0.04);
@@ -673,7 +673,7 @@ select.field-input option { background: #1a2535; color: white; }
 }
 .candidate-card:hover { transform: translateY(-8px) scale(1.01); box-shadow: 0 24px 60px -12px rgba(0,0,0,0.2); }
 @keyframes card-reveal { to { opacity: 1; transform: translateY(0); } }
-.card-img-wrap { position: relative; height: 160px; background: var(--light-gray); overflow: hidden; }
+.card-img-wrap { position: relative; height: 110px; background: var(--light-gray); overflow: hidden; }
 .card-img-wrap img { width: 100%; height: 100%; object-fit: cover; object-position: top; transition: transform 0.5s; }
 .candidate-card:hover .card-img-wrap img { transform: scale(1.08); }
 .card-rank-badge {
@@ -693,13 +693,13 @@ select.field-input option { background: #1a2535; color: white; }
   color: white; font-size: 0.7rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;
   padding: 0.25rem 0.6rem; border-radius: 50px; border: 1px solid rgba(255,255,255,0.1);
 }
-.card-body { padding: 1rem 1.1rem; flex: 1; display: flex; flex-direction: column; }
-.card-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; color: var(--text-dark); margin-bottom: 0.15rem; }
-.card-party { font-size: 0.72rem; color: var(--mid-gray); margin-bottom: 0.6rem; }
-.card-bio { font-size: 0.78rem; color: var(--text-mid); line-height: 1.5; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-body { padding: 0.65rem 0.85rem; flex: 1; display: flex; flex-direction: column; }
+.card-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.8rem; color: var(--text-dark); margin-bottom: 0.1rem; }
+.card-party { font-size: 0.65rem; color: var(--mid-gray); margin-bottom: 0.4rem; }
+.card-bio { font-size: 0.72rem; color: var(--text-mid); line-height: 1.45; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-vote-btn {
   display: flex; align-items: center; justify-content: center; gap: 0.4rem;
-  width: 100%; margin-top: 0.9rem; padding: 0.65rem;
+  width: 100%; margin-top: 0.6rem; padding: 0.45rem;
   background: var(--forest); color: white; border: none; border-radius: var(--radius-md);
   font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 0.82rem;
   cursor: none; transition: all 0.2s; letter-spacing: 0.02em;
@@ -1114,8 +1114,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
   .fo-vs-divider { display: none; }
   .faceoff-inner { flex-direction: column; }
   .fo-votes { font-size: 2.5rem; }
-  .fo-portrait-ring { width: 70px; height: 70px; }
-  .fo-candidate { padding: 1rem 1rem; }
+  .fo-portrait-ring { width: 65px; height: 65px; }
+  .fo-candidate { padding: 0.85rem 1rem; }
   .site-header { padding: 0.75rem 0; }
   .hero-title { font-size: 2rem; }
 }
@@ -1491,8 +1491,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 }
 .notice-filter.active { background: var(--forest); color: white; }
 .notices-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1.25rem; margin-bottom: 1.5rem;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 0.85rem; margin-bottom: 1.2rem;
 }
 .notice-card {
   background: white; border-radius: var(--radius-xl);
@@ -1503,7 +1503,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 }
 .notice-card:hover { transform: translateY(-5px); box-shadow: 0 20px 50px -12px rgba(0,0,0,0.18); }
 .notice-card-top {
-  padding: 0.6rem 1rem 0; display: flex; align-items: center;
+  padding: 0.5rem 0.85rem 0; display: flex; align-items: center;
   justify-content: space-between;
 }
 .notice-cat-badge {
@@ -1520,25 +1520,25 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
   border: 1px solid var(--sand); border-radius: 50px; padding: 0.15rem 0.5rem;
 }
 .notice-card-img {
-  width: 100%; height: 140px; object-fit: cover;
-  background: var(--light-gray); margin-top: 0.6rem;
+  width: 100%; height: 90px; object-fit: cover;
+  background: var(--light-gray); margin-top: 0.5rem;
 }
 .notice-card-img-placeholder {
-  height: 140px; display: flex; align-items: center; justify-content: center;
-  font-size: 3rem; background: linear-gradient(135deg, var(--light-gray), var(--cream-dark));
-  margin-top: 0.6rem;
+  height: 90px; display: flex; align-items: center; justify-content: center;
+  font-size: 2rem; background: linear-gradient(135deg, var(--light-gray), var(--cream-dark));
+  margin-top: 0.5rem;
 }
-.notice-card-body { padding: 1rem 1.1rem; flex: 1; }
+.notice-card-body { padding: 0.65rem 0.85rem; flex: 1; }
 .notice-card-title {
-  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem;
-  color: var(--text-dark); margin-bottom: 0.4rem; line-height: 1.3;
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.82rem;
+  color: var(--text-dark); margin-bottom: 0.25rem; line-height: 1.3;
 }
 .notice-card-desc {
-  font-size: 0.8rem; color: var(--text-mid); line-height: 1.55;
-  display: -webkit-box; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: 0.74rem; color: var(--text-mid); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .notice-card-footer {
-  padding: 0.75rem 1.1rem; border-top: 1px solid var(--light-gray);
+  padding: 0.5rem 0.85rem; border-top: 1px solid var(--light-gray);
   display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
 }
 .notice-meta { font-size: 0.68rem; color: var(--mid-gray); }
