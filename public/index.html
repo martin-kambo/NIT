@@ -2831,6 +2831,7 @@ function enterDashboard(){
   seedInitialNotifications();
   renderNotifBell();
   initAdRequestChat();
+  renderNoticeboardTab(); // ✅ tabNotice is the default active tab — load on every login
   if(faceoffInterval)clearInterval(faceoffInterval);
   faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();updateLiveTicker();},3000);
   startCountdown();
@@ -5522,6 +5523,7 @@ window.enterDashboard = function(){
   if (typeof seedInitialNotifications === 'function') seedInitialNotifications();
   if (typeof renderNotifBell === 'function') renderNotifBell();
   if (typeof initAdRequestChat === 'function') initAdRequestChat();
+  if (typeof renderNoticeboardTab === 'function') renderNoticeboardTab(); // ✅ default active tab — load on login
   
   if(typeof faceoffInterval !== 'undefined' && faceoffInterval) clearInterval(faceoffInterval);
   faceoffInterval = setInterval(() => {

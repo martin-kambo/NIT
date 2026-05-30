@@ -1311,6 +1311,37 @@ app.get('/api/admin/ad-requests', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// HELPER: publish an approved ad_request as a notice
+// Called whenever status transitions to 'approved'
+// ─────────────────────────────────────────────────────────────
+async function publishAdAsNotice(adRequest, pool) {
+  // Convert duration string (e.g. "14 days") to an expires_at timestamp
+  const durationDays = parseInt(adRequest.duration) || 7;
+  const expiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+
+  // Map ad category to a notice-friendly title prefix
+  const prefix = {
+    business: '🛒 Business Ad',
+    event:    '🎉 Event',
+    jobs:     '💼 Job Listing',
+    public:   '📢 Public Notice',
+    general:  '📌 Notice',
+  }[adRequest.category] || '📌 Ad';
+
+  const title   = `${prefix}: ${adRequest.business_name}`;
+  const content = adRequest.ad_content
+    + (adRequest.contact_phone ? `\n\n📞 Contact: ${adRequest.contact_phone}` : '')
+    + (adRequest.contact_email ? `  |  ✉️ ${adRequest.contact_email}` : '');
+  const category = adRequest.category || 'general';
+
+  await pool.query(
+    `INSERT INTO notices (title, content, category, priority, expires_at, created_by)
+     VALUES ($1, $2, $3, 'normal', $4, 'ad-request')`,
+    [title, content, category, expiresAt]
+  );
+}
+
 // PATCH /api/admin/ad-requests/:id — admin: update status + notes + optional fee
 app.patch('/api/admin/ad-requests/:id', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
@@ -1330,6 +1361,17 @@ app.patch('/api/admin/ad-requests/:id', async (req, res) => {
       [status, notes || null, fee ? parseInt(fee) : null, req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
+
+    // ✅ If transitioning to approved, publish the ad as a notice immediately
+    if (status === 'approved') {
+      try {
+        await publishAdAsNotice(result.rows[0], pool);
+      } catch (pubErr) {
+        console.error('publishAdAsNotice error:', pubErr.message);
+        // Don't fail the whole request — ad is approved, notice publish is best-effort
+      }
+    }
+
     res.json({ success: true, adRequest: result.rows[0] });
   } catch (err) {
     console.error('PATCH /api/admin/ad-requests error:', err.message);
@@ -1368,6 +1410,16 @@ app.post('/api/ad-requests/:id/pay', async (req, res) => {
        WHERE id=$2 RETURNING *`,
       [mpesaReceiptNumber, req.params.id]
     );
+
+    // ✅ Publish the ad as a notice now that payment is confirmed
+    if (result.rows.length) {
+      try {
+        await publishAdAsNotice(result.rows[0], pool);
+      } catch (pubErr) {
+        console.error('publishAdAsNotice (pay) error:', pubErr.message);
+      }
+    }
+
     res.json({ success: true, adRequest: result.rows[0] });
   } catch (err) {
     console.error('POST /api/ad-requests/:id/pay error:', err.message);
