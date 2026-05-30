@@ -338,6 +338,7 @@ async function ensureNoticesTable() {
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS fee INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS submitted_by_phone VARCHAR(20)`);
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS category VARCHAR(20) DEFAULT 'general'`);
 
     // Seed sample notices only if table is empty
     const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
@@ -985,46 +986,77 @@ app.get('/api/faceoff', async (req, res) => {
 app.get('/api/notices', async (req, res) => {
   try {
     const { cat } = req.query;
+    const filterCat = cat && cat !== 'all' ? cat : null;
 
-    // Build WHERE clauses
-    const noticeWhere = cat && cat !== 'all'
-      ? { sql: "WHERE (expires_at IS NULL OR expires_at > NOW()) AND COALESCE(is_archived,false)=false AND category=$1", params: [cat] }
-      : { sql: "WHERE (expires_at IS NULL OR expires_at > NOW()) AND COALESCE(is_archived,false)=false", params: [] };
+    // Query 1: admin notices
+    const noticesQ = filterCat
+      ? pool.query(
+          `SELECT id, title, content, category, priority, created_at, expires_at,
+                  NULL AS contact_phone, NULL AS business_name, false AS is_ad
+           FROM notices
+           WHERE (expires_at IS NULL OR expires_at > NOW())
+             AND COALESCE(is_archived, false) = false
+             AND category = $1
+           ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`,
+          [filterCat]
+        )
+      : pool.query(
+          `SELECT id, title, content, category, priority, created_at, expires_at,
+                  NULL AS contact_phone, NULL AS business_name, false AS is_ad
+           FROM notices
+           WHERE (expires_at IS NULL OR expires_at > NOW())
+             AND COALESCE(is_archived, false) = false
+           ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`
+        );
 
-    const adWhere = cat && cat !== 'all'
-      ? { sql: "WHERE status='approved' AND COALESCE(is_hidden,false)=false AND COALESCE(category,'general')=$1", params: [cat] }
-      : { sql: "WHERE status='approved' AND COALESCE(is_hidden,false)=false", params: [] };
+    // Query 2: approved paid ad requests shaped to match notice cards
+    const adsQ = filterCat
+      ? pool.query(
+          `SELECT id,
+                  business_name                AS title,
+                  ad_content                   AS content,
+                  COALESCE(category,'general') AS category,
+                  'normal'                     AS priority,
+                  submitted_at                 AS created_at,
+                  NULL                         AS expires_at,
+                  contact_phone,
+                  business_name,
+                  true                         AS is_ad
+           FROM ad_requests
+           WHERE status = 'approved'
+             AND COALESCE(is_hidden, false) = false
+             AND COALESCE(category, 'general') = $1
+           ORDER BY submitted_at DESC`,
+          [filterCat]
+        )
+      : pool.query(
+          `SELECT id,
+                  business_name                AS title,
+                  ad_content                   AS content,
+                  COALESCE(category,'general') AS category,
+                  'normal'                     AS priority,
+                  submitted_at                 AS created_at,
+                  NULL                         AS expires_at,
+                  contact_phone,
+                  business_name,
+                  true                         AS is_ad
+           FROM ad_requests
+           WHERE status = 'approved'
+             AND COALESCE(is_hidden, false) = false
+           ORDER BY submitted_at DESC`
+        );
 
-    // 1. Admin-created notices
-    const noticesQ = pool.query(
-      `SELECT id, title, content, category, priority, created_at, expires_at,
-              NULL::text AS contact_phone, NULL::text AS business_name, false AS is_ad
-       FROM notices ${noticeWhere.sql}
-       ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`,
-      noticeWhere.params
-    );
+    // Run both queries — ads query is isolated so a missing column never kills notices
+    const [noticesResult, adsResultRaw] = await Promise.all([
+      noticesQ,
+      adsQ.catch(err => {
+        console.error('/api/notices ads query error (non-fatal):', err.message);
+        return { rows: [] };
+      })
+    ]);
 
-    // 2. Approved paid ad requests shaped to match notice card fields
-    const adsQ = pool.query(
-      `SELECT id,
-              business_name                    AS title,
-              ad_content                       AS content,
-              COALESCE(category,'general')     AS category,
-              'normal'                         AS priority,
-              submitted_at                     AS created_at,
-              NULL::timestamp                  AS expires_at,
-              contact_phone,
-              business_name,
-              true                             AS is_ad
-       FROM ad_requests ${adWhere.sql}
-       ORDER BY submitted_at DESC`,
-      adWhere.params
-    );
-
-    const [noticesResult, adsResult] = await Promise.all([noticesQ, adsQ]);
-
-    // 3. Merge: high-priority first, then newest
-    const all = [...noticesResult.rows, ...adsResult.rows].sort((a, b) => {
+    // Merge: high-priority first, then newest
+    const all = [...noticesResult.rows, ...adsResultRaw.rows].sort((a, b) => {
       const pa = a.priority === 'high' ? 0 : 1;
       const pb = b.priority === 'high' ? 0 : 1;
       if (pa !== pb) return pa - pb;
@@ -1033,7 +1065,7 @@ app.get('/api/notices', async (req, res) => {
 
     res.json({ success: true, notices: all });
   } catch (error) {
-    console.error('/api/notices GET error:', error.message);
+    console.error('/api/notices GET error:', error.message, '|', error.detail || '');
     res.status(500).json({ success: false, notices: [], error: error.message });
   }
 });
@@ -1303,9 +1335,9 @@ app.post('/api/ad-requests', async (req, res) => {
   }
   try {
     const result = await pool.query(
-      `INSERT INTO ad_requests (id, business_name, ad_content, contact_phone, contact_email, budget, duration, status, submitted_by_phone, submitted_at)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'pending', $7, NOW()) RETURNING id, submitted_at`,
-      [businessName, adContent, contactPhone, contactEmail || null, budget || null, duration || '7 days', session.phone]
+      `INSERT INTO ad_requests (id, business_name, ad_content, contact_phone, contact_email, budget, duration, status, submitted_by_phone, submitted_at, category)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'pending', $7, NOW(), $8) RETURNING id, submitted_at`,
+      [businessName, adContent, contactPhone, contactEmail || null, budget || null, duration || '7 days', session.phone, category || 'general']
     );
     res.json({ success: true, id: result.rows[0].id, submittedAt: result.rows[0].submitted_at });
   } catch (err) {
