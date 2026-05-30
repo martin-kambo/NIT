@@ -665,6 +665,95 @@ app.post('/api/auth', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════
+// ROUTE: /api/profile  — update profile details & photo
+// ════════════════════════════════════════════════
+app.post('/api/profile', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ success: false, error: 'Unauthorized' });
+  const { firstName, surname, sublocation, email, nationalId, language, profilePhoto } = req.body;
+  if (!firstName || !surname) return res.status(400).json({ success: false, error: 'Name fields required' });
+  try {
+    const result = await pool.query(
+      `UPDATE users
+       SET first_name=$1, surname=$2, sublocation=$3, email=$4, national_id=$5, language=$6,
+           profile_photo=COALESCE($7, profile_photo), updated_at=NOW()
+       WHERE id=$8
+       RETURNING id, phone, first_name, surname, dob, sublocation, email, national_id, language, voter_number, profile_photo, created_at, updated_at`,
+      [firstName, surname, sublocation || null, email || null, nationalId || null, language || 'en',
+       profilePhoto || null, session.userId]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+    return res.json({ success: true, user: sanitizeUser(result.rows[0]) });
+  } catch (e) {
+    console.error('/api/profile error:', e);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// ════════════════════════════════════════════════
+// ROUTE: /api/reset-password  — OTP-less reset (server validates phone exists)
+// ════════════════════════════════════════════════
+app.post('/api/reset-password', async (req, res) => {
+  const { action, phone } = req.body;
+  // action='request': validate phone exists → in production send SMS; here just confirm
+  if (action === 'request') {
+    try {
+      const result = await pool.query('SELECT id FROM users WHERE phone = $1', [phone]);
+      if (!result.rows.length) return res.status(404).json({ success: false, error: 'Phone not registered' });
+      // In production: generate OTP, save to DB, send via Africa's Talking SMS
+      // For now: return success so frontend can show code entry
+      return res.json({ success: true });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+  // action='confirm': apply new password
+  if (action === 'confirm') {
+    const { password } = req.body;
+    if (!phone || !password || password.length < 6)
+      return res.status(400).json({ success: false, error: 'Phone and password (min 6 chars) required' });
+    try {
+      const result = await pool.query('SELECT id FROM users WHERE phone = $1', [phone]);
+      if (!result.rows.length) return res.status(404).json({ success: false, error: 'Phone not registered' });
+      const salt = crypto.randomBytes(16).toString('hex');
+      const passwordHash = hashPassword(password, salt);
+      await pool.query('UPDATE users SET password_hash=$1, salt=$2, updated_at=NOW() WHERE phone=$3',
+        [passwordHash, salt, phone]);
+      return res.json({ success: true });
+    } catch (e) {
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+  return res.status(400).json({ success: false, error: 'Invalid action' });
+});
+
+// ════════════════════════════════════════════════
+// ROUTE: /api/change-password  — authenticated password change
+// ════════════════════════════════════════════════
+app.post('/api/change-password', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ success: false, error: 'Unauthorized' });
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword || newPassword.length < 6)
+    return res.status(400).json({ success: false, error: 'Both passwords required; new password min 6 chars' });
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE id = $1', [session.userId]);
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+    const user = result.rows[0];
+    if (hashPassword(currentPassword, user.salt) !== user.password_hash)
+      return res.status(401).json({ success: false, error: 'Current password incorrect' });
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = hashPassword(newPassword, salt);
+    await pool.query('UPDATE users SET password_hash=$1, salt=$2, updated_at=NOW() WHERE id=$3',
+      [passwordHash, salt, session.userId]);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('/api/change-password error:', e);
+    return res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// ════════════════════════════════════════════════
 // ROUTE: /api/vote
 // ════════════════════════════════════════════════
 app.post('/api/vote', async (req, res) => {
