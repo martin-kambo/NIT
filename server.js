@@ -337,6 +337,7 @@ async function ensureNoticesTable() {
     // Migrations for existing deployments
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS fee INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS submitted_by_phone VARCHAR(20)`);
+    await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT false`);
 
     // Seed sample notices only if table is empty
     const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
@@ -1297,12 +1298,15 @@ app.get('/api/my-ad-requests', async (req, res) => {
   }
 });
 
-// GET /api/admin/ad-requests — admin: list all ad requests
+// GET /api/admin/ad-requests — admin: list all ad requests (hidden excluded by default)
 app.get('/api/admin/ad-requests', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
   try {
+    const showHidden = req.query.showHidden === 'true';
     const result = await pool.query(
-      `SELECT * FROM ad_requests ORDER BY submitted_at DESC`
+      showHidden
+        ? `SELECT * FROM ad_requests ORDER BY submitted_at DESC`
+        : `SELECT * FROM ad_requests WHERE COALESCE(is_hidden, false) = false ORDER BY submitted_at DESC`
     );
     res.json({ success: true, adRequests: result.rows });
   } catch (err) {
@@ -1311,36 +1315,38 @@ app.get('/api/admin/ad-requests', async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-// HELPER: publish an approved ad_request as a notice
-// Called whenever status transitions to 'approved'
-// ─────────────────────────────────────────────────────────────
-async function publishAdAsNotice(adRequest, pool) {
-  // Convert duration string (e.g. "14 days") to an expires_at timestamp
-  const durationDays = parseInt(adRequest.duration) || 7;
-  const expiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+// PATCH /api/admin/ad-requests/:id/hide — toggle is_hidden
+app.patch('/api/admin/ad-requests/:id/hide', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  const { hidden } = req.body; // true = hide, false = unhide
+  try {
+    const result = await pool.query(
+      `UPDATE ad_requests SET is_hidden = $1 WHERE id = $2 RETURNING id, is_hidden`,
+      [hidden === true, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
+    res.json({ success: true, hidden: result.rows[0].is_hidden });
+  } catch (err) {
+    console.error('PATCH /api/admin/ad-requests/:id/hide error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-  // Map ad category to a notice-friendly title prefix
-  const prefix = {
-    business: '🛒 Business Ad',
-    event:    '🎉 Event',
-    jobs:     '💼 Job Listing',
-    public:   '📢 Public Notice',
-    general:  '📌 Notice',
-  }[adRequest.category] || '📌 Ad';
-
-  const title   = `${prefix}: ${adRequest.business_name}`;
-  const content = adRequest.ad_content
-    + (adRequest.contact_phone ? `\n\n📞 Contact: ${adRequest.contact_phone}` : '')
-    + (adRequest.contact_email ? `  |  ✉️ ${adRequest.contact_email}` : '');
-  const category = adRequest.category || 'general';
-
-  await pool.query(
-    `INSERT INTO notices (title, content, category, priority, expires_at, created_by)
-     VALUES ($1, $2, $3, 'normal', $4, 'ad-request')`,
-    [title, content, category, expiresAt]
-  );
-}
+// DELETE /api/admin/ad-requests/:id — permanently delete an ad request
+app.delete('/api/admin/ad-requests/:id', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  try {
+    const result = await pool.query(
+      `DELETE FROM ad_requests WHERE id = $1 RETURNING id`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/admin/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // PATCH /api/admin/ad-requests/:id — admin: update status + notes + optional fee
 app.patch('/api/admin/ad-requests/:id', async (req, res) => {
@@ -1361,17 +1367,6 @@ app.patch('/api/admin/ad-requests/:id', async (req, res) => {
       [status, notes || null, fee ? parseInt(fee) : null, req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
-
-    // ✅ If transitioning to approved, publish the ad as a notice immediately
-    if (status === 'approved') {
-      try {
-        await publishAdAsNotice(result.rows[0], pool);
-      } catch (pubErr) {
-        console.error('publishAdAsNotice error:', pubErr.message);
-        // Don't fail the whole request — ad is approved, notice publish is best-effort
-      }
-    }
-
     res.json({ success: true, adRequest: result.rows[0] });
   } catch (err) {
     console.error('PATCH /api/admin/ad-requests error:', err.message);
@@ -1410,16 +1405,6 @@ app.post('/api/ad-requests/:id/pay', async (req, res) => {
        WHERE id=$2 RETURNING *`,
       [mpesaReceiptNumber, req.params.id]
     );
-
-    // ✅ Publish the ad as a notice now that payment is confirmed
-    if (result.rows.length) {
-      try {
-        await publishAdAsNotice(result.rows[0], pool);
-      } catch (pubErr) {
-        console.error('publishAdAsNotice (pay) error:', pubErr.message);
-      }
-    }
-
     res.json({ success: true, adRequest: result.rows[0] });
   } catch (err) {
     console.error('POST /api/ad-requests/:id/pay error:', err.message);

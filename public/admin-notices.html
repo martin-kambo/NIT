@@ -212,6 +212,8 @@
         .ar-card.status-approved        { border-left-color: var(--success); }
         .ar-card.status-rejected        { border-left-color: var(--danger); }
         .ar-card.status-completed       { border-left-color: var(--primary); }
+        .ar-card.is-hidden-card         { opacity: 0.45; border-left-color: #9ca3af; }
+        .ar-card.is-hidden-card:hover   { opacity: 0.7; }
         .ar-status-badge.pending         { background: #fff7ed; color: var(--warning); }
         .ar-status-badge.payment_pending { background: #f5f3ff; color: #7c3aed; }
         .ar-status-badge.approved        { background: #f0fdf4; color: var(--success); }
@@ -662,6 +664,9 @@
                             <option value="rejected">Rejected</option>
                             <option value="completed">Completed</option>
                         </select>
+                        <button class="btn btn-secondary btn-small" id="showHiddenBtn" onclick="toggleShowHidden()" style="display:flex;align-items:center;gap:5px;">
+                            👁 Show Hidden
+                        </button>
                         <button class="btn btn-secondary btn-small" onclick="loadAdRequests()">↻ Refresh</button>
                     </div>
                 </div>
@@ -1000,7 +1005,7 @@
             const container = document.getElementById('adRequestsContainer');
             container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⏳</div><p>Loading...</p></div>';
             try {
-                const res = await fetch('/api/admin/ad-requests', {
+                const res = await fetch(`/api/admin/ad-requests?showHidden=${showingHidden}`, {
                     headers: { 'x-admin-password': state.adminPassword }
                 });
                 const json = await res.json();
@@ -1055,10 +1060,24 @@
                 const isActive     = isPending || isAwaitingPay;
 
                 return `
-                <div class="ar-card status-${r.status}" id="arCard-${r.id}">
+                <div class="ar-card status-${r.status} ${r.is_hidden ? 'is-hidden-card' : ''}" id="arCard-${r.id}">
                     <div class="ar-card-header">
-                        <div class="ar-business-name">🏢 ${escapeHTML(r.business_name)}</div>
-                        <span class="ar-status-badge ${r.status}">${statusLabel[r.status] || r.status}</span>
+                        <div class="ar-business-name">🏢 ${escapeHTML(r.business_name)}${r.is_hidden ? ' <span style="font-size:11px;color:#9ca3af;font-weight:400;">(hidden)</span>' : ''}</div>
+                        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                            <span class="ar-status-badge ${r.status}">${statusLabel[r.status] || r.status}</span>
+                            <button
+                                onclick="toggleHideAdRequest('${r.id}', ${!r.is_hidden})"
+                                title="${r.is_hidden ? 'Unhide' : 'Hide'}"
+                                style="padding:3px 8px;font-size:12px;border:1px solid var(--border);border-radius:5px;background:white;cursor:pointer;color:var(--text-light);transition:all 0.15s;">
+                                ${r.is_hidden ? '👁 Unhide' : '🙈 Hide'}
+                            </button>
+                            <button
+                                onclick="deleteAdRequest('${r.id}', '${escapeHTML(r.business_name)}')"
+                                title="Delete permanently"
+                                style="padding:3px 8px;font-size:12px;border:1px solid #fca5a5;border-radius:5px;background:#fef2f2;cursor:pointer;color:var(--danger);transition:all 0.15s;">
+                                🗑
+                            </button>
+                        </div>
                     </div>
                     <div class="ar-content">${escapeHTML(r.ad_content)}</div>
                     <div class="ar-meta">
@@ -1167,6 +1186,62 @@
                 loadAdRequests();
             } catch (err) {
                 showAlert('adRequestAlert', 'Failed to update: ' + err.message, 'error');
+            }
+        }
+
+        // ─── Show / hide hidden toggle ───
+        let showingHidden = false;
+
+        function toggleShowHidden() {
+            showingHidden = !showingHidden;
+            const btn = document.getElementById('showHiddenBtn');
+            btn.innerHTML   = showingHidden ? '🙈 Hide Hidden' : '👁 Show Hidden';
+            btn.style.background = showingHidden ? 'var(--warning)' : '';
+            btn.style.color      = showingHidden ? 'white' : '';
+            btn.style.border     = showingHidden ? '1px solid var(--warning)' : '';
+            loadAdRequests();
+        }
+
+        // ─── Hide / Unhide a single request ───
+        async function toggleHideAdRequest(id, hide) {
+            try {
+                const res = await fetch(`/api/admin/ad-requests/${id}/hide`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-password': state.adminPassword },
+                    body: JSON.stringify({ hidden: hide })
+                });
+                const json = await res.json();
+                if (!json.success) throw new Error(json.error);
+                showAlert('adRequestAlert', hide ? '🙈 Request hidden.' : '👁 Request unhidden.', 'success');
+                loadAdRequests();
+            } catch (err) {
+                showAlert('adRequestAlert', 'Failed: ' + err.message, 'error');
+            }
+        }
+
+        // ─── Permanently delete a request ───
+        async function deleteAdRequest(id, businessName) {
+            if (!confirm(`Permanently delete the ad request from "${businessName}"?\n\nThis cannot be undone.`)) return;
+            try {
+                const res = await fetch(`/api/admin/ad-requests/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'x-admin-password': state.adminPassword }
+                });
+                const json = await res.json();
+                if (!json.success) throw new Error(json.error);
+                // Animate card out before reloading
+                const card = document.getElementById(`arCard-${id}`);
+                if (card) {
+                    card.style.transition = 'opacity 0.3s, transform 0.3s';
+                    card.style.opacity    = '0';
+                    card.style.transform  = 'scale(0.95)';
+                    setTimeout(() => loadAdRequests(), 320);
+                } else {
+                    loadAdRequests();
+                }
+                showAlert('adRequestAlert', `🗑 "${businessName}" deleted permanently.`, 'success');
+            } catch (err) {
+                showAlert('adRequestAlert', 'Delete failed: ' + err.message, 'error');
             }
         }
 
