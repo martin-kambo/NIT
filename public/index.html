@@ -2135,10 +2135,40 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           <div id="adSuccessState" style="display:none;text-align:center;padding:2rem 1.5rem;">
             <div style="font-size:2.5rem;margin-bottom:0.75rem;">✅</div>
             <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1rem;color:var(--text-dark);margin-bottom:0.4rem;">Request Submitted!</div>
-            <div style="font-size:0.82rem;color:var(--mid-gray);line-height:1.5;">The admin will review your request and contact you within 24 hours on the number you provided.</div>
-            <button onclick="resetAdForm()" style="margin-top:1.25rem;display:inline-flex;align-items:center;gap:0.4rem;background:var(--cream-dark);border:1px solid var(--sand);border-radius:50px;padding:0.45rem 1.2rem;font-size:0.78rem;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif;color:var(--text-mid);">
-              Submit Another
+            <div style="font-size:0.82rem;color:var(--mid-gray);line-height:1.5;margin-bottom:1rem;">The admin will review your request and contact you within 24 hours on the number you provided.</div>
+            <button onclick="checkAdRequestStatus()" style="display:inline-flex;align-items:center;gap:0.4rem;background:var(--forest);color:white;border:none;border-radius:50px;padding:0.5rem 1.2rem;font-size:0.78rem;font-weight:700;cursor:pointer;font-family:'Outfit',sans-serif;">
+              ↻ Check Status
             </button>
+            <button onclick="resetAdForm()" style="margin-top:0.5rem;margin-left:0.5rem;display:inline-flex;align-items:center;gap:0.4rem;background:var(--cream-dark);border:1px solid var(--sand);border-radius:50px;padding:0.45rem 1.2rem;font-size:0.78rem;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif;color:var(--text-mid);">
+              New Request
+            </button>
+          </div>
+
+          <!-- PAY NOW STATE — shown when admin sets payment_pending -->
+          <div id="adPayState" style="display:none;padding:1.25rem 1.25rem 1.5rem;">
+            <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:1rem;">
+              <div style="font-size:1.5rem;">💳</div>
+              <div>
+                <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:0.95rem;color:var(--text-dark);">Payment Required</div>
+                <div style="font-size:0.76rem;color:var(--mid-gray);">Admin has reviewed your request</div>
+              </div>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:0.75rem;padding:1rem;margin-bottom:1rem;">
+              <div style="font-size:0.72rem;color:#7c3aed;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem;">Fee Due</div>
+              <div style="font-size:1.8rem;font-weight:800;color:#5b21b6;font-family:'JetBrains Mono',monospace;" id="adPayAmount">KES 0</div>
+              <div style="font-size:0.75rem;color:var(--mid-gray);margin-top:0.2rem;" id="adPayDuration"></div>
+            </div>
+            <div id="adAdminNotes" style="display:none;font-size:0.78rem;color:var(--text-mid);background:var(--cream-dark);border-radius:0.5rem;padding:0.6rem 0.75rem;margin-bottom:0.75rem;line-height:1.5;"></div>
+            <div class="mpesa-phone-row" style="margin-bottom:0.75rem;">
+              <div class="mpesa-phone-prefix">🇰🇪 +254</div>
+              <input type="tel" id="adPayPhone" maxlength="9" placeholder="712 345 678"
+                style="flex:1;padding:0.5rem 0.75rem;border:1.5px solid var(--sand);border-radius:0.6rem;font-size:0.82rem;font-family:'Outfit',sans-serif;outline:none;">
+            </div>
+            <button onclick="initiateAdPayment()" id="adPayBtn"
+              style="width:100%;display:flex;align-items:center;justify-content:center;gap:0.5rem;background:linear-gradient(135deg,#00a550,#007a3a);color:white;border:none;border-radius:50px;padding:0.65rem 1.4rem;font-size:0.85rem;font-weight:700;cursor:pointer;font-family:'Outfit',sans-serif;">
+              <span style="font-size:1rem;">📲</span> Pay via M-Pesa
+            </button>
+            <div id="adPayError" style="display:none;margin-top:0.5rem;font-size:0.76rem;color:var(--red-accent);text-align:center;"></div>
           </div>
         </div>
 
@@ -3412,7 +3442,6 @@ function buildNotices(notices) {
       </div>
     </div>`;
   }).join("");
-  initScrollReveal();
 }
 
 // ═══ NOTIFICATION SYSTEM ═══
@@ -3523,6 +3552,9 @@ async function submitAdRequest(){
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'Submission failed');
 
+    // Remember ID so user can check status / pay later
+    lastAdRequestId = data.id;
+
     // Show success state
     document.getElementById("adFormState").style.display    = "none";
     document.getElementById("adSuccessState").style.display = "block";
@@ -3541,6 +3573,104 @@ function showArError(msg){
   el.style.display = "block";
 }
 
+// Tracks the last submitted request ID so the user can check status
+let lastAdRequestId = null;
+
+async function checkAdRequestStatus() {
+  if (!lastAdRequestId) return;
+  try {
+    const res  = await fetch(`/api/ad-requests/${lastAdRequestId}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+    const r = data.adRequest;
+
+    if (r.status === 'payment_pending') {
+      // Switch to pay state
+      document.getElementById('adSuccessState').style.display = 'none';
+      document.getElementById('adPayState').style.display    = 'block';
+      document.getElementById('adPayAmount').textContent     = `KES ${r.fee.toLocaleString()}`;
+      document.getElementById('adPayDuration').textContent   = `Duration: ${r.duration}`;
+
+      const notesEl = document.getElementById('adAdminNotes');
+      if (r.notes) { notesEl.textContent = `📝 Admin note: ${r.notes}`; notesEl.style.display = 'block'; }
+
+      // Pre-fill phone from profile if available
+      if (currentUser?.phone) {
+        const n = currentUser.phone.replace(/^0/, '').replace(/^254/, '').slice(0, 9);
+        document.getElementById('adPayPhone').value = n;
+      }
+    } else if (r.status === 'approved') {
+      showToast('🎉 Your ad has been approved and is now live!', 'success');
+    } else if (r.status === 'rejected') {
+      showToast('Your ad request was not approved. Please contact admin.', 'error');
+    } else {
+      showToast('⏳ Still under review — check back soon.', 'info');
+    }
+  } catch (err) {
+    showToast('Could not check status: ' + err.message, 'error');
+  }
+}
+
+async function initiateAdPayment() {
+  const raw = document.getElementById('adPayPhone').value.trim();
+  if (!/^\d{9}$/.test(raw)) {
+    const el = document.getElementById('adPayError');
+    el.textContent = 'Enter a valid 9-digit M-Pesa number e.g. 712 345 678';
+    el.style.display = 'block';
+    return;
+  }
+  document.getElementById('adPayError').style.display = 'none';
+
+  const btn = document.getElementById('adPayBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="btn-spinner" style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.4);border-top-color:white;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;"></div> Sending STK Push…';
+
+  const fullPhone = '254' + raw;
+  try {
+    // Reuse the existing DARAJA engine (simulated / real in production)
+    await DARAJA.getAccessToken();
+    const stk = await DARAJA.initiateStkPush({ phone: fullPhone, amount: parseInt(document.getElementById('adPayAmount').textContent.replace(/[^\d]/g, '')), accountRef: 'NGOLIBA-AD' });
+    if (stk.ResponseCode !== '0') throw new Error(stk.ResponseDescription);
+
+    // Simulate PIN confirmation (same pattern as voting flow)
+    btn.innerHTML = '⏳ Waiting for M-Pesa PIN…';
+    const result = await DARAJA.simulateIpnCallback(stk.CheckoutRequestID, true);
+
+    if (result.ResultCode === 0) {
+      // Confirm payment on the server
+      const confirm = await fetch(`/api/ad-requests/${lastAdRequestId}/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mpesaReceiptNumber: result.MpesaReceiptNumber, phone: fullPhone })
+      });
+      const confirmData = await confirm.json();
+      if (!confirmData.success) throw new Error(confirmData.error);
+
+      // Success UI
+      document.getElementById('adPayState').style.display = 'none';
+      document.getElementById('adSuccessState').style.display = 'block';
+      document.getElementById('adSuccessState').innerHTML = `
+        <div style="font-size:2.5rem;margin-bottom:0.75rem;">🎉</div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1rem;color:var(--text-dark);margin-bottom:0.4rem;">Payment Confirmed!</div>
+        <div style="font-size:0.82rem;color:var(--mid-gray);line-height:1.5;margin-bottom:0.75rem;">
+          Receipt: <strong>${result.MpesaReceiptNumber}</strong><br>Your ad is now <strong>live</strong> on the notice board.
+        </div>
+        <button onclick="resetAdForm()" style="display:inline-flex;align-items:center;gap:0.4rem;background:var(--cream-dark);border:1px solid var(--sand);border-radius:50px;padding:0.45rem 1.2rem;font-size:0.78rem;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif;color:var(--text-mid);">
+          Done
+        </button>`;
+      addNotification({ icon:'💳', iconCls:'ni-notice', text:`M-Pesa payment confirmed — your ad is now <strong>live</strong>! Receipt: ${result.MpesaReceiptNumber}`, type:'notice' });
+    } else {
+      throw new Error(result.ResultDesc || 'Payment was not confirmed');
+    }
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = '<span style="font-size:1rem;">📲</span> Pay via M-Pesa';
+    const el = document.getElementById('adPayError');
+    el.textContent = 'Payment failed: ' + err.message;
+    el.style.display = 'block';
+  }
+}
+
 function resetAdForm(){
   ["arBusinessName","arContactPhone","arContactEmail"].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value="";
@@ -3548,9 +3678,11 @@ function resetAdForm(){
   const ta=document.getElementById("arAdContent"); if(ta) ta.value="";
   document.getElementById("adFormState").style.display    = "block";
   document.getElementById("adSuccessState").style.display = "none";
+  document.getElementById("adPayState").style.display     = "none";
   document.getElementById("arError").style.display        = "none";
   const btn=document.getElementById("adRequestSendBtn");
   if(btn){ btn.disabled=false; btn.innerHTML='<i class="fas fa-paper-plane"></i> Submit Request'; }
+  lastAdRequestId = null;
 }
 
 const PROMISES=[

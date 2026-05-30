@@ -207,20 +207,16 @@
             box-shadow: var(--shadow);
             border-left: 4px solid var(--border);
         }
-        .ar-card.status-pending  { border-left-color: var(--warning); }
-        .ar-card.status-approved { border-left-color: var(--success); }
-        .ar-card.status-rejected { border-left-color: var(--danger); }
-        .ar-card.status-completed{ border-left-color: var(--primary); }
-        .ar-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-        .ar-business-name { font-weight: 700; font-size: 15px; color: var(--text); }
-        .ar-status-badge {
-            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-            padding: 3px 10px; border-radius: 50px; white-space: nowrap;
-        }
-        .ar-status-badge.pending  { background: #fff7ed; color: var(--warning); }
-        .ar-status-badge.approved { background: #f0fdf4; color: var(--success); }
-        .ar-status-badge.rejected { background: #fef2f2; color: var(--danger); }
-        .ar-status-badge.completed{ background: #eff6ff; color: var(--primary); }
+        .ar-card.status-pending         { border-left-color: var(--warning); }
+        .ar-card.status-payment_pending { border-left-color: #7c3aed; }
+        .ar-card.status-approved        { border-left-color: var(--success); }
+        .ar-card.status-rejected        { border-left-color: var(--danger); }
+        .ar-card.status-completed       { border-left-color: var(--primary); }
+        .ar-status-badge.pending         { background: #fff7ed; color: var(--warning); }
+        .ar-status-badge.payment_pending { background: #f5f3ff; color: #7c3aed; }
+        .ar-status-badge.approved        { background: #f0fdf4; color: var(--success); }
+        .ar-status-badge.rejected        { background: #fef2f2; color: var(--danger); }
+        .ar-status-badge.completed       { background: #eff6ff; color: var(--primary); }
         .ar-content { font-size: 13px; color: var(--text); margin-bottom: 10px; line-height: 1.5; }
         .ar-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--text-light); margin-bottom: 12px; }
         .ar-meta span { display: flex; align-items: center; gap: 4px; }
@@ -661,6 +657,7 @@
                         <select id="arStatusFilter" onchange="renderAdRequests()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
                             <option value="all">All Statuses</option>
                             <option value="pending">Pending</option>
+                            <option value="payment_pending">💳 Awaiting Payment</option>
                             <option value="approved">Approved</option>
                             <option value="rejected">Rejected</option>
                             <option value="completed">Completed</option>
@@ -1024,6 +1021,14 @@
             }
         }
 
+        // Duration → suggested fee lookup (admin can override)
+        const DURATION_FEES = {
+            '7 days':  500,
+            '14 days': 900,
+            '30 days': 1500,
+            '60 days': 2500
+        };
+
         function renderAdRequests() {
             const filter    = document.getElementById('arStatusFilter').value;
             const container = document.getElementById('adRequestsContainer');
@@ -1034,9 +1039,22 @@
                 return;
             }
 
-            const statusLabel = { pending: '⏳ Pending', approved: '✅ Approved', rejected: '❌ Rejected', completed: '🏁 Completed' };
+            const statusLabel = {
+                pending:         '⏳ Pending',
+                payment_pending: '💳 Awaiting Payment',
+                approved:        '✅ Approved',
+                rejected:        '❌ Rejected',
+                completed:       '🏁 Completed'
+            };
 
-            container.innerHTML = list.map(r => `
+            container.innerHTML = list.map(r => {
+                const suggestedFee = DURATION_FEES[r.duration] || 500;
+                const currentFee   = r.fee || suggestedFee;
+                const isPending    = r.status === 'pending';
+                const isAwaitingPay = r.status === 'payment_pending';
+                const isActive     = isPending || isAwaitingPay;
+
+                return `
                 <div class="ar-card status-${r.status}" id="arCard-${r.id}">
                     <div class="ar-card-header">
                         <div class="ar-business-name">🏢 ${escapeHTML(r.business_name)}</div>
@@ -1048,33 +1066,105 @@
                         <span>⏱ ${r.duration || '7 days'}</span>
                         <span>📞 ${escapeHTML(r.contact_phone)}</span>
                         ${r.contact_email ? `<span>✉️ ${escapeHTML(r.contact_email)}</span>` : ''}
-                        ${r.budget ? `<span>💰 ${escapeHTML(r.budget)}</span>` : ''}
                         <span>📅 Submitted: ${new Date(r.submitted_at).toLocaleDateString('en-KE', {day:'numeric',month:'short',year:'numeric'})}</span>
                         ${r.reviewed_at ? `<span>🕐 Reviewed: ${new Date(r.reviewed_at).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'})}</span>` : ''}
                     </div>
+
                     ${r.notes ? `<div style="font-size:13px;color:var(--text-light);background:var(--light);padding:8px 10px;border-radius:6px;margin-bottom:10px;">📝 <em>${escapeHTML(r.notes)}</em></div>` : ''}
-                    <div class="ar-actions">
-                        <input class="ar-notes-input" id="arNotes-${r.id}" placeholder="Add notes (optional)…" value="${r.notes ? escapeHTML(r.notes) : ''}">
-                        <button class="btn btn-success btn-small" onclick="updateAdRequest('${r.id}','approved')">✅ Approve</button>
-                        <button class="btn btn-secondary btn-small" onclick="updateAdRequest('${r.id}','completed')">🏁 Complete</button>
-                        <button class="btn btn-danger btn-small" onclick="updateAdRequest('${r.id}','rejected')">❌ Reject</button>
+
+                    ${isActive ? `
+                    <!-- ── APPROVAL FORM ── -->
+                    <div style="background:var(--light);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+                        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-light);margin-bottom:10px;">
+                            Admin Action
+                        </div>
+
+                        <!-- Fee row -->
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+                            <label style="font-size:13px;font-weight:600;white-space:nowrap;">
+                                Ad Fee (KES) <span style="font-weight:400;color:var(--text-light);">· ${r.duration}</span>
+                            </label>
+                            <div style="display:flex;align-items:center;gap:6px;">
+                                <span style="font-size:13px;color:var(--text-light);">KES</span>
+                                <input
+                                    type="number" min="0" step="50"
+                                    id="arFee-${r.id}"
+                                    value="${currentFee}"
+                                    style="width:90px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;"
+                                >
+                            </div>
+                            <div style="display:flex;gap:6px;">
+                                ${Object.entries(DURATION_FEES).map(([d,f]) =>
+                                    `<button onclick="document.getElementById('arFee-${r.id}').value=${f}"
+                                        style="padding:3px 8px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:white;cursor:pointer;font-family:inherit;">
+                                        ${d}: KES ${f}
+                                    </button>`
+                                ).join('')}
+                            </div>
+                        </div>
+
+                        <!-- Notes row -->
+                        <textarea
+                            id="arNotes-${r.id}"
+                            rows="2"
+                            placeholder="Optional notes for the requester (e.g. 'Ad approved, pay to go live')…"
+                            style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;"
+                        >${r.notes ? escapeHTML(r.notes) : ''}</textarea>
+
+                        <!-- Action buttons -->
+                        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                            <button class="btn btn-success btn-small" onclick="updateAdRequest('${r.id}','payment_pending')">
+                                💳 Request Payment
+                            </button>
+                            <button class="btn btn-secondary btn-small" onclick="updateAdRequest('${r.id}','approved')">
+                                ✅ Approve Free
+                            </button>
+                            <button class="btn btn-danger btn-small" onclick="updateAdRequest('${r.id}','rejected')">
+                                ❌ Reject
+                            </button>
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                    ` : r.status === 'approved' ? `
+                    <!-- ── APPROVED: mark complete ── -->
+                    <div style="display:flex;gap:8px;margin-top:6px;">
+                        <button class="btn btn-secondary btn-small" onclick="updateAdRequest('${r.id}','completed')">
+                            🏁 Mark Completed
+                        </button>
+                    </div>
+                    ` : ''}
+                </div>`;
+            }).join('');
         }
 
         async function updateAdRequest(id, status) {
-            const notes = document.getElementById(`arNotes-${id}`)?.value.trim() || '';
+            const notes  = document.getElementById(`arNotes-${id}`)?.value.trim() || '';
+            const feeEl  = document.getElementById(`arFee-${id}`);
+            const fee    = feeEl ? parseInt(feeEl.value) || 0 : 0;
+
+            // Validate: payment_pending requires a fee > 0
+            if (status === 'payment_pending' && fee <= 0) {
+                showAlert('adRequestAlert', 'Please set a fee greater than KES 0 before requesting payment.', 'error');
+                feeEl?.focus();
+                return;
+            }
+
             try {
                 const res = await fetch(`/api/admin/ad-requests/${id}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json', 'x-admin-password': state.adminPassword },
-                    body: JSON.stringify({ status, notes })
+                    body: JSON.stringify({ status, notes, fee })
                 });
                 const json = await res.json();
                 if (!json.success) throw new Error(json.error);
-                showAlert('adRequestAlert', `Request marked as "${status}" successfully.`, 'success');
-                loadAdRequests(); // Refresh the list + badge
+
+                const msgs = {
+                    payment_pending: `💳 Payment request sent — requester must pay KES ${fee} to go live.`,
+                    approved:        '✅ Ad approved and is now live.',
+                    rejected:        '❌ Ad request rejected.',
+                    completed:       '🏁 Ad marked as completed.'
+                };
+                showAlert('adRequestAlert', msgs[status] || `Status updated to "${status}".`, 'success');
+                loadAdRequests();
             } catch (err) {
                 showAlert('adRequestAlert', 'Failed to update: ' + err.message, 'error');
             }

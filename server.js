@@ -1287,23 +1287,66 @@ app.get('/api/admin/ad-requests', async (req, res) => {
   }
 });
 
-// PATCH /api/admin/ad-requests/:id — admin: update status + notes
+// PATCH /api/admin/ad-requests/:id — admin: update status + notes + optional fee
 app.patch('/api/admin/ad-requests/:id', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
-  const { status, notes } = req.body;
-  const allowed = ['pending', 'approved', 'rejected', 'completed'];
+  const { status, notes, fee } = req.body;
+  const allowed = ['pending', 'payment_pending', 'approved', 'rejected', 'completed'];
   if (!status || !allowed.includes(status)) {
     return res.status(400).json({ success: false, error: `status must be one of: ${allowed.join(', ')}` });
   }
+  if (status === 'payment_pending' && (!fee || isNaN(parseInt(fee)) || parseInt(fee) <= 0)) {
+    return res.status(400).json({ success: false, error: 'A valid fee (KES) is required when requesting payment.' });
+  }
   try {
     const result = await pool.query(
-      `UPDATE ad_requests SET status=$1, notes=$2, reviewed_at=NOW(), reviewed_by='admin' WHERE id=$3 RETURNING *`,
-      [status, notes || null, req.params.id]
+      `UPDATE ad_requests
+         SET status=$1, notes=$2, fee=COALESCE($3, fee), reviewed_at=NOW(), reviewed_by='admin'
+       WHERE id=$4 RETURNING *`,
+      [status, notes || null, fee ? parseInt(fee) : null, req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
     res.json({ success: true, adRequest: result.rows[0] });
   } catch (err) {
     console.error('PATCH /api/admin/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/ad-requests/:id — public: requester checks their own request status
+app.get('/api/ad-requests/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, business_name, status, fee, duration, notes, submitted_at, reviewed_at FROM ad_requests WHERE id=$1`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Not found' });
+    res.json({ success: true, adRequest: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/ad-requests/:id/pay — requester confirms payment (M-Pesa receipt)
+app.post('/api/ad-requests/:id/pay', async (req, res) => {
+  const { mpesaReceiptNumber, phone } = req.body;
+  if (!mpesaReceiptNumber) return res.status(400).json({ success: false, error: 'mpesaReceiptNumber is required' });
+  try {
+    // Verify the request is in payment_pending state
+    const check = await pool.query(`SELECT status, fee FROM ad_requests WHERE id=$1`, [req.params.id]);
+    if (!check.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
+    if (check.rows[0].status !== 'payment_pending') {
+      return res.status(400).json({ success: false, error: `Cannot confirm payment — request is currently "${check.rows[0].status}"` });
+    }
+    const result = await pool.query(
+      `UPDATE ad_requests
+         SET status='approved', notes=COALESCE(notes||' | ', '')||'Paid via M-Pesa: '||$1
+       WHERE id=$2 RETURNING *`,
+      [mpesaReceiptNumber, req.params.id]
+    );
+    res.json({ success: true, adRequest: result.rows[0] });
+  } catch (err) {
+    console.error('POST /api/ad-requests/:id/pay error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
