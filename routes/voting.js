@@ -52,8 +52,11 @@ async function getCurrentPeriod(pool) {
         const periodEnd = new Date(periodStart.getTime() + 5 * 60 * 1000); // 5 minutes
 
         result = await pool.query(`
-            INSERT INTO voting_periods (period_start, period_end, is_active, total_votes)
-            VALUES ($1, $2, true, 0)
+            INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+            VALUES (
+                COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
+                $1, $2, true, 0
+            )
             RETURNING id, period_start, period_end, total_votes
         `, [periodStart, periodEnd]);
 
@@ -145,13 +148,13 @@ function formatVoteResults(voteCounts, candidates) {
  */
 function getCandidates() {
     return [
-        { id: 0, name: 'Hon. James Mwangi', party: 'UDA', incumbent: true },
-        { id: 1, name: 'Grace Wanjiku', party: 'Independent' },
-        { id: 2, name: 'Peter Kimani', party: 'Jubilee' },
-        { id: 3, name: 'Sarah Nduati', party: 'Wiper' },
-        { id: 4, name: 'John Otieno', party: 'Independent' },
-        { id: 5, name: 'Mary Wambui', party: 'Maendeleo' },
-        { id: 6, name: 'David Kiprotich', party: 'Roots' }
+        { id: 0, name: 'Hon. James Mwangi', party: 'Jubilee',     incumbent: true,  bio: 'Incumbent MCA, serving second term.',  img: 'https://ui-avatars.com/api/?name=James+Mwangi&background=0d2818&color=40c27a&size=120' },
+        { id: 1, name: 'Grace Wanjiku',     party: 'ODM',         incumbent: false, bio: 'Community health advocate.',            img: 'https://ui-avatars.com/api/?name=Grace+Wanjiku&background=1a3f28&color=e9c46a&size=120' },
+        { id: 2, name: 'Peter Kimani',      party: 'UDA',         incumbent: false, bio: 'Former ward administrator.',            img: 'https://ui-avatars.com/api/?name=Peter+Kimani&background=2d6a4f&color=fff&size=120' },
+        { id: 3, name: 'Sarah Nduati',      party: 'Wiper',       incumbent: false, bio: 'Women rights campaigner.',              img: 'https://ui-avatars.com/api/?name=Sarah+Nduati&background=4361ee&color=fff&size=120' },
+        { id: 4, name: 'John Otieno',       party: 'ANC',         incumbent: false, bio: 'Youth empowerment champion.',           img: 'https://ui-avatars.com/api/?name=John+Otieno&background=e63946&color=fff&size=120' },
+        { id: 5, name: 'Mary Wambui',       party: 'Ford-K',      incumbent: false, bio: 'Education sector advocate.',            img: 'https://ui-avatars.com/api/?name=Mary+Wambui&background=c9a027&color=fff&size=120' },
+        { id: 6, name: 'David Kiprotich',   party: 'Independent', incumbent: false, bio: 'Farmer and entrepreneur.',              img: 'https://ui-avatars.com/api/?name=David+Kiprotich&background=6b7280&color=fff&size=120' }
     ];
 }
 
@@ -201,107 +204,6 @@ router.get('/api/voting-period', async (req, res) => {
     }
 });
 
-/**
- * POST /api/vote
- * Submit a vote for a candidate
- */
-router.post('/api/vote', async (req, res) => {
-    try {
-        const { candidateId, sublocation } = req.body;
-        const userId = req.user?.id || req.headers['x-user-id'];
-
-        // Validation
-        if (!userId) {
-            return res.status(400).json({
-                success: false,
-                error: 'User ID required (login first)'
-            });
-        }
-
-        if (!isValidCandidateId(candidateId)) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid candidate ID'
-            });
-        }
-
-        // Get current period
-        const period = await getCurrentPeriod(req.pool);
-        
-        // Check if period is still active
-        const now = new Date();
-        if (new Date(period.period_end) <= now) {
-            return res.status(400).json({
-                success: false,
-                error: 'Voting period has ended'
-            });
-        }
-
-        // Check if user already voted in this period
-        const checkVote = await req.pool.query(`
-            SELECT id FROM votes 
-            WHERE user_id = $1 AND period_id = $2
-        `, [userId, period.id]);
-
-        if (checkVote.rows.length > 0) {
-            return res.status(400).json({
-                success: false,
-                error: 'You have already voted in this period'
-            });
-        }
-
-        // Record vote
-        const ipHash = crypto
-            .createHash('sha256')
-            .update(req.ip + process.env.SESSION_SECRET)
-            .digest('hex')
-            .substring(0, 16);
-
-        const result = await req.pool.query(`
-            INSERT INTO votes (user_id, candidate_id, period_id, sublocation, ip_hash, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, created_at
-        `, [userId, candidateId, period.id, sublocation || null, ipHash, Date.now()]);
-
-        // Update period vote count
-        await req.pool.query(`
-            UPDATE voting_periods 
-            SET total_votes = total_votes + 1 
-            WHERE id = $1
-        `, [period.id]);
-
-        // Get updated vote counts
-        const voteCounts = await getVoteCounts(req.pool, period.id);
-        const totalVotes = voteCounts.reduce((sum, row) => sum + parseInt(row.vote_count), 0);
-
-        // Broadcast to all connected clients
-        broadcastVoteUpdate('vote-received', {
-            candidateId,
-            votes: voteCounts.find(v => v.candidate_id === candidateId)?.vote_count || 0,
-            totalVotes: totalVotes
-        });
-
-        console.log(`Vote recorded: user=${userId}, candidate=${candidateId}, period=${period.id}`);
-
-        res.status(201).json({
-            success: true,
-            message: 'Vote recorded successfully',
-            data: {
-                voteId: result.rows[0].id,
-                candidateId,
-                periodId: period.id,
-                createdAt: result.rows[0].created_at
-            }
-        });
-
-    } catch (error) {
-        console.error('Error recording vote:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to record vote'
-        });
-    }
-});
 
 /**
  * GET /api/voting-results
@@ -407,21 +309,22 @@ router.get('/api/leaderboard', async (req, res) => {
 
         // Get previous period winners
         const archiveResult = await req.pool.query(`
-            SELECT id, period_data->>'winner_id' as winner_id, 
-                   period_data->>'winner_votes' as winner_votes
+            SELECT 
+                id,
+                (period_data->>'winner_id')::int    AS winner_id,
+                (period_data->>'winner_votes')::int AS winner_votes
             FROM period_archives
             ORDER BY id DESC
             LIMIT 5
         `);
 
         const previous = archiveResult.rows.map(row => {
-            const winnerData = row.period_data ? JSON.parse(row.period_data) : {};
-            const winner = candidates.find(c => c.id === parseInt(row.winner_id));
+            const winner = candidates.find(c => c.id === row.winner_id);
             return {
                 period: row.id,
                 winner: winner?.name || 'Unknown',
                 winnerId: row.winner_id,
-                votes: parseInt(row.winner_votes || 0)
+                votes: row.winner_votes || 0
             };
         });
 
@@ -471,18 +374,7 @@ router.get('/api/voting-results/by-sublocation', async (req, res) => {
     }
 });
 
-/**
- * GET /api/candidates
- * Get list of candidates
- */
-router.get('/api/candidates', (req, res) => {
-    res.json({
-        success: true,
-        data: {
-            candidates: getCandidates()
-        }
-    });
-});
+// NOTE: /api/candidates is served by server.js (has fuller candidate data shape)
 
 /**
  * Admin: POST /api/period/next
@@ -540,16 +432,18 @@ router.post('/api/period/next', async (req, res) => {
             // Archive period
             const breakdown = await getVotesBySublocations(req.pool, currentPeriod.id);
             await req.pool.query(`
-                INSERT INTO period_archives (id, period_data, winner_id, winner_votes, total_votes, vote_breakdown)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO period_archives (id, period_data)
+                VALUES ($1, $2)
                 ON CONFLICT (id) DO NOTHING
             `, [
                 currentPeriod.id,
-                JSON.stringify(currentPeriod),
-                winner?.id,
-                winner?.votes,
-                currentPeriod.total_votes,
-                JSON.stringify(breakdown)
+                JSON.stringify({
+                    ...currentPeriod,
+                    winner_id: winner?.id ?? null,
+                    winner_votes: winner?.votes ?? 0,
+                    total_votes: currentPeriod.total_votes,
+                    vote_breakdown: breakdown
+                })
             ]);
 
             // Broadcast period ended
@@ -565,8 +459,11 @@ router.post('/api/period/next', async (req, res) => {
         const periodEnd = new Date(periodStart.getTime() + durationMinutes * 60 * 1000);
 
         const newResult = await req.pool.query(`
-            INSERT INTO voting_periods (period_start, period_end, is_active, total_votes)
-            VALUES ($1, $2, true, 0)
+            INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+            VALUES (
+                COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
+                $1, $2, true, 0
+            )
             RETURNING id, period_start, period_end
         `, [periodStart, periodEnd]);
 
@@ -698,10 +595,10 @@ router.get('/api/admin/votes', async (req, res) => {
                 user_id,
                 candidate_id,
                 sublocation,
-                created_at
+                timestamp
             FROM votes
             WHERE period_id = $1
-            ORDER BY created_at DESC
+            ORDER BY timestamp DESC
             LIMIT 100
         `, [period.id]);
 
