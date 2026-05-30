@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Voting - Ngoliba InfoTrack</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1e40af;
+            --danger: #dc2626;
+            --success: #16a34a;
+            --warning: #ea580c;
+            --light: #f1f5f9;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --radius: 8px;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* HEADER */
+        header {
+            background: white;
+            padding: 24px;
+            border-radius: var(--radius);
+            margin-bottom: 32px;
+            box-shadow: var(--shadow-lg);
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: var(--text-light);
+            font-size: 16px;
+        }
+
+        /* TIMER AND STATUS */
+        .status-bar {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-label {
+            color: var(--text-light);
+            font-size: 12px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .status-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .timer-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 6px;
+            text-align: center;
+            min-width: 120px;
+        }
+
+        .timer-value {
+            font-size: 32px;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .timer-label {
+            font-size: 11px;
+            margin-top: 4px;
+            opacity: 0.9;
+        }
+
+        /* MAIN GRID */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 32px;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* CANDIDATES SECTION */
+        .candidates-section h2 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            color: white;
+        }
+
+        .candidates-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 20px;
+        }
+
+        .candidate-card {
+            background: white;
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            border: 2px solid transparent;
+        }
+
+        .candidate-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--primary);
+        }
+
+        .candidate-card.voted {
+            border-color: var(--success);
+            background: #f0fdf4;
+        }
+
+        .candidate-photo {
+            width: 100%;
+            aspect-ratio: 1;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 64px;
+            color: white;
+            overflow: hidden;
+        }
+
+        .candidate-photo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .candidate-info {
+            padding: 16px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .candidate-name {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            color: var(--text);
+        }
+
+        .candidate-party {
+            font-size: 12px;
+            color: var(--text-light);
+            margin-bottom: 8px;
+            padding: 4px 8px;
+            background: var(--light);
+            border-radius: 4px;
+            display: inline-block;
+            width: fit-content;
+        }
+
+        .candidate-vote-count {
+            margin-top: auto;
+            padding: 12px 0 0 0;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .vote-number {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .vote-percentage {
+            font-size: 12px;
+            color: var(--text-light);
+        }
+
+        .vote-btn {
+            width: 100%;
+            padding: 12px;
+            margin-top: 12px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .vote-btn:hover {
+            background: var(--primary-dark);
+        }
+
+        .vote-btn:disabled {
+            background: var(--text-light);
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        /* SIDEBAR */
+        .sidebar {
+            position: sticky;
+            top: 20px;
+        }
+
+        .leaderboard-card {
+            background: white;
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            margin-bottom: 24px;
+        }
+
+        .leaderboard-card h3 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            color: var(--text);
+        }
+
+        .leaderboard-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .leaderboard-item:last-child {
+            border-bottom: none;
+        }
+
+        .leaderboard-rank {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-light);
+            width: 24px;
+        }
+
+        .leaderboard-rank.first {
+            color: #fbbf24;
+        }
+
+        .leaderboard-rank.second {
+            color: #a78bfa;
+        }
+
+        .leaderboard-rank.third {
+            color: #f97316;
+        }
+
+        .leaderboard-name {
+            flex: 1;
+            font-size: 12px;
+            font-weight: 600;
+            margin: 0 8px;
+        }
+
+        .leaderboard-votes {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--primary);
+            min-width: 40px;
+            text-align: right;
+        }
+
+        /* STATUS MESSAGE */
+        .alert {
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .alert.show {
+            display: block;
+        }
+
+        .alert-success {
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .alert-error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        .alert-warning {
+            background: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fde68a;
+        }
+
+        /* LOADING STATE */
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .loading::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,255,255,0.5);
+        }
+
+        /* REAL-TIME INDICATOR */
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--success);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* VOTING DISABLED STATE */
+        .voting-disabled {
+            background: var(--light);
+            padding: 32px;
+            border-radius: var(--radius);
+            text-align: center;
+            color: var(--text-light);
+        }
+
+        .voting-disabled h2 {
+            font-size: 24px;
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 480px) {
+            h1 {
+                font-size: 24px;
+            }
+
+            .status-bar {
+                grid-template-columns: 1fr;
+            }
+
+            .candidates-grid {
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            }
+
+            .vote-btn {
+                padding: 8px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="container">
+        <h1>🗳️ Live Voting</h1>
+        <p class="subtitle">Vote for your preferred candidate - each period is 5 minutes</p>
+
+        <div class="status-bar">
+            <div class="status-item">
+                <div>
+                    <div class="status-label">Period</div>
+                    <div class="status-value" id="periodId">-</div>
+                </div>
+            </div>
+            <div class="status-item">
+                <div>
+                    <div class="status-label">Total Votes</div>
+                    <div class="status-value" id="totalVotes">0</div>
+                </div>
+            </div>
+            <div class="status-item">
+                <div class="timer-badge">
+                    <div class="timer-value" id="timer">--:--</div>
+                    <div class="timer-label">Time Left</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ALERT -->
+    <div class="container" style="margin-bottom: 20px;">
+        <div id="alert" class="alert"></div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="container">
+        <div class="main-grid">
+            <!-- CANDIDATES -->
+            <section>
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px;">
+                    <h2 style="color: white; margin: 0; font-size: 24px;">Candidates</h2>
+                    <div class="live-indicator">
+                        <div class="live-dot"></div>
+                        <span>Live Updates</span>
+                    </div>
+                </div>
+
+                <div id="candidatesContainer" class="candidates-grid">
+                    <!-- Filled by JavaScript -->
+                </div>
+
+                <div id="votingDisabled" class="voting-disabled" style="display: none;">
+                    <h2>Voting Period Ended</h2>
+                    <p>Please wait for the next voting period to vote.</p>
+                </div>
+            </section>
+
+            <!-- SIDEBAR -->
+            <aside class="sidebar">
+                <div class="leaderboard-card">
+                    <h3>📊 Current Standings</h3>
+                    <div id="leaderboardContainer">
+                        <!-- Filled by JavaScript -->
+                    </div>
+                </div>
+
+                <div class="leaderboard-card">
+                    <h3>ℹ️ Instructions</h3>
+                    <p style="font-size: 13px; line-height: 1.6; color: var(--text-light);">
+                        <strong>How to Vote:</strong><br>
+                        1. Select a candidate<br>
+                        2. Click "Vote Now"<br>
+                        3. You can only vote once per period<br>
+                        4. New period starts when timer ends
+                    </p>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script>
+        // ─────────────────────────────────────────
+        // STATE
+        // ─────────────────────────────────────────
+
+        const state = {
+            period: null,
+            candidates: [],
+            results: [],
+            userVoted: false,
+            isConnected: false,
+            timerInterval: null
+        };
+
+        // ─────────────────────────────────────────
+        // INITIALIZATION
+        // ─────────────────────────────────────────
+
+        async function initializeVoting() {
+            try {
+                // Load candidates
+                await loadCandidates();
+
+                // Load voting period
+                await loadVotingPeriod();
+
+                // Load results
+                await loadResults();
+
+                // Start timer
+                startTimer();
+
+                // Connect to real-time updates
+                connectSSE();
+
+            } catch (error) {
+                console.error('Error initializing voting:', error);
+                showAlert('Failed to load voting system', 'error');
+            }
+        }
+
+        // ─────────────────────────────────────────
+        // API CALLS
+        // ─────────────────────────────────────────
+
+        async function loadCandidates() {
+            try {
+                const response = await fetch('/api/candidates');
+                const json = await response.json();
+
+                if (!json.success) throw new Error(json.error);
+
+                state.candidates = json.data.candidates;
+                renderCandidates();
+
+            } catch (error) {
+                console.error('Error loading candidates:', error);
+            }
+        }
+
+        async function loadVotingPeriod() {
+            try {
+                const response = await fetch('/api/voting-period');
+                const json = await response.json();
+
+                if (!json.success) throw new Error(json.error);
+
+                state.period = json.data;
+                document.getElementById('periodId').textContent = state.period.periodId;
+
+            } catch (error) {
+                console.error('Error loading voting period:', error);
+            }
+        }
+
+        async function loadResults() {
+            try {
+                const response = await fetch('/api/voting-results');
+                const json = await response.json();
+
+                if (!json.success) throw new Error(json.error);
+
+                state.results = json.data.results;
+                renderResults();
+
+            } catch (error) {
+                console.error('Error loading results:', error);
+            }
+        }
+
+        async function submitVote(candidateId) {
+            try {
+                // Get user ID (from localStorage or generate)
+                let userId = localStorage.getItem('userId');
+                if (!userId) {
+                    userId = 'user-' + Math.random().toString(36).substr(2, 9);
+                    localStorage.setItem('userId', userId);
+                }
+
+                const response = await fetch('/api/vote', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-user-id': userId
+                    },
+                    body: JSON.stringify({
+                        candidateId,
+                        sublocation: 'Ngoliba'
+                    })
+                });
+
+                const json = await response.json();
+
+                if (!json.success) {
+                    showAlert(json.error, 'error');
+                    return;
+                }
+
+                state.userVoted = true;
+                const candidate = state.candidates.find(c => c.id === candidateId);
+                showAlert(`✓ Vote recorded for ${candidate.name}`, 'success');
+
+                // Update UI
+                renderCandidates();
+
+            } catch (error) {
+                console.error('Error submitting vote:', error);
+                showAlert('Failed to submit vote', 'error');
+            }
+        }
+
+        // ─────────────────────────────────────────
+        // RENDERING
+        // ─────────────────────────────────────────
+
+        function renderCandidates() {
+            const container = document.getElementById('candidatesContainer');
+
+            container.innerHTML = state.candidates.map(candidate => {
+                const result = state.results.find(r => r.candidateId === candidate.id);
+                const votes = result?.votes || 0;
+                const percentage = result?.percentage || 0;
+
+                return `
+                    <div class="candidate-card ${state.userVoted ? 'voted' : ''}">
+                        <div class="candidate-photo">
+                            👤
+                        </div>
+                        <div class="candidate-info">
+                            <div class="candidate-name">${candidate.name}</div>
+                            <div class="candidate-party">${candidate.party}</div>
+                            <div class="candidate-vote-count">
+                                <div>
+                                    <div class="vote-number">${votes}</div>
+                                    <div class="vote-percentage">${percentage}%</div>
+                                </div>
+                            </div>
+                            <button 
+                                class="vote-btn" 
+                                onclick="submitVote(${candidate.id})"
+                                ${state.userVoted ? 'disabled' : ''}
+                            >
+                                ${state.userVoted ? '✓ Already Voted' : 'Vote Now'}
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderResults() {
+            const container = document.getElementById('leaderboardContainer');
+            const sorted = [...state.results].sort((a, b) => b.votes - a.votes);
+            const total = sorted.reduce((sum, r) => sum + r.votes, 0);
+
+            if (sorted.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-light); text-align: center;">No votes yet</p>';
+                return;
+            }
+
+            container.innerHTML = sorted.slice(0, 5).map((result, index) => {
+                const medals = ['🥇', '🥈', '🥉', '', ''];
+                const medal = medals[index] || '•';
+
+                return `
+                    <div class="leaderboard-item">
+                        <span class="leaderboard-rank">${medal}</span>
+                        <span class="leaderboard-name">${result.name}</span>
+                        <span class="leaderboard-votes">${result.votes}</span>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('totalVotes').textContent = total;
+        }
+
+        // ─────────────────────────────────────────
+        // TIMER
+        // ─────────────────────────────────────────
+
+        function startTimer() {
+            if (state.timerInterval) clearInterval(state.timerInterval);
+
+            const updateTimer = () => {
+                if (!state.period) return;
+
+                const now = new Date();
+                const end = new Date(state.period.endsAt);
+                const seconds = Math.max(0, Math.floor((end - now) / 1000));
+
+                const minutes = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+
+                document.getElementById('timer').textContent = 
+                    `${minutes}:${secs.toString().padStart(2, '0')}`;
+
+                if (seconds === 0) {
+                    clearInterval(state.timerInterval);
+                    // Period ended, reload
+                    setTimeout(() => {
+                        loadVotingPeriod();
+                        loadResults();
+                        state.userVoted = false;
+                        renderCandidates();
+                        startTimer();
+                    }, 1000);
+                }
+            };
+
+            updateTimer();
+            state.timerInterval = setInterval(updateTimer, 1000);
+        }
+
+        // ─────────────────────────────────────────
+        // REAL-TIME UPDATES (SSE)
+        // ─────────────────────────────────────────
+
+        function connectSSE() {
+            try {
+                const eventSource = new EventSource('/api/votes/stream');
+
+                eventSource.addEventListener('vote-received', (event) => {
+                    const data = JSON.parse(event.data);
+                    // Update results
+                    const result = state.results.find(r => r.candidateId === data.candidateId);
+                    if (result) {
+                        result.votes = data.votes;
+                        result.percentage = ((data.votes / data.totalVotes) * 100).toFixed(1);
+                    }
+                    renderResults();
+                    renderCandidates();
+                });
+
+                eventSource.addEventListener('period-ended', (event) => {
+                    const data = JSON.parse(event.data);
+                    const winner = state.candidates.find(c => c.id === data.winner);
+                    showAlert(`Period ended! Winner: ${winner?.name}`, 'warning');
+                });
+
+                eventSource.addEventListener('new-period', (event) => {
+                    const data = JSON.parse(event.data);
+                    state.period = {
+                        periodId: data.period,
+                        endsAt: data.endsAt,
+                        endsIn: new Date(data.endsAt) - new Date()
+                    };
+                    state.userVoted = false;
+                    state.results = [];
+                    document.getElementById('periodId').textContent = data.period;
+                    renderCandidates();
+                    renderResults();
+                    startTimer();
+                    showAlert('New voting period started!', 'success');
+                });
+
+                state.isConnected = true;
+
+            } catch (error) {
+                console.error('SSE connection failed:', error);
+                // Retry after 5 seconds
+                setTimeout(connectSSE, 5000);
+            }
+        }
+
+        // ─────────────────────────────────────────
+        // UTILITIES
+        // ─────────────────────────────────────────
+
+        function showAlert(message, type = 'info') {
+            const alert = document.getElementById('alert');
+            alert.textContent = message;
+            alert.className = `alert alert-${type} show`;
+
+            setTimeout(() => {
+                alert.classList.remove('show');
+            }, 5000);
+        }
+
+        // ─────────────────────────────────────────
+        // INITIALIZATION
+        // ─────────────────────────────────────────
+
+        document.addEventListener('DOMContentLoaded', initializeVoting);
+    </script>
+</body>
+</html>

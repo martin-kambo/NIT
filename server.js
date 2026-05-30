@@ -11,6 +11,9 @@ const { Pool } = require('pg');
 const axios = require('axios');
 // notices routes are defined inline — no separate router file needed
 
+// ── PHASE 2: Voting Router ──
+const votingRouter = require('./routes/voting');
+
 const app = express();
 const PORT = process.env.PORT || 10000;
 
@@ -847,39 +850,46 @@ app.use((err, req, res, next) => {
 // ════════════════════════════════════════════════════════════════════════════
 
 // GET /api/stats - Return voting statistics
-// GET /api/stats - Return voting statistics
 app.get('/api/stats', async (req, res) => {
   try {
-    // Get registered voters count
     const votersResult = await pool.query('SELECT COUNT(*) as count FROM users');
     const registeredVoters = parseInt(votersResult.rows[0].count || 0);
-    
-    // Get votes by candidate
-    const votesResult = await pool.query(`
-      SELECT candidate_id, COUNT(*) as vote_count 
-      FROM votes 
-      GROUP BY candidate_id
-    `);
-    
+
+    const periodResult = await pool.query(
+      'SELECT id, total_votes, period_start, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
+    );
+    const period = periodResult.rows[0] || null;
+
     const votesByCandidate = {};
-    votesResult.rows.forEach(row => {
-      votesByCandidate[row.candidate_id] = parseInt(row.vote_count);
-    });
-    
-    // Return stats
+    if (period) {
+      const votesResult = await pool.query(
+        'SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
+        [period.id]
+      );
+      votesResult.rows.forEach(row => {
+        votesByCandidate[row.candidate_id] = parseInt(row.vote_count);
+      });
+    }
+
+    // Real sublocation breakdown from users table
+    const sublocResult = await pool.query(
+      `SELECT COALESCE(sublocation, 'Unknown') as sublocation, COUNT(*) as count
+       FROM users GROUP BY sublocation`
+    );
+    const votersBySubLocation = {};
+    sublocResult.rows.forEach(r => { votersBySubLocation[r.sublocation] = parseInt(r.count); });
+
     res.json({
       success: true,
-      registeredVoters: registeredVoters,
-      currentPeriod: {
-        totalVotes: Object.values(votesByCandidate).reduce((a, b) => a + b, 0),
-        votesByCandidate: votesByCandidate
-      },
-      votersBySubLocation: {
-        'Ngoliba': 0,
-        'Gatiiguru': 0,
-        'Kilimambogo': 0,
-        'Magogoni': 0
-      }
+      registeredVoters,
+      currentPeriod: period ? {
+        periodId: period.id,
+        totalVotes: parseInt(period.total_votes || 0),
+        periodStart: period.period_start,
+        periodEnd: period.period_end,
+        votesByCandidate
+      } : null,
+      votersBySubLocation
     });
   } catch (error) {
     console.error('/api/stats error:', error);
@@ -890,15 +900,16 @@ app.get('/api/stats', async (req, res) => {
 // GET /api/forum - List forum posts
 app.get('/api/forum', async (req, res) => {
   try {
-    const posts = await pool.query('SELECT * FROM forum_posts ORDER BY created_at DESC LIMIT 50');
+    const posts = await pool.query('SELECT * FROM forum_posts ORDER BY last_activity_at DESC LIMIT 50');
     res.json({
       success: true,
       posts: posts.rows.map(p => ({
         id: p.id,
         author: p.author_name || 'Anonymous',
         text: p.content,
-        tag: p.tag || 'general',
-        likes: p.likes || 0,
+        title: p.title,
+        likes: p.like_count || 0,
+        reply_count: p.reply_count || 0,
         created_at: p.created_at
       }))
     });
@@ -908,44 +919,44 @@ app.get('/api/forum', async (req, res) => {
   }
 });
 
-// POST /api/forum - Create forum post
+// POST /api/forum - Create forum post / list / like
 app.post('/api/forum', async (req, res) => {
-  const { action, text, tag, postId } = req.body;
-  
+  const { action, text, title, postId } = req.body;
+
   if (action === 'create_post') {
     try {
       const session = verifySession(req.headers.cookie || '');
       if (!session) return res.status(401).json({ error: 'Unauthorized' });
-      
-      const user = await pool.query('SELECT first_name, surname FROM users WHERE phone = $1', [session.phone]);
-      const author = user.rows[0] ? `${user.rows[0].first_name} ${user.rows[0].surname}` : 'Anonymous';
-      
+
+      const user = await pool.query('SELECT id, first_name, surname FROM users WHERE phone = $1', [session.phone]);
+      if (!user.rows.length) return res.status(404).json({ error: 'User not found' });
+      const author = `${user.rows[0].first_name} ${user.rows[0].surname}`;
+
       const post = await pool.query(
-        'INSERT INTO forum_posts (author_name, content, tag) VALUES ($1, $2, $3) RETURNING *',
-        [author, text, tag || 'general']
+        `INSERT INTO forum_posts (title, content, author_id, author_name, author_phone, last_activity_at)
+         VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
+        [title || text?.slice(0, 80) || 'Post', text, user.rows[0].id, author, session.phone]
       );
-      
-      res.json({
-        success: true,
-        post: post.rows[0]
-      });
+
+      res.json({ success: true, post: post.rows[0] });
     } catch (error) {
       console.error('/api/forum create error:', error);
       res.status(500).json({ success: false, error: 'Failed to create post' });
     }
   }
-  
-  if (action === 'list_posts') {
+
+  else if (action === 'list_posts') {
     try {
-      const posts = await pool.query('SELECT * FROM forum_posts ORDER BY created_at DESC LIMIT 50');
+      const posts = await pool.query('SELECT * FROM forum_posts ORDER BY last_activity_at DESC LIMIT 50');
       res.json({
         success: true,
         posts: posts.rows.map(p => ({
           id: p.id,
           author: p.author_name || 'Anonymous',
           text: p.content,
-          tag: p.tag || 'general',
-          likes: p.likes || 0,
+          title: p.title,
+          likes: p.like_count || 0,
+          reply_count: p.reply_count || 0,
           created_at: p.created_at
         }))
       });
@@ -954,25 +965,60 @@ app.post('/api/forum', async (req, res) => {
       res.status(500).json({ success: false, error: 'Failed to get forum posts' });
     }
   }
-  
-  if (action === 'like_post') {
+
+  else if (action === 'like_post') {
     try {
-      await pool.query('UPDATE forum_posts SET likes = likes + 1 WHERE id = $1', [postId]);
+      const session = verifySession(req.headers.cookie || '');
+      if (!session) return res.status(401).json({ error: 'Unauthorized' });
+
+      const userRes = await pool.query('SELECT id FROM users WHERE phone = $1', [session.phone]);
+      if (!userRes.rows.length) return res.status(404).json({ error: 'User not found' });
+      const userId = userRes.rows[0].id;
+
+      // Insert like — ignore if already liked (PRIMARY KEY constraint)
+      await pool.query(
+        'INSERT INTO post_likes (post_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [postId, userId]
+      );
+      // Sync like_count from actual rows
+      await pool.query(
+        'UPDATE forum_posts SET like_count = (SELECT COUNT(*) FROM post_likes WHERE post_id = $1) WHERE id = $1',
+        [postId]
+      );
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ success: false, error: 'Failed to like post' });
     }
   }
+
+  else {
+    res.status(400).json({ success: false, error: 'Unknown action' });
+  }
 });
 
-// GET /api/faceoff - Get top 2 candidates
+// GET /api/faceoff - Get top 2 candidates by current vote count
 app.get('/api/faceoff', async (req, res) => {
   try {
-    const candidates = await pool.query('SELECT * FROM candidates ORDER BY id LIMIT 2');
-    res.json({
-      success: true,
-      candidates: candidates.rows
-    });
+    const period = await pool.query(
+      'SELECT id FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
+    );
+    if (!period.rows.length) {
+      return res.json({ success: true, candidates: CANDIDATES.slice(0, 2) });
+    }
+    const votes = await pool.query(
+      `SELECT candidate_id, COUNT(*) as vote_count
+       FROM votes WHERE period_id = $1
+       GROUP BY candidate_id ORDER BY vote_count DESC LIMIT 2`,
+      [period.rows[0].id]
+    );
+    // Map vote results back to CANDIDATES array
+    const top = votes.rows.length
+      ? votes.rows.map(r => ({
+          ...CANDIDATES.find(c => c.id === parseInt(r.candidate_id)),
+          vote_count: parseInt(r.vote_count)
+        }))
+      : CANDIDATES.slice(0, 2);
+    res.json({ success: true, candidates: top });
   } catch (error) {
     console.error('/api/faceoff error:', error);
     res.status(500).json({ success: false, error: 'Failed to get faceoff data' });
@@ -1264,16 +1310,21 @@ if (action === 'get_users') {
   }
 }
 
-  // ✅ ADD PERIOD - Fixed INSERT and RETURNING clauses
+  // ✅ ADD PERIOD - id has no DEFAULT, must be computed; also deactivate old periods
 if (action === 'add_period') {
   const { durationDays } = req.body;
   if (!durationDays) return res.status(400).json({ success: false, error: 'Duration required' });
   try {
+    // Deactivate any currently active periods first
+    await pool.query('UPDATE voting_periods SET is_active = false WHERE is_active = true');
     const result = await pool.query(
-      `INSERT INTO voting_periods (period_start, period_end, is_active) 
-       VALUES (NOW(), NOW() + ($1 || ' days')::INTERVAL, true) 
-       RETURNING id, period_start, period_end, is_active`,
-      [durationDays]
+      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+       VALUES (
+         COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
+         NOW(), NOW() + ($1 || ' days')::INTERVAL, true, 0
+       )
+       RETURNING id, period_start, period_end, is_active, total_votes`,
+      [String(durationDays)]
     );
     return res.json({ success: true, period: result.rows[0] });
   } catch (error) {
@@ -1293,12 +1344,18 @@ if (action === 'end_period') {
     return res.status(500).json({ success: false, error: error.message });
   }
 }
-  // ✅ DELETE USER
+  // ✅ DELETE USER - with token auth (already verified above) + cascade votes
 if (action === 'delete_user') {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
   try {
-    await pool.query('DELETE FROM users WHERE phone = $1', [phone]);
+    const userRes = await pool.query('SELECT id FROM users WHERE phone = $1', [phone]);
+    if (!userRes.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+    const userId = userRes.rows[0].id;
+    await pool.query('DELETE FROM votes WHERE user_id = $1', [userId]);
+    await pool.query('DELETE FROM post_likes WHERE user_id = $1', [userId]);
+    await pool.query('DELETE FROM reply_likes WHERE user_id = $1', [userId]);
+    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
     return res.json({ success: true });
   } catch (error) {
     console.error('Error in delete_user:', error.message);
@@ -1477,6 +1534,20 @@ app.post('/api/ad-requests/:id/pay', async (req, res) => {
     console.error('POST /api/ad-requests/:id/pay error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// ── PHASE 2: Mount voting router ──
+app.use(votingRouter);
+
+// ── PHASE 2: Frontend page routes ──
+app.get('/voting', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'voting.html'));
+});
+app.get('/leaderboard', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'leaderboard.html'));
+});
+app.get('/admin-voting', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin-voting.html'));
 });
 
 // ── Catch-all: serve index.html for any unmatched GET ──
