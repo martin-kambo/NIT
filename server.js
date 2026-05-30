@@ -322,6 +322,7 @@ async function ensureNoticesTable() {
         duration VARCHAR(50) DEFAULT '7 days',
         status VARCHAR(20) DEFAULT 'pending',
         fee INTEGER DEFAULT 0,
+        submitted_by_phone VARCHAR(20),
         submitted_at TIMESTAMP DEFAULT NOW(),
         reviewed_at TIMESTAMP,
         reviewed_by VARCHAR(50),
@@ -333,8 +334,9 @@ async function ensureNoticesTable() {
       ALTER TABLE ad_requests
         ALTER COLUMN id SET DEFAULT gen_random_uuid()
     `);
-    // Add fee column for existing deployments
+    // Migrations for existing deployments
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS fee INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS submitted_by_phone VARCHAR(20)`);
 
     // Seed sample notices only if table is empty
     const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
@@ -1254,21 +1256,43 @@ app.get('/api/debug/check-env', (req, res) => {
 // AD REQUESTS — public submission + admin management
 // ══════════════════════════════════════════════════════
 
-// POST /api/ad-requests — any logged-in user submits an ad request
+// POST /api/ad-requests — logged-in user submits an ad request
 app.post('/api/ad-requests', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ success: false, error: 'Please log in to submit an ad request.' });
+
   const { businessName, adContent, category, contactPhone, contactEmail, budget, duration } = req.body;
   if (!businessName || !adContent || !contactPhone) {
     return res.status(400).json({ success: false, error: 'businessName, adContent and contactPhone are required' });
   }
   try {
     const result = await pool.query(
-      `INSERT INTO ad_requests (id, business_name, ad_content, contact_phone, contact_email, budget, duration, status, submitted_at)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'pending', NOW()) RETURNING id, submitted_at`,
-      [businessName, adContent, contactPhone, contactEmail || null, budget || null, duration || '7 days']
+      `INSERT INTO ad_requests (id, business_name, ad_content, contact_phone, contact_email, budget, duration, status, submitted_by_phone, submitted_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'pending', $7, NOW()) RETURNING id, submitted_at`,
+      [businessName, adContent, contactPhone, contactEmail || null, budget || null, duration || '7 days', session.phone]
     );
     res.json({ success: true, id: result.rows[0].id, submittedAt: result.rows[0].submitted_at });
   } catch (err) {
     console.error('POST /api/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/my-ad-requests — returns all requests submitted by the logged-in user
+app.get('/api/my-ad-requests', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ success: false, error: 'Not authenticated' });
+  try {
+    const result = await pool.query(
+      `SELECT id, business_name, ad_content, duration, status, fee, notes, submitted_at, reviewed_at
+       FROM ad_requests
+       WHERE submitted_by_phone = $1
+       ORDER BY submitted_at DESC`,
+      [session.phone]
+    );
+    res.json({ success: true, adRequests: result.rows });
+  } catch (err) {
+    console.error('GET /api/my-ad-requests error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

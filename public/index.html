@@ -2077,11 +2077,23 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
             <div style="display:flex;align-items:center;gap:0.75rem;">
               <div class="ad-request-avatar">📣</div>
               <div>
-                <div class="ad-request-title">Request an Ad Slot</div>
-                <div class="ad-request-sub">Fill in the form — admin will review within 24 hrs</div>
+                <div class="ad-request-title">Ad Slot Request</div>
+                <div class="ad-request-sub">Reach the Ngoliba community</div>
               </div>
             </div>
             <button class="ad-request-close" id="closeAdRequestBtn"><i class="fas fa-times"></i></button>
+          </div>
+
+          <!-- Panel tab nav -->
+          <div style="display:flex;border-bottom:1px solid var(--sand);margin:0 1rem;">
+            <button id="adPanelTabNew" onclick="switchAdPanel('new')"
+              style="flex:1;padding:0.6rem 0;font-size:0.78rem;font-weight:700;background:none;border:none;border-bottom:2px solid var(--forest);color:var(--forest);cursor:pointer;font-family:'Outfit',sans-serif;">
+              ✏️ New Request
+            </button>
+            <button id="adPanelTabHistory" onclick="switchAdPanel('history')"
+              style="flex:1;padding:0.6rem 0;font-size:0.78rem;font-weight:700;background:none;border:none;border-bottom:2px solid transparent;color:var(--mid-gray);cursor:pointer;font-family:'Outfit',sans-serif;">
+              📋 My Requests
+            </button>
           </div>
 
           <!-- IDLE STATE: form -->
@@ -2169,6 +2181,16 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <span style="font-size:1rem;">📲</span> Pay via M-Pesa
             </button>
             <div id="adPayError" style="display:none;margin-top:0.5rem;font-size:0.76rem;color:var(--red-accent);text-align:center;"></div>
+          </div>
+
+          <!-- MY REQUESTS HISTORY PANE -->
+          <div id="adHistoryPane" style="display:none;">
+            <div style="padding:0.75rem 1rem 0;display:flex;justify-content:flex-end;">
+              <button onclick="loadMyAdRequests()" style="font-size:0.73rem;background:none;border:1px solid var(--sand);border-radius:50px;padding:0.3rem 0.85rem;cursor:pointer;color:var(--text-mid);font-family:'Outfit',sans-serif;">↻ Refresh</button>
+            </div>
+            <div id="adHistoryList" style="padding:0 1rem 1rem;">
+              <div style="text-align:center;padding:2rem 0;color:var(--mid-gray);font-size:0.82rem;">Loading your requests…</div>
+            </div>
           </div>
         </div>
 
@@ -3520,8 +3542,115 @@ function initAdRequestChat(){
   const closeBtn=document.getElementById("closeAdRequestBtn");
   const panel=document.getElementById("adRequestPanel");
   if(!openBtn)return;
-  openBtn.onclick=()=>panel.classList.toggle("hidden");
+  openBtn.onclick=()=>{
+    panel.classList.toggle("hidden");
+    if(!panel.classList.contains("hidden")) {
+      // Auto-switch to history if user has prior requests, otherwise stay on new
+      switchAdPanel('new');
+    }
+  };
   closeBtn.onclick=()=>panel.classList.add("hidden");
+}
+
+// ── Panel tab switching ──
+function switchAdPanel(tab) {
+  const newPane     = document.getElementById('adFormState');
+  const successPane = document.getElementById('adSuccessState');
+  const payPane     = document.getElementById('adPayState');
+  const histPane    = document.getElementById('adHistoryPane');
+  const tabNew      = document.getElementById('adPanelTabNew');
+  const tabHist     = document.getElementById('adPanelTabHistory');
+
+  if (tab === 'history') {
+    if (newPane)     newPane.style.display     = 'none';
+    if (successPane) successPane.style.display = 'none';
+    if (payPane)     payPane.style.display     = 'none';
+    if (histPane)    histPane.style.display    = 'block';
+    if (tabNew)  { tabNew.style.borderBottomColor  = 'transparent'; tabNew.style.color  = 'var(--mid-gray)'; }
+    if (tabHist) { tabHist.style.borderBottomColor = 'var(--forest)'; tabHist.style.color = 'var(--forest)'; }
+    loadMyAdRequests();
+  } else {
+    if (histPane) histPane.style.display = 'none';
+    // Restore whichever new-request state was active
+    const hasSuccess = lastAdRequestId && successPane?.innerHTML.trim();
+    if (newPane && !lastAdRequestId)  newPane.style.display = 'block';
+    if (successPane && lastAdRequestId) successPane.style.display = 'block';
+    if (tabNew)  { tabNew.style.borderBottomColor  = 'var(--forest)'; tabNew.style.color  = 'var(--forest)'; }
+    if (tabHist) { tabHist.style.borderBottomColor = 'transparent'; tabHist.style.color = 'var(--mid-gray)'; }
+  }
+}
+
+// ── Load & render history ──
+async function loadMyAdRequests() {
+  const list = document.getElementById('adHistoryList');
+  if (!list) return;
+  list.innerHTML = '<div style="text-align:center;padding:2rem 0;color:var(--mid-gray);font-size:0.82rem;">⏳ Loading…</div>';
+  try {
+    const res  = await fetch('/api/my-ad-requests');
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+    renderAdHistory(data.adRequests, list);
+  } catch (err) {
+    list.innerHTML = `<div style="text-align:center;padding:1.5rem 0;color:var(--red-accent);font-size:0.8rem;">⚠️ ${err.message}</div>`;
+  }
+}
+
+function renderAdHistory(requests, container) {
+  if (!requests.length) {
+    container.innerHTML = '<div style="text-align:center;padding:2rem 0;color:var(--mid-gray);font-size:0.82rem;">You have no ad requests yet.</div>';
+    return;
+  }
+
+  const statusConfig = {
+    pending:         { label: '⏳ Under Review',      bg: '#fff7ed', color: '#b45309' },
+    payment_pending: { label: '💳 Payment Required',  bg: '#f5f3ff', color: '#7c3aed' },
+    approved:        { label: '✅ Approved & Live',    bg: '#f0fdf4', color: '#15803d' },
+    rejected:        { label: '❌ Not Approved',       bg: '#fef2f2', color: '#b91c1c' },
+    completed:       { label: '🏁 Completed',          bg: '#eff6ff', color: '#1d4ed8' },
+  };
+
+  container.innerHTML = requests.map(r => {
+    const s   = statusConfig[r.status] || { label: r.status, bg: '#f3f4f6', color: '#6b7280' };
+    const dt  = new Date(r.submitted_at).toLocaleDateString('en-KE', { day:'numeric', month:'short', year:'numeric' });
+    const isPayable = r.status === 'payment_pending';
+
+    return `
+    <div style="border:1px solid var(--sand);border-radius:0.75rem;padding:0.9rem;margin-bottom:0.75rem;background:white;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;margin-bottom:0.5rem;">
+        <div style="font-weight:700;font-size:0.85rem;color:var(--text-dark);flex:1;">${r.business_name}</div>
+        <span style="font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:50px;white-space:nowrap;background:${s.bg};color:${s.color};">${s.label}</span>
+      </div>
+      <div style="font-size:0.78rem;color:var(--mid-gray);margin-bottom:0.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${r.ad_content}</div>
+      <div style="display:flex;gap:1rem;font-size:0.72rem;color:var(--mid-gray);flex-wrap:wrap;margin-bottom:${isPayable || r.notes ? '0.65rem' : '0'};">
+        <span>⏱ ${r.duration}</span>
+        <span>📅 ${dt}</span>
+        ${r.fee ? `<span style="color:#7c3aed;font-weight:700;">KES ${r.fee.toLocaleString()}</span>` : ''}
+      </div>
+      ${r.notes ? `<div style="font-size:0.74rem;color:var(--text-mid);background:var(--cream-dark);border-radius:0.4rem;padding:0.4rem 0.6rem;margin-bottom:${isPayable ? '0.65rem' : '0'};">📝 ${r.notes}</div>` : ''}
+      ${isPayable ? `
+        <button onclick="openPayFromHistory('${r.id}', ${r.fee}, '${r.duration}')"
+          style="width:100%;display:flex;align-items:center;justify-content:center;gap:0.4rem;background:linear-gradient(135deg,#00a550,#007a3a);color:white;border:none;border-radius:50px;padding:0.5rem;font-size:0.8rem;font-weight:700;cursor:pointer;font-family:'Outfit',sans-serif;">
+          📲 Pay KES ${r.fee.toLocaleString()} via M-Pesa
+        </button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// Opens the pay pane from history tab (switching to new-request pane area)
+function openPayFromHistory(id, fee, duration) {
+  lastAdRequestId = id;
+  // Switch to the "new" tab area to show the pay pane
+  switchAdPanel('new');
+  document.getElementById('adFormState').style.display     = 'none';
+  document.getElementById('adSuccessState').style.display  = 'none';
+  document.getElementById('adPayState').style.display      = 'block';
+  document.getElementById('adPayAmount').textContent        = `KES ${fee.toLocaleString()}`;
+  document.getElementById('adPayDuration').textContent      = `Duration: ${duration}`;
+  document.getElementById('adAdminNotes').style.display     = 'none';
+  if (currentUser?.phone) {
+    const n = currentUser.phone.replace(/^0/, '').replace(/^254/, '').slice(0, 9);
+    document.getElementById('adPayPhone').value = n;
+  }
 }
 
 async function submitAdRequest(){
@@ -3551,6 +3680,12 @@ async function submitAdRequest(){
       body: JSON.stringify({ businessName, adContent, category, duration, contactPhone, contactEmail: contactEmail || undefined })
     });
     const data = await res.json();
+    if (res.status === 401) {
+      showArError('You must be logged in to submit an ad request. Please log in and try again.');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Request';
+      return;
+    }
     if (!data.success) throw new Error(data.error || 'Submission failed');
 
     // Remember ID so user can check status / pay later
@@ -3660,6 +3795,8 @@ async function initiateAdPayment() {
           Done
         </button>`;
       addNotification({ icon:'💳', iconCls:'ni-notice', text:`M-Pesa payment confirmed — your ad is now <strong>live</strong>! Receipt: ${result.MpesaReceiptNumber}`, type:'notice' });
+      // Refresh history so the status updates
+      loadMyAdRequests();
     } else {
       throw new Error(result.ResultDesc || 'Payment was not confirmed');
     }
