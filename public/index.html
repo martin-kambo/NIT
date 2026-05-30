@@ -494,6 +494,17 @@ body::before {
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
 @media (max-width: 480px) { .field-grid { grid-template-columns: 1fr; } }
 
+@media (max-width: 480px) {
+  /* Tighten further for very small phones */
+  .container { padding: 0 0.65rem; }
+  .hero-title { font-size: 1.4rem; }
+  .feature-tab { padding: 0.45rem 0.65rem; font-size: 0.68rem; }
+  .notice-header { padding: 0.9rem 0.85rem; }
+  .notice-header-title { font-size: 1rem; }
+  .analytics-grid { grid-template-columns: 1fr; }
+  .header-nav { display: none; }   /* hide nav pills on very small screens — avatar + logo only */
+}
+
 .error-msg {
   background: rgba(220,38,38,0.1); border: 1px solid rgba(220,38,38,0.25); color: #fca5a5;
   padding: 0.6rem 1rem; border-radius: 0.75rem;
@@ -1111,13 +1122,139 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
 /* MOBILE RESPONSIVE */
 @media (max-width: 768px) {
+  /* ── Faceoff ── */
   .fo-vs-divider { display: none; }
   .faceoff-inner { flex-direction: column; }
   .fo-votes { font-size: 2.5rem; }
   .fo-portrait-ring { width: 65px; height: 65px; }
   .fo-candidate { padding: 0.85rem 1rem; }
-  .site-header { padding: 0.75rem 0; }
-  .hero-title { font-size: 2rem; }
+
+  /* ── Global container ── */
+  .container { padding: 0 0.85rem; }
+
+  /* ── Header ── */
+  .site-header { padding: 0.6rem 0; }
+  .header-inner { gap: 0.5rem; flex-wrap: nowrap; }
+  .logo-sub { display: none; }
+  .logo-text { font-size: 1rem; }
+  .logo-mark { width: 34px; height: 34px; font-size: 1rem; border-radius: 9px; }
+  .header-nav { gap: 0.25rem; }
+  .nav-pill { padding: 0.35rem 0.65rem; font-size: 0.72rem; }
+  .header-actions { gap: 0.4rem; }
+  .avatar-wrap { width: 32px; height: 32px; }
+
+  /* ── Hero ── */
+  .hero-title { font-size: 1.7rem; }
+
+  /* ── Feature tabs — scrollable row, no wrapping ── */
+  .feature-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    gap: 0.2rem;
+    padding: 0.3rem;
+    margin-bottom: 1.25rem;
+    /* hide scrollbar but keep scroll */
+    scrollbar-width: none;
+  }
+  .feature-nav::-webkit-scrollbar { display: none; }
+  .feature-tab {
+    flex: 0 0 auto;           /* stop flex from squishing tabs */
+    scroll-snap-align: start;
+    min-width: unset;
+    padding: 0.5rem 0.8rem;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  /* ── Notice header banner ── */
+  .notice-header {
+    padding: 1.1rem 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .notice-header-title { font-size: 1.15rem; }
+  .notice-header-sub { font-size: 0.75rem; max-width: 100%; }
+  .notice-header::before { display: none; } /* remove decorative circle */
+
+  /* ── Notice filter pills — scrollable ── */
+  .notice-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+    padding-bottom: 4px;    /* prevent clipped box-shadow on active pill */
+  }
+  .notice-filters::-webkit-scrollbar { display: none; }
+  .notice-filter {
+    flex: 0 0 auto;
+    padding: 0.35rem 0.8rem;
+    font-size: 0.72rem;
+  }
+
+  /* ── Notice grid — single column on mobile ── */
+  .notices-grid {
+    grid-template-columns: 1fr;
+    gap: 0.7rem;
+  }
+
+  /* ── Notice card — tighten up ── */
+  .notice-card { border-radius: var(--radius-lg); }
+  .notice-card:hover { transform: none; }   /* disable hover lift on touch */
+  .notice-card-img-placeholder { height: 70px; font-size: 1.6rem; }
+  .notice-card-body { padding: 0.5rem 0.75rem; }
+  .notice-card-title { font-size: 0.8rem; }
+  .notice-card-desc { font-size: 0.72rem; -webkit-line-clamp: 2; }
+  .notice-card-footer {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.45rem 0.75rem;
+  }
+  .notice-cta-btn {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.68rem;
+    cursor: pointer;    /* restore pointer on touch devices */
+  }
+  .notice-cat-badge { font-size: 0.6rem; }
+
+  /* ── Analytics grid ── */
+  .analytics-grid { grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+  .analytics-kpi-val { font-size: 1.4rem; }
+  .heatmap-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* ── Leaderboard ── */
+  .lb-rank { font-size: 1rem; min-width: 28px; }
+
+  /* ── Modals ── */
+  .modal-box { margin: 0 0.75rem; max-width: calc(100vw - 1.5rem); }
+
+  /* ── Ad request panel — full width on mobile ── */
+  .ad-request-panel {
+    width: calc(100vw - 1.5rem) !important;
+    right: 0.75rem !important;
+    left: 0.75rem !important;
+    bottom: 5rem !important;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  /* ── Promise tracker tabs ── */
+  .promise-candidate-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+  .promise-candidate-tabs::-webkit-scrollbar { display: none; }
+  .promise-cand-tab { flex: 0 0 auto; font-size: 0.72rem; padding: 0.4rem 0.75rem; }
+
+  /* ── Cursor: restore pointer on touch ── */
+  button, a, [onclick] { cursor: pointer !important; }
 }
 
 /* WELCOME POPUP */
