@@ -3442,26 +3442,31 @@ function buildNotices(notices) {
   };
 
   grid.innerHTML = filtered.map(n => {
-    const cm      = catMap[n.category] || { label: n.category, cls: "" };
-    const emoji   = NOTICE_EMOJI[n.category] || "📌";
+    const cm       = catMap[n.category] || { label: n.category, cls: "" };
+    const emoji    = NOTICE_EMOJI[n.category] || "📌";
     const isUrgent = n.priority === "high";
-    const dateStr = n.created_at
+    const isAd     = !!n.is_ad;
+    const dateStr  = n.created_at
       ? new Date(n.created_at).toLocaleDateString("en-KE", { day:"numeric", month:"short", year:"numeric" })
       : "";
-    const safeTitle = n.title.replace(/'/g, "\'");
-    return `<div class="notice-card scroll-reveal">
+    const safeTitle = (n.title||"").replace(/'/g, "\'");
+    const contactBtn = isAd && n.contact_phone
+      ? `<a class="notice-cta-btn" href="tel:${n.contact_phone}" style="text-decoration:none">📞 Contact</a>`
+      : `<button class="notice-cta-btn" onclick="showToast('📌 ${safeTitle}','info')">Read More →</button>`;
+    return `<div class="notice-card scroll-reveal${isAd ? ' notice-card--ad' : ''}">
       <div class="notice-card-top">
         <span class="notice-cat-badge ${cm.cls}">${cm.label}</span>
-        ${isUrgent ? '<span class="notice-sponsored" style="background:#e63946;color:#fff">⚠ Urgent</span>' : ""}
+        ${isAd    ? '<span class="notice-sponsored">📣 Sponsored</span>' : ""}
+        ${isUrgent && !isAd ? '<span class="notice-sponsored" style="background:#e63946;color:#fff">⚠ Urgent</span>' : ""}
       </div>
       <div class="notice-card-img-placeholder">${emoji}</div>
       <div class="notice-card-body">
-        <div class="notice-card-title">${n.title}</div>
-        <div class="notice-card-desc">${n.content}</div>
+        <div class="notice-card-title">${n.title||""}</div>
+        <div class="notice-card-desc">${n.content||""}</div>
       </div>
       <div class="notice-card-footer">
         <div class="notice-meta"><strong>Posted</strong><br>${dateStr}</div>
-        <button class="notice-cta-btn" onclick="showToast('📌 ${safeTitle}','info')">Read More →</button>
+        ${contactBtn}
       </div>
     </div>`;
   }).join("");
