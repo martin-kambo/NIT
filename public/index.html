@@ -2769,9 +2769,11 @@ async function submitVote(candidateId) {
     // ━━━ 2. CALL SERVER API ━━━
     const response = await fetch('/api/vote', {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ candidateId, periodId: window.currentPeriodId })
+      body: JSON.stringify({
+        candidateId: candidateId,
+        periodId: currentPeriodId  // ← Must have periodId from /api/polling-results
+      })
     });
     
     const data = await response.json();
@@ -2832,74 +2834,80 @@ function getEarnedBadges(user){
 
 // ═══ AUTH  //  API call ═══
 
-async function registerUser(){
-  const fn = document.getElementById("regFirstName").value.trim();
-  const sn = document.getElementById("regSurname").value.trim();
-  const dob = document.getElementById("regDob").value;
-  const phone = document.getElementById("regPhone").value.trim();
-  const sub = document.getElementById("regSublocation").value;
-  const email = document.getElementById("regEmail").value.trim();
-  const natId = document.getElementById("regNationalId").value.trim();
-  const lang = document.getElementById("regLanguage").value;
-  const pwd = document.getElementById("regPassword").value;
-  const confirm = document.getElementById("regConfirmPassword").value;
-  const err = document.getElementById("regErrorMsg");
-  
-  if(!isValidName(fn) || !isValidName(sn)){
-    if(err) { err.textContent = "First and last name must be 2–30 letters"; err.classList.add("show"); }
-    return;
-  }
-  if(!dob){ if(err) { err.textContent = "Date of birth required"; err.classList.add("show"); } return; }
-  if(!isValidPhone(phone)){ if(err) { err.textContent = "Valid phone required"; err.classList.add("show"); } return; }
-  if(!sub){ if(err) { err.textContent = "Select sublocation"; err.classList.add("show"); } return; }
-  if(!isValidEmail(email)){ if(err) { err.textContent = "Invalid email"; err.classList.add("show"); } return; }
-  if(!isValidNationalId(natId)){ if(err) { err.textContent = "ID must be 7–8 digits"; err.classList.add("show"); } return; }
-  if(pwd.length < 6){ if(err) { err.textContent = "Password min 6 chars"; err.classList.add("show"); } return; }
-  if(pwd !== confirm){ if(err) { err.textContent = "Passwords don't match"; err.classList.add("show"); } return; }
-  
-  const btn = document.getElementById("doRegisterBtn");
+async function registerUser() {
+  const fn      = document.getElementById('regFirstName').value.trim();
+  const sn      = document.getElementById('regSurname').value.trim();
+  const dob     = document.getElementById('regDob').value;
+  const phone   = document.getElementById('regPhone').value.trim();
+  const sub     = document.getElementById('regSublocation').value;
+  const email   = document.getElementById('regEmail').value.trim();
+  const natId   = document.getElementById('regNationalId').value.trim();
+  const lang    = document.getElementById('regLanguage').value;
+  const pwd     = document.getElementById('regPassword').value;
+  const confirm = document.getElementById('regConfirmPassword').value;
+  const err     = document.getElementById('regErrorMsg');
+  const fail    = (msg) => { if (err) { err.textContent = msg; err.classList.add('show'); } };
+
+  if (!isValidName(fn) || !isValidName(sn)) return fail('First and last name must be 2–30 letters');
+  if (!dob)                                 return fail('Date of birth required');
+  if (!isValidPhone(phone))                 return fail('Valid phone required (07XXXXXXXX)');
+  if (!sub)                                 return fail('Select sublocation');
+  if (!isValidEmail(email))                 return fail('Invalid email address');
+  if (!isValidNationalId(natId))            return fail('National ID must be 7–8 digits');
+  if (pwd.length < 6)                       return fail('Password minimum 6 characters');
+  if (pwd !== confirm)                      return fail("Passwords don't match");
+
+  const btn = document.getElementById('doRegisterBtn');
   btn.disabled = true;
   btn.innerHTML = '<div class="btn-spinner"></div> Creating…';
-  
+
   try {
-    const data = await (await fetch('/api/auth', {
+    const res  = await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'register', firstName: fn, surname: sn, dob, phone, sublocation: sub, email, nationalId: natId, language: lang, password: pwd })
-    })).json();
-    
+      body: JSON.stringify({ action:'register', firstName:fn, surname:sn, dob, phone,
+                             sublocation:sub, email, nationalId:natId, language:lang, password:pwd })
+    });
+    const data = await res.json();
+
     if (!data.success) {
-      if(err) { err.textContent = data.error || 'Failed'; err.classList.add("show"); }
+      fail(data.error || 'Registration failed');
       btn.disabled = false;
       btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
       return;
     }
-    
-    // Do NOT set currentUser — force manual login after registration
+
+    // Do NOT set currentUser — force manual login
     btn.disabled = false;
     btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
-    if (err) err.classList.remove("show");
+    if (err) err.classList.remove('show');
+    showToast(`🎉 Registered! Voter No. ${data.user.voter_number || '?'} — Please log in.`, 'success');
 
-    showToast(`🎉 Registered! Voter No. ${data.user.voter_number || '?'} — Please log in.`, "success");
+    // Clear form
+    ['regFirstName','regSurname','regDob','regPhone','regEmail',
+     'regNationalId','regPassword','regConfirmPassword']
+      .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
 
-    ["regFirstName","regSurname","regDob","regPhone","regEmail","regNationalId","regPassword","regConfirmPassword"]
-      .forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+    // Pre-fill login phone
+    const lp = document.getElementById('loginPhone');
+    if (lp) lp.value = data.user.phone;
 
-    // Pre-fill login phone for convenience
-    const loginPhoneEl = document.getElementById("loginPhone");
-    if (loginPhoneEl) loginPhoneEl.value = data.user.phone;
-
-    // Destroy the auto-issued session cookie so we don't skip the login step
-    await fetch('/api/auth', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'logout' }) }).catch(() => {});
+    // Destroy the auto-issued session cookie
+    await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'logout' })
+    }).catch(() => {});
 
     // Switch to login panel
     setTimeout(() => {
       if (typeof switchToLogin === 'function') switchToLogin();
-      else document.getElementById("showLoginTab")?.click();
+      else document.getElementById('showLoginTab')?.click();
     }, 400);
-  } catch (error) {
-    console.error('Reg error:', error);
-    if(err) { err.textContent = 'Error occurred'; err.classList.add("show"); }
+
+  } catch (e) {
+    console.error('Register error:', e);
+    fail('Registration error — please try again');
     btn.disabled = false;
     btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
   }
@@ -3240,36 +3248,16 @@ async function simulateMpesaSuccess(){
     document.getElementById("mpesaReceiptCand").innerText=cand?.name||"—";
     document.getElementById("mpesaReceiptTime").innerText=new Date().toLocaleTimeString();
     setMpesaStep(4); showToast("💚 Payment confirmed by Safaricom!","success");
-    if (mpesaPendingVote) {
-      try {
-        const voteRes = await fetch('/api/vote', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            candidateId: mpesaPendingVote.candidateId,
-            periodId:    window.currentPeriodId
-          })
-        });
-        const voteData = await voteRes.json();
-        if (voteData.success) {
-          if (mpesaPendingVote.button) {
-            mpesaPendingVote.button.innerHTML = '<i class="fas fa-check-circle"></i> Voted!';
-            mpesaPendingVote.button.disabled  = true;
-          }
-          const cn = CANDIDATES.find(c => c.id === mpesaPendingVote.candidateId);
-          if (cn) addNotification({ icon:'🗳️', iconCls:'ni-vote', text:`Your vote for <strong>${cn.name}</strong> has been confirmed this cycle.`, type:'vote' });
-          if (voteData.badge) showToast(`🏅 You're the ${voteData.badge} voter this cycle!`, 'success');
-          await renderDashboard();
-        } else {
-          showToast(voteData.error || 'Vote recording failed — contact support', 'error');
-        }
-      } catch(e) {
-        console.error('Vote API error:', e);
-        showToast('Network error recording vote', 'error');
+    if(mpesaPendingVote){
+      const ok=recordVote(mpesaPendingVote.candidateId,currentUser.phone,currentUser.sublocation);
+      if(ok){
+        if(mpesaPendingVote.button){mpesaPendingVote.button.innerHTML='<i class="fas fa-check-circle"></i> Voted!';mpesaPendingVote.button.disabled=true;}
+        renderDashboard();
+        const cn=CANDIDATES.find(c=>c.id===mpesaPendingVote.candidateId);
+        if(cn)addNotification({icon:"🗳️",iconCls:"ni-vote",text:`Your vote for <strong>${cn.name}</strong> has been confirmed this cycle.`,type:"vote"});
       }
     }
-  } else { setMpesaStep(1); showToast("Payment failed: "+result.ResultDesc, "error"); }
+  }else{setMpesaStep(1);showToast("Payment failed: "+result.ResultDesc,"error");}
 }
 
 function closeMpesaAndDone(){if(mpesaCountdownTimer)clearInterval(mpesaCountdownTimer);closeModal("mpesaModal");mpesaPendingVote=null;mpesaActiveCheckoutId=null;setMpesaStep(1);}
@@ -4156,171 +4144,88 @@ function initPWAInstall(){
 }
 
 // ═══ PROFILE ═══
-function loadProfileData() {
-  if (!currentUser) return;
-  const u = currentUser;
-  const firstName   = u.firstName   || u.first_name   || '';
-  const surname     = u.surname     || '';
-  const phone       = u.phone       || '';
-  const dob         = u.dob         || '';
-  const sublocation = u.sublocation || '';
-  const email       = u.email       || '';
-  const nationalId  = u.nationalId  || u.national_id  || '';
-  const language    = u.language    || 'en';
-  const voterNumber = u.voterNumber || u.voter_number  || '?';
-  const profilePhoto= u.profilePhoto || u.profile_photo || null;
-
-  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
-  set('profFirstName',   firstName);
-  set('profSurname',     surname);
-  set('profPhone',       phone);
-  set('profDob',         dob);
-  set('profSublocation', sublocation);
-  set('profEmail',       email);
-  set('profNationalId',  nationalId);
-  set('profLanguage',    language);
-
-  const avatar = document.getElementById('profileAvatar');
-  if (avatar) avatar.src = profilePhoto || `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=120&bold=true&name=${encodeURIComponent(firstName+'+'+surname)}`;
-
-  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
-  setText('profileName',            `${firstName} ${surname}`);
-  setText('profileSub',             `${sublocation} · Voter #${voterNumber}`);
-  setText('profileVoterNum',        `Voter #${voterNumber}`);
-  setText('profileSublocationChip', sublocation);
-  setText('profileTotalVotes',      '0');
-  setText('profileCurrentRank',     '🔥 0');
-
-  const cycleBadge = document.getElementById('profileCycleBadge');
-  if (cycleBadge) cycleBadge.style.display = 'none';
-
+function loadProfileData(){
+  if(!currentUser) return;
+  const fresh=DB.findUser(currentUser.phone); if(fresh) currentUser=fresh;
+  document.getElementById("profFirstName").value=currentUser.firstName;
+  document.getElementById("profSurname").value=currentUser.surname;
+  document.getElementById("profPhone").value=currentUser.phone;
+  document.getElementById("profDob").value=currentUser.dob||"";
+  document.getElementById("profSublocation").value=currentUser.sublocation;
+  document.getElementById("profEmail").value=currentUser.email||"";
+  document.getElementById("profNationalId").value=currentUser.nationalId||"";
+  document.getElementById("profLanguage").value=currentUser.language||"en";
+  const avatar=document.getElementById("profileAvatar");
+  avatar.src=currentUser.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=120&bold=true&name=${encodeURIComponent(currentUser.firstName+"+"+currentUser.surname)}`;
+  document.getElementById("profileName").innerText=`${currentUser.firstName} ${currentUser.surname}`;
+  document.getElementById("profileSub").innerText=`${currentUser.sublocation} · Voter #${currentUser.voterNumber}`;
+  document.getElementById("profileVoterNum").innerText=`Voter #${currentUser.voterNumber}`;
+  document.getElementById("profileSublocationChip").innerText=currentUser.sublocation;
+  const meta=DB.getVoterMeta(currentUser.phone);
+  const badge=getUserVoterBadge(currentUser.phone);
+  const cycleBadge=document.getElementById("profileCycleBadge");
+  cycleBadge.innerText=badge?`${badge} voter this cycle`:"";
+  cycleBadge.style.display=badge?"":"none";
+  document.getElementById("profileTotalVotes").innerText=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes.filter(v=>v.userId===currentUser.phone).length;
+  document.getElementById("profileCurrentRank").innerText=`🔥 ${meta.streak||0}`;
   updateHeaderAvatar();
 }
 
-async function saveProfileChanges() {
-  const fn    = document.getElementById('profFirstName').value.trim();
-  const sn    = document.getElementById('profSurname').value.trim();
-  const sub   = document.getElementById('profSublocation').value;
-  const email = document.getElementById('profEmail').value.trim();
-  const natId = document.getElementById('profNationalId').value.trim();
-  const lang  = document.getElementById('profLanguage').value;
-  if (!isValidName(fn) || !isValidName(sn)) { showToast('Invalid name','error'); return; }
-  if (!isValidEmail(email))                  { showToast('Invalid email','error'); return; }
-  if (!isValidNationalId(natId))             { showToast('National ID must be 7–8 digits','error'); return; }
-  try {
-    const res  = await fetch('/api/profile', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ firstName:fn, surname:sn, sublocation:sub, email, nationalId:natId, language:lang })
-    });
-    const data = await res.json();
-    if (!data.success) { showToast(data.error||'Update failed','error'); return; }
-    currentUser = { ...currentUser, ...data.user, firstName: data.user.first_name };
-    showToast('✅ Profile updated','success');
-    loadProfileData();
-  } catch (e) { showToast('Network error — could not save profile','error'); }
+async function saveProfileChanges(){
+  const fn=document.getElementById("profFirstName").value.trim(),sn=document.getElementById("profSurname").value.trim();
+  const sub=document.getElementById("profSublocation").value,email=document.getElementById("profEmail").value.trim();
+  const natId=document.getElementById("profNationalId").value.trim(),lang=document.getElementById("profLanguage").value;
+  if(!isValidName(fn)||!isValidName(sn)){showToast("Invalid name","error");return;}
+  if(!isValidEmail(email)){showToast("Invalid email","error");return;}
+  if(!isValidNationalId(natId)){showToast("National ID must be 7–8 digits","error");return;}
+  currentUser=DB.upsertUser({...currentUser,firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId,language:lang});
+  saveSession(currentUser,true); showToast("✅ Profile updated","success"); loadProfileData();
 }
 
-async function changePassword() {
-  const curr = document.getElementById('currentPassword').value;
-  const n1   = document.getElementById('newPassword1').value;
-  const n2   = document.getElementById('newPassword2').value;
-  const err  = document.getElementById('profilePwdError');
-  if (!curr||!n1||!n2) { if(err){err.textContent='All fields required';err.classList.add('show');} return; }
-  if (n1 !== n2)        { if(err){err.textContent='Passwords do not match';err.classList.add('show');} return; }
-  if (n1.length < 6)    { if(err){err.textContent='Minimum 6 characters';err.classList.add('show');} return; }
-  try {
-    const res  = await fetch('/api/change-password', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ currentPassword:curr, newPassword:n1 })
-    });
-    const data = await res.json();
-    if (!data.success) { if(err){err.textContent=data.error||'Change failed';err.classList.add('show');} return; }
-    if (err) err.classList.remove('show');
-    showToast('🔐 Password changed','success');
-    ['currentPassword','newPassword1','newPassword2'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  } catch (e) { if(err){err.textContent='Network error';err.classList.add('show');} }
+async function changePassword(){
+  const curr=document.getElementById("currentPassword").value,n1=document.getElementById("newPassword1").value,n2=document.getElementById("newPassword2").value;
+  const err=document.getElementById("profilePwdError");
+  if(!curr||!n1||!n2){showFormError(err,"All fields required");return;}
+  if(n1!==n2){showFormError(err,"Passwords do not match");return;}
+  if(n1.length<6){showFormError(err,"Minimum 6 characters");return;}
+  const user=DB.findUser(currentUser.phone);
+  if(!(await verifyPassword(curr,user.passwordHash,user.salt))){showFormError(err,"Current password incorrect");return;}
+  const {hash,salt}=await createUserHash(n1);
+  currentUser=DB.upsertUser({...currentUser,passwordHash:hash,salt}); saveSession(currentUser,true);
+  err.classList.remove("show"); showToast("🔐 Password changed","success");
+  ["currentPassword","newPassword1","newPassword2"].forEach(id=>document.getElementById(id).value="");
 }
 
-function handlePhotoUpload(file) {
-  if (!file) return;
-  if (!['image/jpeg','image/png'].includes(file.type)) { showToast('JPG or PNG only','error'); return; }
-  if (file.size > 2*1024*1024) { showToast('Max 2MB','error'); return; }
-  const r = new FileReader();
-  r.onload = async e => {
-    const photoData = e.target.result;
-    const avatar = document.getElementById('profileAvatar');
-    if (avatar) avatar.src = photoData;
-    updateHeaderAvatar();
-    try {
-      const u = currentUser;
-      const res  = await fetch('/api/profile', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ firstName:u.firstName||u.first_name, surname:u.surname, sublocation:u.sublocation, email:u.email||'', nationalId:u.national_id||u.nationalId||'', language:u.language||'en', profilePhoto:photoData })
-      });
-      const data = await res.json();
-      if (data.success) { currentUser = { ...currentUser, ...data.user, firstName:data.user.first_name, profilePhoto:photoData }; showToast('📸 Photo updated','success'); }
-      else showToast(data.error||'Photo save failed','error');
-    } catch(e) { showToast('Network error saving photo','error'); }
-  };
-  r.readAsDataURL(file);
+function handlePhotoUpload(file){
+  if(!file) return; if(!["image/jpeg","image/png"].includes(file.type)){showToast("JPG or PNG only","error");return;} if(file.size>2*1024*1024){showToast("Max 2MB","error");return;}
+  const r=new FileReader(); r.onload=e=>{currentUser=DB.upsertUser({...currentUser,profilePhoto:e.target.result});saveSession(currentUser,true);document.getElementById("profileAvatar").src=e.target.result;updateHeaderAvatar();showToast("📸 Photo updated","success");};r.readAsDataURL(file);
 }
-async function removePhoto() {
-  try {
-    const u = currentUser;
-    const res  = await fetch('/api/profile', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ firstName:u.firstName||u.first_name, surname:u.surname, sublocation:u.sublocation, email:u.email||'', nationalId:u.national_id||u.nationalId||'', language:u.language||'en', profilePhoto:'' })
-    });
-    const data = await res.json();
-    if (data.success) { currentUser = { ...currentUser, ...data.user, firstName:data.user.first_name, profilePhoto:null, profile_photo:null }; }
-  } catch(e) {}
-  loadProfileData(); updateHeaderAvatar(); showToast('Photo removed','info');
-}
+function removePhoto(){currentUser=DB.upsertUser({...currentUser,profilePhoto:null});saveSession(currentUser,true);loadProfileData();updateHeaderAvatar();showToast("Photo removed","info");}
 function exportUserData(){
   const data={exportedAt:new Date().toISOString(),user:{firstName:currentUser.firstName,surname:currentUser.surname,phone:currentUser.phone,sublocation:currentUser.sublocation,voterNumber:currentUser.voterNumber},transactions:DB.getTransactions().filter(t=>t.user_id===currentUser.phone)};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`ngoliba_${currentUser.phone}.json`;a.click();URL.revokeObjectURL(url);showToast("📦 Data exported","success");
 }
 
-// ═══ OTP / Password Reset ═══
-async function sendOtp() {
-  const phone = document.getElementById('otpPhone').value.trim();
-  if (!phone) { showToast('Enter your phone number','error'); return; }
-  try {
-    const res  = await fetch('/api/reset-password', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ action:'request', phone })
-    });
-    const data = await res.json();
-    if (!data.success) { showToast(data.error||'Phone not found','error'); return; }
-    showToast('✅ Request received — enter your new password below','success');
-    document.getElementById('otpStep1').classList.remove('active');
-    document.getElementById('otpStep2').classList.add('active');
-    let secs = 60;
-    if (otpTimer) clearInterval(otpTimer);
-    otpTimer = setInterval(() => {
-      secs--;
-      const el = document.getElementById('resendTimer'); if(el) el.innerText = secs;
-      if (secs <= 0) { clearInterval(otpTimer); const rb=document.getElementById('resendOtpBtn'); if(rb) rb.disabled=false; }
-    }, 1000);
-  } catch(e) { showToast('Network error','error'); }
+// ═══ OTP ═══
+function sendOtp(){
+  const phone=document.getElementById("otpPhone").value.trim();
+  if(!DB.findUser(phone)){showToast("Phone not registered","error");return;}
+  const otp=Math.floor(100000+Math.random()*900000).toString();
+  otpDataStore={phone,otp,expiry:Date.now()+600000};localStorage.setItem(KEYS.OTP_STORE,JSON.stringify(otpDataStore));
+  alert(`[DEMO] Your OTP is: ${otp}`);showToast("OTP sent!","success");
+  document.getElementById("otpStep1").classList.remove("active");document.getElementById("otpStep2").classList.add("active");
+  let secs=60;if(otpTimer)clearInterval(otpTimer);
+  otpTimer=setInterval(()=>{secs--;document.getElementById("resendTimer").innerText=secs;if(secs<=0){clearInterval(otpTimer);document.getElementById("resendOtpBtn").disabled=false;}},1000);
 }
-
-async function resetPasswordConfirm() {
-  const phone = document.getElementById('otpPhone').value.trim();
-  const pwd   = document.getElementById('newPassword').value;
-  if (pwd.length < 6) { showToast('Min 6 characters','error'); return; }
-  try {
-    const res  = await fetch('/api/reset-password', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ action:'confirm', phone, password:pwd })
-    });
-    const data = await res.json();
-    if (!data.success) { showToast(data.error||'Reset failed','error'); return; }
-    showToast('🔐 Password reset! Please log in.','success');
-    closeModal('otpModal');
-    document.getElementById('otpStep1').classList.add('active');
-    document.getElementById('otpStep2').classList.remove('active');
-  } catch(e) { showToast('Network error','error'); }
+async function resetPasswordConfirm(){
+  const phone=document.getElementById("otpPhone").value.trim(),code=document.getElementById("otpCode").value.trim(),pwd=document.getElementById("newPassword").value;
+  const stored=JSON.parse(localStorage.getItem(KEYS.OTP_STORE)||"{}");
+  if(!stored||stored.phone!==phone||stored.otp!==code||Date.now()>stored.expiry){showToast("Invalid or expired OTP","error");return;}
+  if(pwd.length<6){showToast("Min 6 characters","error");return;}
+  const user=DB.findUser(phone);if(!user)return;
+  const {hash,salt}=await createUserHash(pwd);DB.upsertUser({...user,passwordHash:hash,salt});
+  showToast("🔐 Password reset! Please login.","success");closeModal("otpModal");
+  document.getElementById("otpStep1").classList.add("active");document.getElementById("otpStep2").classList.remove("active");
 }
 
 // ═══ COMPARE ═══
@@ -4644,114 +4549,56 @@ async function apiCall(endpoint, body = null) {
     console.error('Network Error:', error);
     return { success: false, error: 'Network error' };
   }
-}
+}    btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
+  
+async function loginUser() {
+  const phone    = document.getElementById('loginPhone').value.trim();
+  const pwd      = document.getElementById('loginPassword').value;
+  const remember = document.getElementById('rememberMe')?.checked || false;
+  const err      = document.getElementById('loginErrorMsg');
+  const btn      = document.getElementById('doLoginBtn');
+  const spinner  = document.getElementById('loginSpinner');
 
-// 2. FIXED REGISTRATION
-async function registerUser(){
-  const fn = document.getElementById("regFirstName").value.trim();
-  const sn = document.getElementById("regSurname").value.trim();
-  const dob = document.getElementById("regDob").value;
-  const phone = document.getElementById("regPhone").value.trim();
-  const sub = document.getElementById("regSublocation").value;
-  const email = document.getElementById("regEmail").value.trim();
-  const natId = document.getElementById("regNationalId").value.trim();
-  const lang = document.getElementById("regLanguage").value;
-  const pwd = document.getElementById("regPassword").value;
-  const confirm = document.getElementById("regConfirmPassword").value;
-  const err = document.getElementById("regErrorMsg");
-  
-  if(!isValidName(fn) || !isValidName(sn)){ if(err) { err.textContent = "Name invalid"; err.classList.add("show"); } return; }
-  if(!dob){ if(err) { err.textContent = "DOB required"; err.classList.add("show"); } return; }
-  if(!isValidPhone(phone)){ if(err) { err.textContent = "Phone invalid"; err.classList.add("show"); } return; }
-  if(!sub){ if(err) { err.textContent = "Sublocation required"; err.classList.add("show"); } return; }
-  if(!isValidEmail(email)){ if(err) { err.textContent = "Email invalid"; err.classList.add("show"); } return; }
-  if(!isValidNationalId(natId)){ if(err) { err.textContent = "ID invalid"; err.classList.add("show"); } return; }
-  if(pwd.length < 6){ if(err) { err.textContent = "Password too short"; err.classList.add("show"); } return; }
-  if(pwd !== confirm){ if(err) { err.textContent = "Passwords don't match"; err.classList.add("show"); } return; }
-  
-  const btn = document.getElementById("doRegisterBtn");
-  btn.disabled = true;
-  btn.innerHTML = '<div class="btn-spinner"></div> Creating…';
-  
-  try {
-    const data = await apiCall('/api/auth', {
-      action: 'register',
-      firstName: fn,
-      surname: sn,
-      dob, phone, sublocation: sub, email, nationalId: natId, language: lang,
-      password: pwd
-    });
-    
-    if (!data.success) {
-      if(err) { err.textContent = data.error || 'Failed'; err.classList.add("show"); }
-      btn.disabled = false;
-      btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
-      return;
-    }
-    
-  currentUser = data.user;
-  currentUser.firstName = currentUser.first_name;
-    btn.disabled = false;
-    btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
-    if(err) err.classList.remove("show");
-    if(typeof showToast === 'function') showToast(`🎉 Registered! Voter No. ${data.user.voter_number}`, "success");
-    
-    document.getElementById("regFirstName").value = '';
-    document.getElementById("regSurname").value = '';
-    document.getElementById("regDob").value = '';
-    document.getElementById("regPhone").value = '';
-    document.getElementById("regEmail").value = '';
-    document.getElementById("regNationalId").value = '';
-    document.getElementById("regPassword").value = '';
-    document.getElementById("regConfirmPassword").value = '';
-    
-    setTimeout(() => document.getElementById("showLoginTab").click(), 500);
-  } catch (error) {
-    console.error('Reg error:', error);
-    if(err) { err.textContent = 'Error'; err.classList.add("show"); }
-    btn.disabled = false;
-    btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
+  if (!phone || !pwd) {
+    if (err) { err.textContent = 'Phone and password required'; err.classList.add('show'); }
+    return;
   }
-}
 
-// 3. FIXED LOGIN
-async function loginUser(){
-  const phone = document.getElementById("loginPhone").value.trim();
-  const pwd = document.getElementById("loginPassword").value;
-  const remember = document.getElementById("rememberMe").checked;
-  const err = document.getElementById("loginErrorMsg");
-  const btn = document.getElementById("doLoginBtn");
-  
-  document.getElementById("loginSpinner").classList.remove("hidden");
+  if (spinner) spinner.classList.remove('hidden');
   btn.disabled = true;
-  
+
   try {
-    const data = await apiCall('/api/auth', {
-      action: 'login',
-      phone, password: pwd, remember
+    const res  = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action:'login', phone, password:pwd, remember })
     });
-    
+    const data = await res.json();
+
     if (!data.success) {
-      if(err) { err.textContent = data.error || 'Login failed'; err.classList.add("show"); }
-      if(typeof shakeEl === 'function') shakeEl("authContainer");
-      document.getElementById("loginSpinner").classList.add("hidden");
+      if (err) { err.textContent = data.error || 'Login failed'; err.classList.add('show'); }
+      if (typeof shakeEl === 'function') shakeEl('authContainer');
+      if (spinner) spinner.classList.add('hidden');
       btn.disabled = false;
       return;
     }
-    
+
+    // Normalise server snake_case → camelCase
     currentUser = data.user;
     currentUser.firstName = currentUser.first_name;
-    document.getElementById("loginSpinner").classList.add("hidden");
+
+    if (spinner) spinner.classList.add('hidden');
     btn.disabled = false;
-    if(err) err.classList.remove("show");
-    document.getElementById("loginPhone").value = '';
-    document.getElementById("loginPassword").value = '';
-    
-    if(typeof enterDashboard === 'function') enterDashboard();
-  } catch (error) {
-    console.error('Login error:', error);
-    if(err) { err.textContent = 'Error'; err.classList.add("show"); }
-    document.getElementById("loginSpinner").classList.add("hidden");
+    if (err) err.classList.remove('show');
+    document.getElementById('loginPhone').value    = '';
+    document.getElementById('loginPassword').value = '';
+
+    enterDashboard();
+
+  } catch (e) {
+    console.error('Login error:', e);
+    if (err) { err.textContent = 'Network error — please try again'; err.classList.add('show'); }
+    if (spinner) spinner.classList.add('hidden');
     btn.disabled = false;
   }
 }
