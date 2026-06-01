@@ -369,21 +369,29 @@ async function ensureNoticesTable() {
     console.log('✅ notices table ready');
 
     // ── AVATAR COLUMN MIGRATION ──
-    // profile_photo was originally BYTEA but we store base64 data-URL strings.
-    // Migrate to TEXT so the pg driver returns a plain string instead of a Buffer.
-    // This is idempotent — Postgres will no-op if the column is already TEXT.
+    // profile_photo may be BYTEA (original schema) or TEXT (already migrated).
+    // Query the actual column type first — never call convert_from on TEXT.
     try {
-      await pool.query(`
-        ALTER TABLE users
-          ALTER COLUMN profile_photo TYPE TEXT
-          USING convert_from(profile_photo, 'UTF8')
+      const colType = await pool.query(`
+        SELECT data_type
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name   = 'users'
+           AND column_name  = 'profile_photo'
       `);
-      console.log('✅ profile_photo column migrated to TEXT');
-    } catch (migErr) {
-      // Silently ignore if already TEXT or column has incompatible binary data
-      if (!migErr.message.includes('already exists') && !migErr.message.includes('type text')) {
-        console.warn('⚠️  profile_photo migration skipped:', migErr.message);
+      const currentType = colType.rows[0]?.data_type || '';
+      if (currentType === 'bytea') {
+        await pool.query(`
+          ALTER TABLE users
+            ALTER COLUMN profile_photo TYPE TEXT
+            USING convert_from(profile_photo, 'UTF8')
+        `);
+        console.log('\u2705 profile_photo column migrated BYTEA \u2192 TEXT');
+      } else {
+        console.log(`\u2705 profile_photo column already ${currentType || 'unknown'} \u2014 no migration needed`);
       }
+    } catch (migErr) {
+      console.warn('\u26a0\ufe0f  profile_photo migration skipped:', migErr.message);
     }
   } catch (err) {
     console.error('❌ ensureNoticesTable error:', err.message);
