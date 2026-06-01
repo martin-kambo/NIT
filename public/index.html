@@ -5828,11 +5828,6 @@ window.updateHeaderBadge = function(){
   if (badge) badge.style.display = 'none';
 };
 
-window.updateHeaderAvatar = function(){
-  // Delegate to real implementation defined above
-  if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
-};
-
 window.loadProfileData = function(){
   if (!currentUser) return;
   // ── Hero section (display elements, not inputs) ──
