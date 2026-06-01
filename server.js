@@ -502,13 +502,21 @@ function verifyAdminToken(authHeader) {
 }
 
 async function getNextVoterNumber() {
+  // Guarantee the counters row exists even when initDB() early-exited because
+  // the users table was already present (i.e. the metadata seed was never run).
+  await pool.query(
+    `INSERT INTO metadata (key, value)
+     VALUES ('counters', '{"last_voter_number": 0, "registered_voters": 0, "last_period_id": 0}')
+     ON CONFLICT (key) DO NOTHING`
+  );
+
   const res = await pool.query(
     `SELECT (value->>'last_voter_number')::bigint as last FROM metadata WHERE key = 'counters'`
   );
   const last = res.rows[0]?.last || 0;
   const next = last + 1;
   await pool.query(
-    `UPDATE metadata SET value = jsonb_set(value, '{last_voter_number}', to_jsonb($1::int)) WHERE key = 'counters'`,
+    `UPDATE metadata SET value = jsonb_set(value, '{last_voter_number}', to_jsonb($1::bigint)) WHERE key = 'counters'`,
     [next]
   );
   return next;
@@ -922,6 +930,63 @@ app.get('/api/history', async (req, res) => {
   } catch (e) {
     console.error('/api/history error:', e);
     return res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
+// ════════════════════════════════════════════════
+// ROUTE: /api/transaction  (record STK push initiation)
+// ════════════════════════════════════════════════
+app.post('/api/transaction', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { checkout_request_id, phone, amount, candidate_id } = req.body;
+  if (!checkout_request_id) return res.status(400).json({ error: 'checkout_request_id required' });
+
+  try {
+    await pool.query(
+      `INSERT INTO mpesa_transactions
+         (id, phone, amount, account_reference, description, status, created_at)
+       VALUES ($1, $2, $3, 'NIT-VOTE', $4, 'pending', NOW())
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        checkout_request_id,
+        phone || session.phone || null,
+        amount || 10,
+        `Vote for candidate ${candidate_id ?? 'unknown'}`
+      ]
+    );
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('/api/transaction error:', e);
+    return res.status(500).json({ error: 'Failed to record transaction' });
+  }
+});
+
+// ════════════════════════════════════════════════
+// ROUTE: /api/transaction/confirm  (mark STK push as paid)
+// ════════════════════════════════════════════════
+app.post('/api/transaction/confirm', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { checkout_request_id, receipt } = req.body;
+  if (!checkout_request_id || !receipt)
+    return res.status(400).json({ error: 'checkout_request_id and receipt required' });
+
+  try {
+    await pool.query(
+      `UPDATE mpesa_transactions
+          SET status = 'confirmed',
+              mpesa_receipt_number = $2,
+              callback_received_at = NOW()
+        WHERE id = $1`,
+      [checkout_request_id, receipt]
+    );
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('/api/transaction/confirm error:', e);
+    return res.status(500).json({ error: 'Failed to confirm transaction' });
   }
 });
 

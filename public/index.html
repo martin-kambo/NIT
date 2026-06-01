@@ -3292,7 +3292,7 @@ async function simulateMpesaSuccess(){
     if(mpesaPendingVote){
       // recordVote() does not exist — submit vote via server API instead
       const voteRes=await fetch('/api/vote',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-        body:JSON.stringify({candidateId:mpesaPendingVote.candidateId,receipt:result.MpesaReceiptNumber})
+        body:JSON.stringify({candidateId:mpesaPendingVote.candidateId,periodId:window.currentPeriodId,receipt:result.MpesaReceiptNumber})
       }).then(r=>r.json()).catch(()=>({success:false}));
       const ok=voteRes.success!==false;
       if(ok){
@@ -4636,8 +4636,8 @@ async function apiCall(endpoint, body = null) {
     console.error('Network Error:', error);
     return { success: false, error: 'Network error' };
   }
-}    btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
-  
+}
+
 async function loginUser() {
   const phone    = document.getElementById('loginPhone').value.trim();
   const pwd      = document.getElementById('loginPassword').value;
