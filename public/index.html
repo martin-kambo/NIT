@@ -220,6 +220,17 @@ body::before {
 .avatar-dd-item.danger { color: #dc2626; }
 .avatar-dd-item.danger i { color: #dc2626; }
 .avatar-dd-item.danger:hover { background: rgba(220,38,38,0.07); color: #b91c1c; }
+/* ═══ NOTIFICATION PANEL (inside avatar dropdown) ═══ */
+.notif-panel {
+  width: 100%;
+  margin-top: 0.25rem;
+  border-top: 1px solid rgba(0,0,0,0.07);
+  max-height: 260px;
+  overflow-y: auto;
+  background: white;
+}
+.notif-panel.hidden { display: none; }
+
 
 
 /* ═══ HERO BAND ═══ */
@@ -1891,12 +1902,12 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="header-actions">
         <div id="avatarWrap" class="avatar-wrap hidden" role="button" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
           <div class="avatar-online-ring"></div>
-          <img id="headerAvatar" src="" alt="avatar">
+          <img id="headerAvatar" src="" alt="Profile" onerror="this.src=getAvatarSrc(window.currentUser||{})">
           <div id="headerBadge" class="voter-badge-dot hidden"></div>
           <!-- Account hub dropdown -->
           <div class="avatar-dropdown" id="avatarDropdown" role="menu">
             <div class="avatar-dd-header">
-              <img id="avatarDdPhoto" src="" alt="avatar">
+              <img id="avatarDdPhoto" src="" alt="Profile" onerror="this.src=getAvatarSrc(window.currentUser||{})">
               <div>
                 <div class="avatar-dd-name" id="avatarDdName">—</div>
                 <div class="avatar-dd-sub" id="avatarDdSub">Ngoliba Ward · Voter</div>
@@ -1917,6 +1928,11 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
                 <i class="fas fa-bell"></i> Notifications
                 <span class="notif-count hidden" id="avatarDdNotifCount" style="margin-left:auto;background:var(--red-accent);color:white;border-radius:50px;padding:0 6px;font-size:0.68rem;font-weight:700;"></span>
               </button>
+              <!-- Notification panel — rendered here, toggled by ddNotifications -->
+              <div class="notif-panel hidden" id="notifDropdown">
+                <div class="notif-dropdown-header"><span>Notifications</span><button class="notif-mark-all" id="notifMarkAll">Mark all read</button></div>
+                <div class="notif-list" id="notifList"></div>
+              </div>
               <div class="avatar-dd-divider"></div>
               <button class="avatar-dd-item danger" id="ddLogout">
                 <i class="fas fa-sign-out-alt"></i> Logout
@@ -1924,14 +1940,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
             </div>
           </div>
         </div>
-        <div id="notifBell" class="notif-bell hidden">
-          <button class="notif-bell-btn" id="notifBellBtn"><i class="fas fa-bell"></i><span class="notif-count hidden" id="notifCount">0</span></button>
-          <div class="notif-dropdown hidden" id="notifDropdown">
-            <div class="notif-dropdown-header"><span>Notifications</span><button class="notif-mark-all" id="notifMarkAll">Mark all read</button></div>
-            <div class="notif-list" id="notifList"></div>
-          </div>
-        </div>
-        <button id="logoutBtn" class="logout-btn hidden"><i class="fas fa-sign-out-alt"></i> Logout</button>
+        <!-- notifCount: hidden sentinel used by renderNotifBell() to track unread count -->
+        <span id="notifCount" class="hidden" style="display:none!important;" aria-hidden="true">0</span>
       </div>
     </div>
   </div>
@@ -2486,7 +2496,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="profile-hero">
         <div class="profile-hero-inner">
           <div class="profile-avatar-wrap">
-            <img id="profileAvatar" class="profile-avatar-img" src="" alt="avatar">
+            <img id="profileAvatar" class="profile-avatar-img" src="" alt="Profile" onerror="this.src=getAvatarSrc(window.currentUser||{},120)">
             <label class="profile-avatar-edit" for="profilePhotoUpload"><i class="fas fa-camera"></i></label>
             <input type="file" id="profilePhotoUpload" accept="image/jpeg,image/png" class="hidden">
           </div>
@@ -3062,7 +3072,7 @@ async function logout() {
     currentUser = null;
     
     document.getElementById("authContainer")?.classList.remove("hidden");
-    ["heroBand","countdownStrip","headerNav","avatarWrap","notifBell","logoutBtn","livePulse"]
+    ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"]
       .forEach(id => document.getElementById(id)?.classList.add("hidden"));
     
     if(faceoffInterval) clearInterval(faceoffInterval);
@@ -3092,6 +3102,7 @@ async function loadSession(){
       const u = d.user;
       // Normalize server snake_case to camelCase
       u.firstName = u.first_name;
+      if (!u.profilePhoto && u.profile_photo) u.profilePhoto = u.profile_photo;
       SESSION.setCurrentUser(u); 
       return u; 
     }
@@ -3103,7 +3114,7 @@ async function loadSession(){
 
 function enterDashboard(){
   ["authContainer"].forEach(id=>document.getElementById(id)?.classList.add("hidden"));
-  ["heroBand","countdownStrip","headerNav","avatarWrap","notifBell","logoutBtn","livePulse"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
+  ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
   showPane("dashboardContent");
   renderDashboard();
   showWelcomePopup();
@@ -3116,6 +3127,7 @@ function enterDashboard(){
   if(faceoffInterval)clearInterval(faceoffInterval);
   faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();updateLiveTicker();},3000);
   startCountdown();
+  updateHeaderAvatar();  // paint avatar immediately on login
   showToast(`Welcome back, ${currentUser.firstName}! 👋`,"success");
   // Show live viewers (simulated)
   const lp=document.getElementById("livePulse"); if(lp) lp.style.display="flex";
@@ -3319,15 +3331,43 @@ function updateFaceoff(){
   document.getElementById("foWinnerChip").innerHTML=(right.votes>=270||left.votes>=270)?"🏆 WINNER DECLARED!":"⏳ Race in progress";
 }
 
+// ─── Avatar helper — single source of truth for profile picture ───────────────
+/**
+ * Returns a valid image URL for the given user object.
+ * Falls back to a generated initials avatar so there are never broken images.
+ * @param {object} user  - currentUser or any user object with firstName/surname/profilePhoto
+ * @param {number} size  - pixel size for the fallback avatar (default 40)
+ */
+function getAvatarSrc(user, size) {
+  size = size || 40;
+  if (!user) {
+    return `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=${size}&bold=true&name=User`;
+  }
+  // profilePhoto (camelCase) or profile_photo (snake_case from server)
+  const photo = user.profilePhoto || user.profile_photo || null;
+  if (photo && photo.trim() !== '' && !photo.startsWith('null') && !photo.startsWith('undefined')) {
+    return photo;
+  }
+  const name = encodeURIComponent(
+    `${user.firstName || user.first_name || ''}+${user.surname || ''}`
+  ).replace(/%2B/g, '+') || 'User';
+  return `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=${size}&bold=true&name=${name}`;
+}
+
 function updateHeaderAvatar(){
-  const photo = currentUser.profilePhoto ||
-    `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=40&bold=true&name=${encodeURIComponent(currentUser.firstName+"+"+currentUser.surname)}`;
+  if (!currentUser) return;
+  const photo = getAvatarSrc(currentUser, 40);
+  const photoBig = getAvatarSrc(currentUser, 120);
   // Main header avatar
   const img = document.getElementById("headerAvatar");
-  if (img) img.src = photo;
-  // Dropdown header avatar (synced so it's always current)
+  if (img) { img.src = photo; img.alt = "Profile"; }
+  // Dropdown header avatar
   const ddPhoto = document.getElementById("avatarDdPhoto");
-  if (ddPhoto) ddPhoto.src = photo;
+  if (ddPhoto) { ddPhoto.src = photo; ddPhoto.alt = "Profile"; }
+  // Profile page large avatar
+  const profAvatar = document.getElementById("profileAvatar");
+  if (profAvatar) { profAvatar.src = photoBig; profAvatar.alt = "Profile"; }
+  // Dropdown identity text
   const ddName = document.getElementById("avatarDdName");
   if (ddName) ddName.textContent = `${currentUser.firstName||""} ${currentUser.surname||""}`.trim() || "—";
   const ddSub = document.getElementById("avatarDdSub");
@@ -3794,10 +3834,13 @@ function addNotification({icon,iconCls,text,type}){
 function renderNotifBell(){
   const arr=getNotifications();
   const unread=arr.filter(n=>!n.read).length;
+  const badge=unread>9?"9+":String(unread);
+  // Hidden sentinel (for internal reads)
   const countEl=document.getElementById("notifCount");
-  if(!countEl)return;
-  countEl.textContent=unread>9?"9+":unread;
-  countEl.classList.toggle("hidden",unread===0);
+  if(countEl){countEl.textContent=badge;countEl.classList.toggle("hidden",unread===0);}
+  // Visible badge inside avatar dropdown
+  const ddBadge=document.getElementById("avatarDdNotifCount");
+  if(ddBadge){ddBadge.textContent=badge;ddBadge.classList.toggle("hidden",unread===0);}
   const list=document.getElementById("notifList");
   if(!list)return;
   if(!arr.length){list.innerHTML='<div class="notif-empty">No notifications yet</div>';return;}
@@ -3819,12 +3862,12 @@ function renderNotifBell(){
   });
 }
 function ringBell(){
-  const btn=document.getElementById("notifBellBtn");
-  if(!btn)return;
-  btn.classList.remove("ringing");
-  void btn.offsetWidth;
-  btn.classList.add("ringing");
-  setTimeout(()=>btn.classList.remove("ringing"),500);
+  // Bell button removed from header; pulse the avatar wrap instead
+  const wrap=document.getElementById("avatarWrap");
+  if(!wrap)return;
+  wrap.style.transition="transform 0.1s";
+  wrap.style.transform="scale(1.2)";
+  setTimeout(()=>{wrap.style.transform="";wrap.style.transition="transform 0.2s";},180);
 }
 function timeAgo(ts){
   const diff=Date.now()-ts;
@@ -4315,7 +4358,7 @@ function loadProfileData(){
   document.getElementById("profNationalId").value=currentUser.nationalId||currentUser.national_id||"";
   if(document.getElementById("profLanguage")) document.getElementById("profLanguage").value=currentUser.language||"en";
   const avatar=document.getElementById("profileAvatar");
-  if(avatar) avatar.src=currentUser.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=120&bold=true&name=${encodeURIComponent((currentUser.firstName||"")+"+"+(currentUser.surname||""))}`;
+    if(avatar){avatar.src=getAvatarSrc(currentUser,120);avatar.alt="Profile";}
   // Hero section
   document.getElementById("profileName").innerText=`${currentUser.firstName||""} ${currentUser.surname||""}`.trim();
   document.getElementById("profileSub").innerText=`${currentUser.sublocation||""} · Voter #${currentUser.voterNumber||"—"}`;
@@ -4528,7 +4571,6 @@ document.getElementById("showLoginTab") && (document.getElementById("showLoginTa
 document.getElementById("showRegisterTab") && (document.getElementById("showRegisterTab").onclick=switchToRegister);
 document.getElementById("doLoginBtn").onclick=loginUser;
 document.getElementById("doRegisterBtn").onclick=registerUser;
-document.getElementById("logoutBtn").onclick=logout;
 document.getElementById("loginPassword").addEventListener("keydown",e=>{if(e.key==="Enter")loginUser();});
 document.getElementById("loginPhone").addEventListener("keydown",e=>{if(e.key==="Enter")loginUser();});
 // Nav
@@ -4552,10 +4594,9 @@ document.getElementById("navDashboard").onclick=()=>showPane("dashboardContent")
     } else {
       // Refresh header photo/name before opening
       if (currentUser) {
-        const photo = currentUser.profilePhoto ||
-          `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=40&bold=true&name=${encodeURIComponent((currentUser.firstName||"")+"+"+(currentUser.surname||""))}`;
+        const photo = getAvatarSrc(currentUser, 40);
         const ddPhoto = document.getElementById("avatarDdPhoto");
-        if (ddPhoto) ddPhoto.src = photo;
+        if (ddPhoto) { ddPhoto.src = photo; ddPhoto.alt = "Profile"; }
         const ddName  = document.getElementById("avatarDdName");
         if (ddName)  ddName.textContent  = `${currentUser.firstName||""} ${currentUser.surname||""}`.trim() || "—";
         const ddSub   = document.getElementById("avatarDdSub");
@@ -4617,13 +4658,15 @@ document.getElementById("navDashboard").onclick=()=>showPane("dashboardContent")
     setTimeout(()=>{ document.getElementById("profilePhotoUpload")?.click(); }, 200);
   });
 
-  // Notifications — reuse existing bell toggle logic
+  // Notifications — toggle the inline panel (now lives inside avatar dropdown)
   document.getElementById("ddNotifications")?.addEventListener("click", function(e) {
-    e.stopPropagation(); closeDropdown();
-    const notifDd = document.getElementById("notifDropdown");
-    if (notifDd) {
-      notifDd.classList.toggle("hidden");
-      if (!notifDd.classList.contains("hidden")) renderNotifBell();
+    e.stopPropagation();
+    // Keep dropdown open; just toggle the panel below the button
+    const notifPanel = document.getElementById("notifDropdown");
+    if (notifPanel) {
+      const willShow = notifPanel.classList.contains("hidden");
+      notifPanel.classList.toggle("hidden", !willShow);
+      if (willShow) renderNotifBell();
     }
   });
 
@@ -4633,21 +4676,14 @@ document.getElementById("navDashboard").onclick=()=>showPane("dashboardContent")
     if (typeof logout === "function") logout();
   });
 })();
-document.getElementById("notifBellBtn").addEventListener("click",e=>{
+// Notifications mark-all (panel now lives inside avatar dropdown)
+document.getElementById("notifMarkAll")?.addEventListener("click", function(e) {
   e.stopPropagation();
-  const dd=document.getElementById("notifDropdown");
-  dd.classList.toggle("hidden");
-  if(!dd.classList.contains("hidden"))renderNotifBell();
+  const arr = getNotifications().map(n => ({...n, read: true}));
+  saveNotifications(arr);
+  renderNotifBell();
 });
-document.getElementById("notifMarkAll").addEventListener("click",()=>{
-  const arr=getNotifications().map(n=>({...n,read:true}));
-  saveNotifications(arr);renderNotifBell();
-});
-document.addEventListener("click",e=>{
-  const bell=document.getElementById("notifBell");
-  const dd=document.getElementById("notifDropdown");
-  if(dd&&!dd.classList.contains("hidden")&&bell&&!bell.contains(e.target))dd.classList.add("hidden");
-});
+
 // Feature tabs
 document.querySelectorAll(".feature-tab").forEach(btn=>btn.addEventListener("click",()=>switchFeatureTab(btn.dataset.tab)));
 // OTP
@@ -5722,8 +5758,8 @@ window.updateHeaderBadge = function(){
 };
 
 window.updateHeaderAvatar = function(){
-  // Avatar already shown in currentUser
-  // This is cosmetic only
+  // Delegate to real implementation defined above
+  if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
 };
 
 window.loadProfileData = function(){
@@ -5914,7 +5950,7 @@ window.enterDashboard = function(){
   }
   
   ["authContainer"].forEach(id => document.getElementById(id)?.classList.add("hidden"));
-  ["heroBand","countdownStrip","headerNav","avatarWrap","notifBell","logoutBtn","livePulse"]
+  ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"]
     .forEach(id => document.getElementById(id)?.classList.remove("hidden"));
   
   if (typeof showPane === 'function') showPane("dashboardContent");
