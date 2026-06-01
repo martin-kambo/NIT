@@ -132,12 +132,6 @@ body::before {
 .nav-pill:hover { background: var(--forest-light); color: white; }
 .nav-pill.active { background: var(--forest); color: var(--gold); }
 .header-actions { display: flex; align-items: center; gap: 0.75rem; }
-.avatar-wrap {
-  position: relative; cursor: none;
-  transition: transform 0.2s;
-}
-.avatar-wrap:hover { transform: scale(1.05); }
-.avatar-wrap img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 2px solid var(--gold); }
 .voter-badge-dot {
   position: absolute; bottom: -2px; right: -2px;
   width: 18px; height: 18px; border-radius: 50%; border: 2px solid white;
@@ -150,6 +144,83 @@ body::before {
   transition: all 0.2s; color: var(--text-mid);
 }
 .logout-btn:hover { background: var(--red-accent); color: white; border-color: transparent; }
+
+/* ═══ AVATAR ACCOUNT HUB DROPDOWN ═══ */
+.avatar-wrap {
+  position: relative; cursor: pointer;
+  transition: transform 0.2s;
+}
+.avatar-wrap:hover { transform: scale(1.05); }
+.avatar-wrap img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 2px solid var(--gold); }
+.avatar-online-ring {
+  position: absolute; inset: -3px; border-radius: 50%;
+  border: 2px solid var(--emerald);
+  animation: ringPulse 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes ringPulse {
+  0%,100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.08); }
+}
+.avatar-dropdown {
+  position: absolute; top: calc(100% + 10px); right: 0;
+  min-width: 220px;
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08);
+  border: 1px solid rgba(0,0,0,0.07);
+  overflow: hidden;
+  opacity: 0; transform: translateY(-8px) scale(0.97);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 9999;
+}
+.avatar-dropdown.open {
+  opacity: 1; transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.avatar-dd-header {
+  display: flex; align-items: center; gap: 0.65rem;
+  padding: 0.9rem 1rem 0.75rem;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+  background: linear-gradient(135deg, var(--forest), var(--forest-light));
+}
+.avatar-dd-header img {
+  width: 36px; height: 36px; border-radius: 50%;
+  object-fit: cover; border: 2px solid var(--gold);
+  flex-shrink: 0;
+}
+.avatar-dd-name {
+  font-family: 'Syne', sans-serif; font-weight: 700;
+  font-size: 0.85rem; color: white;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 130px;
+}
+.avatar-dd-sub {
+  font-size: 0.7rem; color: rgba(255,255,255,0.6);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 130px;
+}
+.avatar-dd-menu { padding: 0.35rem 0; }
+.avatar-dd-item {
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.6rem 1rem; cursor: pointer;
+  font-size: 0.82rem; font-weight: 500; color: #374151;
+  transition: background 0.15s, color 0.15s;
+  border: none; background: none; width: 100%; text-align: left;
+  font-family: 'Outfit', sans-serif;
+}
+.avatar-dd-item:hover { background: rgba(45,106,79,0.07); color: var(--forest); }
+.avatar-dd-item i {
+  width: 16px; text-align: center;
+  color: var(--mid-gray); transition: color 0.15s;
+}
+.avatar-dd-item:hover i { color: var(--forest); }
+.avatar-dd-divider { height: 1px; background: rgba(0,0,0,0.07); margin: 0.25rem 0; }
+.avatar-dd-item.danger { color: #dc2626; }
+.avatar-dd-item.danger i { color: #dc2626; }
+.avatar-dd-item.danger:hover { background: rgba(220,38,38,0.07); color: #b91c1c; }
+
 
 /* ═══ HERO BAND ═══ */
 .hero-band {
@@ -502,7 +573,7 @@ body::before {
   .notice-header { padding: 0.9rem 0.85rem; }
   .notice-header-title { font-size: 1rem; }
   .analytics-grid { grid-template-columns: 1fr; }
-  .header-nav { display: none; }   /* hide nav pills on very small screens — avatar + logo only */
+  .header-nav { display: none; }   /* hide Dashboard pill on very small screens; avatar hub remains visible */
 }
 
 .error-msg {
@@ -1142,6 +1213,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
   .nav-pill { padding: 0.35rem 0.65rem; font-size: 0.72rem; }
   .header-actions { gap: 0.4rem; }
   .avatar-wrap { width: 32px; height: 32px; }
+  .avatar-dropdown { min-width: 190px; right: -8px; }
 
   /* ── Hero ── */
   .hero-title { font-size: 1.7rem; }
@@ -1815,12 +1887,42 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       </div>
       <nav class="header-nav hidden" id="headerNav">
         <button class="nav-pill active" id="navDashboard">Dashboard</button>
-        <button class="nav-pill" id="navProfile">My Profile</button>
       </nav>
       <div class="header-actions">
-        <div id="avatarWrap" class="avatar-wrap hidden">
+        <div id="avatarWrap" class="avatar-wrap hidden" role="button" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
+          <div class="avatar-online-ring"></div>
           <img id="headerAvatar" src="" alt="avatar">
           <div id="headerBadge" class="voter-badge-dot hidden"></div>
+          <!-- Account hub dropdown -->
+          <div class="avatar-dropdown" id="avatarDropdown" role="menu">
+            <div class="avatar-dd-header">
+              <img id="avatarDdPhoto" src="" alt="avatar">
+              <div>
+                <div class="avatar-dd-name" id="avatarDdName">—</div>
+                <div class="avatar-dd-sub" id="avatarDdSub">Ngoliba Ward · Voter</div>
+              </div>
+            </div>
+            <div class="avatar-dd-menu">
+              <button class="avatar-dd-item" id="ddViewProfile">
+                <i class="fas fa-id-card"></i> View Profile
+              </button>
+              <button class="avatar-dd-item" id="ddEditProfile">
+                <i class="fas fa-user-edit"></i> Edit Profile
+              </button>
+              <button class="avatar-dd-item" id="ddUploadPhoto">
+                <i class="fas fa-camera"></i> Change Photo
+              </button>
+              <div class="avatar-dd-divider"></div>
+              <button class="avatar-dd-item" id="ddNotifications">
+                <i class="fas fa-bell"></i> Notifications
+                <span class="notif-count hidden" id="avatarDdNotifCount" style="margin-left:auto;background:var(--red-accent);color:white;border-radius:50px;padding:0 6px;font-size:0.68rem;font-weight:700;"></span>
+              </button>
+              <div class="avatar-dd-divider"></div>
+              <button class="avatar-dd-item danger" id="ddLogout">
+                <i class="fas fa-sign-out-alt"></i> Logout
+              </button>
+            </div>
+          </div>
         </div>
         <div id="notifBell" class="notif-bell hidden">
           <button class="notif-bell-btn" id="notifBellBtn"><i class="fas fa-bell"></i><span class="notif-count hidden" id="notifCount">0</span></button>
@@ -3024,7 +3126,6 @@ function showPane(id){
   ["dashboardContent","profileContent"].forEach(p=>document.getElementById(p)?.classList.add("hidden"));
   document.getElementById(id)?.classList.remove("hidden");
   document.getElementById("navDashboard")?.classList.toggle("active",id==="dashboardContent");
-  document.getElementById("navProfile")?.classList.toggle("active",id==="profileContent");
   if(id==="profileContent"&&currentUser) loadProfileData();
   window.scrollTo({top:0,behavior:"smooth"});
 }
@@ -3218,7 +3319,20 @@ function updateFaceoff(){
   document.getElementById("foWinnerChip").innerHTML=(right.votes>=270||left.votes>=270)?"🏆 WINNER DECLARED!":"⏳ Race in progress";
 }
 
-function updateHeaderAvatar(){ const img=document.getElementById("headerAvatar"); if(img) img.src=currentUser.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=40&bold=true&name=${encodeURIComponent(currentUser.firstName+"+"+currentUser.surname)}`; }
+function updateHeaderAvatar(){
+  const photo = currentUser.profilePhoto ||
+    `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=40&bold=true&name=${encodeURIComponent(currentUser.firstName+"+"+currentUser.surname)}`;
+  // Main header avatar
+  const img = document.getElementById("headerAvatar");
+  if (img) img.src = photo;
+  // Dropdown header avatar (synced so it's always current)
+  const ddPhoto = document.getElementById("avatarDdPhoto");
+  if (ddPhoto) ddPhoto.src = photo;
+  const ddName = document.getElementById("avatarDdName");
+  if (ddName) ddName.textContent = `${currentUser.firstName||""} ${currentUser.surname||""}`.trim() || "—";
+  const ddSub = document.getElementById("avatarDdSub");
+  if (ddSub) ddSub.textContent = `${currentUser.sublocation||"Ngoliba Ward"} · Voter #${currentUser.voterNumber||"—"}`;
+}
 function updateHeaderBadge(){ const b=document.getElementById("headerBadge"); const badge=getUserVoterBadge(currentUser?.phone); if(badge){b.classList.remove("hidden");b.innerText=badge==="1st"?"🥇":badge==="2nd"?"🥈":"🥉";b.style.background={"1st":"#e9c46a","2nd":"#9ca3af","3rd":"#cd7f32"}[badge]||"#666";}else b.classList.add("hidden"); }
 
 function showCandidateProfile(cand){
@@ -4419,8 +4533,106 @@ document.getElementById("loginPassword").addEventListener("keydown",e=>{if(e.key
 document.getElementById("loginPhone").addEventListener("keydown",e=>{if(e.key==="Enter")loginUser();});
 // Nav
 document.getElementById("navDashboard").onclick=()=>showPane("dashboardContent");
-document.getElementById("navProfile").onclick=()=>showPane("profileContent");
-document.getElementById("avatarWrap").onclick=()=>showPane("profileContent");
+
+// ─── Avatar account-hub dropdown ──────────────────────────────────────────────
+(function initAvatarDropdown(){
+  const wrap = document.getElementById("avatarWrap");
+  const dd   = document.getElementById("avatarDropdown");
+  if (!wrap || !dd) return;
+
+  // Toggle open/close on avatar click (not on inner dropdown clicks)
+  wrap.addEventListener("click", function(e) {
+    e.stopPropagation();
+    const isOpen = dd.classList.contains("open");
+    // Close notif dropdown if open
+    document.getElementById("notifDropdown")?.classList.add("hidden");
+    if (isOpen) {
+      dd.classList.remove("open");
+      wrap.setAttribute("aria-expanded", "false");
+    } else {
+      // Refresh header photo/name before opening
+      if (currentUser) {
+        const photo = currentUser.profilePhoto ||
+          `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=40&bold=true&name=${encodeURIComponent((currentUser.firstName||"")+"+"+(currentUser.surname||""))}`;
+        const ddPhoto = document.getElementById("avatarDdPhoto");
+        if (ddPhoto) ddPhoto.src = photo;
+        const ddName  = document.getElementById("avatarDdName");
+        if (ddName)  ddName.textContent  = `${currentUser.firstName||""} ${currentUser.surname||""}`.trim() || "—";
+        const ddSub   = document.getElementById("avatarDdSub");
+        if (ddSub)   ddSub.textContent   = `${currentUser.sublocation||"Ngoliba Ward"} · Voter #${currentUser.voterNumber||"—"}`;
+        // Mirror unread badge count into dropdown
+        const srcCount = document.getElementById("notifCount");
+        const tgtCount = document.getElementById("avatarDdNotifCount");
+        if (srcCount && tgtCount) {
+          const n = srcCount.textContent;
+          tgtCount.textContent = n;
+          tgtCount.classList.toggle("hidden", srcCount.classList.contains("hidden") || n==="0");
+        }
+      }
+      dd.classList.add("open");
+      wrap.setAttribute("aria-expanded", "true");
+    }
+  });
+
+  // Close when clicking outside
+  document.addEventListener("click", function(e) {
+    if (!wrap.contains(e.target)) {
+      dd.classList.remove("open");
+      wrap.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  // Escape key closes
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape") {
+      dd.classList.remove("open");
+      wrap.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  function closeDropdown() {
+    dd.classList.remove("open");
+    wrap.setAttribute("aria-expanded", "false");
+  }
+
+  // View Profile
+  document.getElementById("ddViewProfile")?.addEventListener("click", function(e) {
+    e.stopPropagation(); closeDropdown();
+    showPane("profileContent");
+  });
+
+  // Edit Profile — same pane, but scroll to the Personal Details panel
+  document.getElementById("ddEditProfile")?.addEventListener("click", function(e) {
+    e.stopPropagation(); closeDropdown();
+    showPane("profileContent");
+    setTimeout(()=>{
+      document.getElementById("profFirstName")?.closest(".glass-panel")?.scrollIntoView({behavior:"smooth",block:"start"});
+    }, 120);
+  });
+
+  // Change Photo — trigger the hidden file input inside profileContent
+  document.getElementById("ddUploadPhoto")?.addEventListener("click", function(e) {
+    e.stopPropagation(); closeDropdown();
+    showPane("profileContent");
+    setTimeout(()=>{ document.getElementById("profilePhotoUpload")?.click(); }, 200);
+  });
+
+  // Notifications — reuse existing bell toggle logic
+  document.getElementById("ddNotifications")?.addEventListener("click", function(e) {
+    e.stopPropagation(); closeDropdown();
+    const notifDd = document.getElementById("notifDropdown");
+    if (notifDd) {
+      notifDd.classList.toggle("hidden");
+      if (!notifDd.classList.contains("hidden")) renderNotifBell();
+    }
+  });
+
+  // Logout
+  document.getElementById("ddLogout")?.addEventListener("click", function(e) {
+    e.stopPropagation(); closeDropdown();
+    if (typeof logout === "function") logout();
+  });
+})();
 document.getElementById("notifBellBtn").addEventListener("click",e=>{
   e.stopPropagation();
   const dd=document.getElementById("notifDropdown");
