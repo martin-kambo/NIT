@@ -2655,6 +2655,40 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 const PERIOD_MS = 5 * 60 * 1000;
 const KEYS = { USERS:"ngoliba_users", SESSION:"ngoliba_session", CURRENT_PERIOD:"ngoliba_current_period", PERIOD_ARCHIVE:"ngoliba_period_archive", OTP_STORE:"ngoliba_otp", LOGIN_ATTEMPTS:"login_attempts", VOTER_COUNTER:"ngoliba_voter_counter" };
 
+// ── DB SHIM ─────────────────────────────────────────────────────
+// DB was a localStorage-based module that no longer exists as a class.
+// This shim is defined here (before first use) so all remaining DB.*
+// call-sites don't throw ReferenceError. Server-side data is fetched
+// via /api/* endpoints; forum posts and voter meta are kept in localStorage.
+const DB_NS = 'ngoliba';
+const DB = {
+  getUsers:  () => { try { return JSON.parse(localStorage.getItem(DB_NS+':users') || '[]'); } catch(e){ return []; } },
+  findUser:  (phone) => DB.getUsers().find(u => u.phone === phone) || null,
+  upsertUser:(user)  => {
+    const users = DB.getUsers();
+    const idx = users.findIndex(u => u.phone === user.phone);
+    if (idx >= 0) users[idx] = user; else users.push(user);
+    localStorage.setItem(DB_NS+':users', JSON.stringify(users));
+    return user;
+  },
+  getTransactions: () => { try { return JSON.parse(localStorage.getItem(DB_NS+':txns') || '[]'); } catch(e){ return []; } },
+  createTransaction: (txn) => {
+    const txns = DB.getTransactions(); txns.push(txn);
+    localStorage.setItem(DB_NS+':txns', JSON.stringify(txns));
+  },
+  confirmTransaction: (checkoutId, receipt) => {
+    const txns = DB.getTransactions();
+    const t = txns.find(t => t.checkout_request_id === checkoutId);
+    if (t) { t.receipt = receipt; t.status = 'confirmed'; }
+    localStorage.setItem(DB_NS+':txns', JSON.stringify(txns));
+  },
+  getVoterMeta:  (phone) => { try { return JSON.parse(localStorage.getItem(DB_NS+':meta:'+phone) || '{}'); } catch(e){ return {}; } },
+  saveVoterMeta: (phone, meta) => localStorage.setItem(DB_NS+':meta:'+phone, JSON.stringify(meta)),
+  getForumPosts:  () => { try { return JSON.parse(localStorage.getItem(DB_NS+':forum') || '[]'); } catch(e){ return []; } },
+  saveForumPosts: (posts) => localStorage.setItem(DB_NS+':forum', JSON.stringify(posts)),
+};
+// ── END DB SHIM ─────────────────────────────────────────────────
+
 const CANDIDATES = [
   { id:0, name:"Hon. James Mwangi", party:"UDA (Incumbent)", bio:"Two-term MCA, water projects.", img:"https://randomuser.me/api/portraits/men/32.jpg", incumbent:true, fullBio:"Two-term MCA with a track record in water projects & youth empowerment across Ngoliba sublocation.", vision:"Complete water pipeline project, tarmac roads, and expand bursary fund.", track:"Bursary fund for 200+ students; 3 ECD classrooms constructed.", color:"#4361ee" },
   { id:1, name:"Grace Wanjiku", party:"Independent", bio:"Teacher & community organizer.", img:"https://randomuser.me/api/portraits/women/68.jpg", fullBio:"15 years teaching, runs a women's cooperative group with 300+ members.", vision:"Digital hub for youth, women enterprise loan program.", track:"Free tuition campaign; clean water initiative for 5 villages.", color:"#e63946" },
@@ -2892,18 +2926,16 @@ async function registerUser() {
     const lp = document.getElementById('loginPhone');
     if (lp) lp.value = data.user.phone;
 
-    // Destroy the auto-issued session cookie
+    // Destroy the auto-issued session cookie, then switch panel only after it resolves
     await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'logout' })
     }).catch(() => {});
 
-    // Switch to login panel
-    setTimeout(() => {
-      if (typeof switchToLogin === 'function') switchToLogin();
-      else document.getElementById('showLoginTab')?.click();
-    }, 400);
+    // Switch to login panel — run synchronously after logout resolves to avoid race
+    if (typeof switchToLogin === 'function') switchToLogin();
+    else document.getElementById('showLoginTab')?.click();
 
   } catch (e) {
     console.error('Register error:', e);
@@ -3209,8 +3241,9 @@ function animatePinDots(count){document.querySelectorAll(".mpesa-pin-dot").forEa
 function showVoteConfirm(cid,btn){ openMpesaModal(cid,btn); }
 
 function openMpesaModal(cid,btn){
-  const cand=CANDIDATES.find(c=>c.id===cid); if(!cand) return;
-  mpesaPendingVote={candidateId:cid,button:btn};
+  const numericCid = typeof cid === 'string' ? parseInt(cid, 10) : cid;
+  const cand=CANDIDATES.find(c=>c.id===numericCid); if(!cand) return;
+  mpesaPendingVote={candidateId:numericCid,button:btn};
   document.getElementById("mpesaCandImg").src=cand.img; document.getElementById("mpesaCandName").innerText=cand.name; document.getElementById("mpesaCandParty").innerText=cand.party;
   if(currentUser?.phone){const n=currentUser.phone.replace(/^0/,"").replace(/^254/,"").slice(0,9);document.getElementById("mpesaPhone").value=n;}
   setMpesaStep(1); openModal("mpesaModal");
@@ -3227,7 +3260,13 @@ async function handleMpesaSend(){
     const stk=await DARAJA.initiateStkPush({phone:fullPhone,amount:10,accountRef:"NGOLIBA-VOTE"});
     if(stk.ResponseCode!=="0") throw new Error(stk.ResponseDescription);
     mpesaActiveCheckoutId=stk.CheckoutRequestID;
-    DB.createTransaction({user_id:currentUser.phone,checkout_request_id:mpesaActiveCheckoutId,phone:fullPhone,amount:10,candidate_id:mpesaPendingVote?.candidateId});
+    // Log transaction via API (DB is server-side; no local DB object exists)
+    fetch('/api/transaction', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ checkout_request_id: mpesaActiveCheckoutId, phone: fullPhone, amount: 10, candidate_id: mpesaPendingVote?.candidateId })
+    }).catch(() => {}); // non-fatal — vote is recorded on confirmation
     btn.disabled=false; btn.innerHTML='<i class="fas fa-mobile-alt"></i> <span>Send M-Pesa Request</span>';
     setMpesaStep(2); animatePinDots(0);
     let secs=60; if(mpesaCountdownTimer)clearInterval(mpesaCountdownTimer);
@@ -3242,14 +3281,20 @@ async function simulateMpesaSuccess(){
   animatePinDots(4); setMpesaStep(3);
   const result=await DARAJA.simulateIpnCallback(mpesaActiveCheckoutId,true);
   if(result.ResultCode===0){
-    DB.confirmTransaction(mpesaActiveCheckoutId,result.MpesaReceiptNumber);
+    // Confirm transaction server-side (no local DB object — DB is server-side only)
+    fetch('/api/transaction/confirm',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+      body:JSON.stringify({checkout_request_id:mpesaActiveCheckoutId,receipt:result.MpesaReceiptNumber})}).catch(()=>{});
     const cand=CANDIDATES.find(c=>c.id===mpesaPendingVote?.candidateId);
     document.getElementById("mpesaTxnId").innerText=result.MpesaReceiptNumber;
     document.getElementById("mpesaReceiptCand").innerText=cand?.name||"—";
     document.getElementById("mpesaReceiptTime").innerText=new Date().toLocaleTimeString();
     setMpesaStep(4); showToast("💚 Payment confirmed by Safaricom!","success");
     if(mpesaPendingVote){
-      const ok=recordVote(mpesaPendingVote.candidateId,currentUser.phone,currentUser.sublocation);
+      // recordVote() does not exist — submit vote via server API instead
+      const voteRes=await fetch('/api/vote',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+        body:JSON.stringify({candidateId:mpesaPendingVote.candidateId,receipt:result.MpesaReceiptNumber})
+      }).then(r=>r.json()).catch(()=>({success:false}));
+      const ok=voteRes.success!==false;
       if(ok){
         if(mpesaPendingVote.button){mpesaPendingVote.button.innerHTML='<i class="fas fa-check-circle"></i> Voted!';mpesaPendingVote.button.disabled=true;}
         renderDashboard();
@@ -4146,40 +4191,50 @@ function initPWAInstall(){
 // ═══ PROFILE ═══
 function loadProfileData(){
   if(!currentUser) return;
-  const fresh=DB.findUser(currentUser.phone); if(fresh) currentUser=fresh;
-  document.getElementById("profFirstName").value=currentUser.firstName;
-  document.getElementById("profSurname").value=currentUser.surname;
-  document.getElementById("profPhone").value=currentUser.phone;
-  document.getElementById("profDob").value=currentUser.dob||"";
-  document.getElementById("profSublocation").value=currentUser.sublocation;
+  // DB.findUser() does not exist — currentUser is already up-to-date from the server
+  document.getElementById("profFirstName").value=currentUser.firstName||"";
+  document.getElementById("profSurname").value=currentUser.surname||"";
+  document.getElementById("profPhone").value=currentUser.phone||"";
+  if(document.getElementById("profDob")) document.getElementById("profDob").value=currentUser.dob||"";
+  document.getElementById("profSublocation").value=currentUser.sublocation||"";
   document.getElementById("profEmail").value=currentUser.email||"";
-  document.getElementById("profNationalId").value=currentUser.nationalId||"";
-  document.getElementById("profLanguage").value=currentUser.language||"en";
+  document.getElementById("profNationalId").value=currentUser.nationalId||currentUser.national_id||"";
+  if(document.getElementById("profLanguage")) document.getElementById("profLanguage").value=currentUser.language||"en";
   const avatar=document.getElementById("profileAvatar");
-  avatar.src=currentUser.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=120&bold=true&name=${encodeURIComponent(currentUser.firstName+"+"+currentUser.surname)}`;
-  document.getElementById("profileName").innerText=`${currentUser.firstName} ${currentUser.surname}`;
-  document.getElementById("profileSub").innerText=`${currentUser.sublocation} · Voter #${currentUser.voterNumber}`;
-  document.getElementById("profileVoterNum").innerText=`Voter #${currentUser.voterNumber}`;
-  document.getElementById("profileSublocationChip").innerText=currentUser.sublocation;
-  const meta=DB.getVoterMeta(currentUser.phone);
+  if(avatar) avatar.src=currentUser.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=120&bold=true&name=${encodeURIComponent((currentUser.firstName||"")+"+"+(currentUser.surname||""))}`;
+  // Hero section
+  document.getElementById("profileName").innerText=`${currentUser.firstName||""} ${currentUser.surname||""}`.trim();
+  document.getElementById("profileSub").innerText=`${currentUser.sublocation||""} · Voter #${currentUser.voterNumber||"—"}`;
+  document.getElementById("profileVoterNum").innerText=`Voter #${currentUser.voterNumber||"—"}`;
+  document.getElementById("profileSublocationChip").innerText=currentUser.sublocation||"—";
+  // DB.getVoterMeta() does not exist — use locally available data only
   const badge=getUserVoterBadge(currentUser.phone);
   const cycleBadge=document.getElementById("profileCycleBadge");
-  cycleBadge.innerText=badge?`${badge} voter this cycle`:"";
-  cycleBadge.style.display=badge?"":"none";
-  document.getElementById("profileTotalVotes").innerText=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes.filter(v=>v.userId===currentUser.phone).length;
-  document.getElementById("profileCurrentRank").innerText=`🔥 ${meta.streak||0}`;
-  updateHeaderAvatar();
+  if(cycleBadge){cycleBadge.innerText=badge?`${badge} voter this cycle`:"";cycleBadge.style.display=badge?"":"none";}
+  const ptvEl=document.getElementById("profileTotalVotes");
+  if(ptvEl) ptvEl.innerText=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes.filter(v=>v.userId===currentUser.phone).length;
+  const pcrEl=document.getElementById("profileCurrentRank");
+  if(pcrEl) pcrEl.innerText="🔥 —";
+  if(typeof updateHeaderAvatar==="function") updateHeaderAvatar();
 }
 
 async function saveProfileChanges(){
   const fn=document.getElementById("profFirstName").value.trim(),sn=document.getElementById("profSurname").value.trim();
   const sub=document.getElementById("profSublocation").value,email=document.getElementById("profEmail").value.trim();
-  const natId=document.getElementById("profNationalId").value.trim(),lang=document.getElementById("profLanguage").value;
+  const natId=document.getElementById("profNationalId").value.trim();
+  const lang=document.getElementById("profLanguage")?document.getElementById("profLanguage").value:"en";
   if(!isValidName(fn)||!isValidName(sn)){showToast("Invalid name","error");return;}
   if(!isValidEmail(email)){showToast("Invalid email","error");return;}
   if(!isValidNationalId(natId)){showToast("National ID must be 7–8 digits","error");return;}
-  currentUser=DB.upsertUser({...currentUser,firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId,language:lang});
-  saveSession(currentUser,true); showToast("✅ Profile updated","success"); loadProfileData();
+  // DB.upsertUser() does not exist — persist via server API
+  try {
+    const data=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+      body:JSON.stringify({firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId,language:lang})}).then(r=>r.json());
+    if(data.success){
+      currentUser={...currentUser,...(data.user||{}),firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId};
+      showToast("✅ Profile updated","success"); loadProfileData();
+    } else { showToast(data.error||"Save failed","error"); }
+  } catch(e){ showToast("Network error","error"); }
 }
 
 async function changePassword(){
@@ -4188,28 +4243,53 @@ async function changePassword(){
   if(!curr||!n1||!n2){showFormError(err,"All fields required");return;}
   if(n1!==n2){showFormError(err,"Passwords do not match");return;}
   if(n1.length<6){showFormError(err,"Minimum 6 characters");return;}
-  const user=DB.findUser(currentUser.phone);
-  if(!(await verifyPassword(curr,user.passwordHash,user.salt))){showFormError(err,"Current password incorrect");return;}
-  const {hash,salt}=await createUserHash(n1);
-  currentUser=DB.upsertUser({...currentUser,passwordHash:hash,salt}); saveSession(currentUser,true);
+  // DB.findUser / DB.upsertUser do not exist — change password via server API
+  try {
+    const data=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+      body:JSON.stringify({action:'change-password',currentPassword:curr,newPassword:n1})}).then(r=>r.json());
+    if(!data.success){showFormError(err,data.error||"Current password incorrect");return;}
+  } catch(e){showFormError(err,"Network error");return;}
   err.classList.remove("show"); showToast("🔐 Password changed","success");
   ["currentPassword","newPassword1","newPassword2"].forEach(id=>document.getElementById(id).value="");
 }
 
 function handlePhotoUpload(file){
   if(!file) return; if(!["image/jpeg","image/png"].includes(file.type)){showToast("JPG or PNG only","error");return;} if(file.size>2*1024*1024){showToast("Max 2MB","error");return;}
-  const r=new FileReader(); r.onload=e=>{currentUser=DB.upsertUser({...currentUser,profilePhoto:e.target.result});saveSession(currentUser,true);document.getElementById("profileAvatar").src=e.target.result;updateHeaderAvatar();showToast("📸 Photo updated","success");};r.readAsDataURL(file);
+  const r=new FileReader(); r.onload=e=>{
+    currentUser.profilePhoto=e.target.result;
+    // Persist photo via server (DB.upsertUser does not exist client-side)
+    fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+      body:JSON.stringify({profilePhoto:e.target.result})}).catch(()=>{});
+    document.getElementById("profileAvatar").src=e.target.result;
+    if(typeof updateHeaderAvatar==='function')updateHeaderAvatar();
+    showToast("📸 Photo updated","success");
+  };r.readAsDataURL(file);
 }
-function removePhoto(){currentUser=DB.upsertUser({...currentUser,profilePhoto:null});saveSession(currentUser,true);loadProfileData();updateHeaderAvatar();showToast("Photo removed","info");}
+function removePhoto(){
+  currentUser.profilePhoto=null;
+  fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+    body:JSON.stringify({profilePhoto:null})}).catch(()=>{});
+  if(typeof loadProfileData==='function')loadProfileData();
+  if(typeof updateHeaderAvatar==='function')updateHeaderAvatar();
+  showToast("Photo removed","info");
+}
 function exportUserData(){
-  const data={exportedAt:new Date().toISOString(),user:{firstName:currentUser.firstName,surname:currentUser.surname,phone:currentUser.phone,sublocation:currentUser.sublocation,voterNumber:currentUser.voterNumber},transactions:DB.getTransactions().filter(t=>t.user_id===currentUser.phone)};
+  // DB.getTransactions() does not exist — export available local user data only
+  const data={exportedAt:new Date().toISOString(),user:{firstName:currentUser.firstName,surname:currentUser.surname,phone:currentUser.phone,sublocation:currentUser.sublocation,voterNumber:currentUser.voterNumber}};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`ngoliba_${currentUser.phone}.json`;a.click();URL.revokeObjectURL(url);showToast("📦 Data exported","success");
 }
 
 // ═══ OTP ═══
-function sendOtp(){
+async function sendOtp(){
   const phone=document.getElementById("otpPhone").value.trim();
-  if(!DB.findUser(phone)){showToast("Phone not registered","error");return;}
+  // DB.findUser() does not exist — validate phone via server
+  try {
+    const check = await fetch('/api/auth', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ action: 'check-phone', phone })
+    }).then(r=>r.json()).catch(()=>({exists:false}));
+    if (!check.exists) { showToast("Phone not registered","error"); return; }
+  } catch(e) { showToast("Could not verify phone","error"); return; }
   const otp=Math.floor(100000+Math.random()*900000).toString();
   otpDataStore={phone,otp,expiry:Date.now()+600000};localStorage.setItem(KEYS.OTP_STORE,JSON.stringify(otpDataStore));
   alert(`[DEMO] Your OTP is: ${otp}`);showToast("OTP sent!","success");
@@ -4222,8 +4302,15 @@ async function resetPasswordConfirm(){
   const stored=JSON.parse(localStorage.getItem(KEYS.OTP_STORE)||"{}");
   if(!stored||stored.phone!==phone||stored.otp!==code||Date.now()>stored.expiry){showToast("Invalid or expired OTP","error");return;}
   if(pwd.length<6){showToast("Min 6 characters","error");return;}
-  const user=DB.findUser(phone);if(!user)return;
-  const {hash,salt}=await createUserHash(pwd);DB.upsertUser({...user,passwordHash:hash,salt});
+  // DB.findUser / DB.upsertUser do not exist — reset password via server API
+  try {
+    const res = await fetch('/api/auth', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ action: 'reset-password', phone, password: pwd })
+    }).then(r=>r.json());
+    if (!res.success) { showToast(res.error || "Reset failed","error"); return; }
+  } catch(e) { showToast("Network error — please try again","error"); return; }
+  localStorage.removeItem(KEYS.OTP_STORE);
   showToast("🔐 Password reset! Please login.","success");closeModal("otpModal");
   document.getElementById("otpStep1").classList.add("active");document.getElementById("otpStep2").classList.remove("active");
 }
@@ -5428,21 +5515,24 @@ window.updateHeaderAvatar = function(){
 };
 
 window.loadProfileData = function(){
-  // Profile data from currentUser object
-  if (currentUser) {
-    if (document.getElementById("profileName")) {
-      document.getElementById("profileName").value = `${currentUser.firstName || ''} ${currentUser.surname || ''}`;
-    }
-    if (document.getElementById("profilePhone")) {
-      document.getElementById("profilePhone").value = currentUser.phone || '';
-    }
-    if (document.getElementById("profileEmail")) {
-      document.getElementById("profileEmail").value = currentUser.email || '';
-    }
-    if (document.getElementById("profileSubLocation")) {
-      document.getElementById("profileSubLocation").value = currentUser.sublocation || '';
-    }
-  }
+  if (!currentUser) return;
+  // ── Hero section (display elements, not inputs) ──
+  const heroName = document.getElementById('profileName');
+  if (heroName) heroName.innerText = `${currentUser.firstName || ''} ${currentUser.surname || ''}`.trim();
+  const heroSub = document.getElementById('profileSub');
+  if (heroSub) heroSub.innerText = `${currentUser.sublocation || ''} · Voter #${currentUser.voterNumber || '—'}`;
+  const voterNum = document.getElementById('profileVoterNum');
+  if (voterNum) voterNum.innerText = `Voter #${currentUser.voterNumber || '—'}`;
+  const subChip = document.getElementById('profileSublocationChip');
+  if (subChip) subChip.innerText = currentUser.sublocation || '—';
+  // ── Form fields — use the ACTUAL HTML IDs (profFirstName etc., not profileName) ──
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+  set('profFirstName',  currentUser.firstName);
+  set('profSurname',    currentUser.surname);
+  set('profPhone',      currentUser.phone);       // read-only field
+  set('profEmail',      currentUser.email);
+  set('profSublocation',currentUser.sublocation);
+  set('profNationalId', currentUser.nationalId || currentUser.national_id);
 };
 
 window.updateProfilePhoto = function(){
@@ -5455,28 +5545,34 @@ window.removePhoto = function(){
 
 window.saveProfile = async function(){
   if (!currentUser) return;
-  
-  const fn = document.getElementById("profileName")?.value.split(" ")[0] || currentUser.firstName;
-  const sn = document.getElementById("profileName")?.value.split(" ")[1] || currentUser.surname;
-  
+  // Read from the ACTUAL form field IDs (prof* prefix)
+  const fn  = document.getElementById('profFirstName')?.value.trim()  || currentUser.firstName;
+  const sn  = document.getElementById('profSurname')?.value.trim()    || currentUser.surname;
+  const em  = document.getElementById('profEmail')?.value.trim()      || currentUser.email;
+  const sub = document.getElementById('profSublocation')?.value       || currentUser.sublocation;
+  const nid = document.getElementById('profNationalId')?.value.trim() || currentUser.nationalId;
+
   try {
-    const data = await fetch('/api/me', {
+    const data = await fetch('/api/profile', {   // correct endpoint (not /api/me)
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        firstName: fn,
-        surname: sn,
-        email: document.getElementById("profileEmail")?.value || currentUser.email,
-        sublocation: document.getElementById("profileSubLocation")?.value || currentUser.sublocation
-      })
+      credentials: 'include',
+      body: JSON.stringify({ firstName: fn, surname: sn, email: em, sublocation: sub, nationalId: nid })
     }).then(r => r.json());
-    
+
     if (data.success) {
-      currentUser = data.user;
-      if(typeof showToast === 'function') showToast("✅ Profile saved!", "success");
+      // Merge updates back into currentUser and refresh hero display
+      currentUser = { ...currentUser, ...data.user,
+        firstName: data.user?.first_name || data.user?.firstName || fn,
+        surname:   data.user?.surname    || sn };
+      if (typeof window.loadProfileData === 'function') window.loadProfileData();
+      if (typeof showToast === 'function') showToast('✅ Profile saved!', 'success');
+    } else {
+      if (typeof showToast === 'function') showToast(data.error || 'Save failed', 'error');
     }
   } catch (error) {
     console.error('Save error:', error);
+    if (typeof showToast === 'function') showToast('Network error — please try again', 'error');
   }
 };
 
@@ -5640,6 +5736,8 @@ window.enterDashboard = function(){
 };
 
 console.log('✅ DB references patched! Dashboard should work now.');
+
+
 // ════════════════════════════════════════════════════════════════════════════
 // FINAL PATCH - REMOVE ALL REMAINING DB REFERENCES
 // ════════════════════════════════════════════════════════════════════════════
@@ -5651,9 +5749,24 @@ window.checkAndResetPeriod = function(){
   return;
 };
 
-window.loadSession = function(){
-  // Sessions are now HTTP-only cookies
-  // Return null to indicate no local session
+window.loadSession = async function(){
+  // Sessions are HTTP-only cookies — verify with server on every page load
+  try {
+    const res = await fetch('/api/me', { credentials: 'include' });
+    if (res.ok) {
+      const d = await res.json();
+      const u = d.user;
+      if (u) {
+        // Normalize snake_case → camelCase
+        u.firstName = u.firstName || u.first_name || '';
+        u.surname   = u.surname   || u.last_name  || '';
+        SESSION.setCurrentUser(u);
+        return u;
+      }
+    }
+  } catch(e) {
+    console.error('Session restore failed:', e);
+  }
   return null;
 };
 
