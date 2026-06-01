@@ -2825,37 +2825,53 @@ let deferredPWAPrompt = null;
 // ═══ server storage ═══
 const SESSION = {
   user: null, // Only stores currently logged-in user
-  
+
   // Load current user from memory (not localStorage!)
   loadCurrentUser: () => SESSION.user,
-  
+
   // Set after server authentication
+  // NOTE: we intentionally do NOT use sessionStorage here — Edge's Tracking
+  // Prevention blocks sessionStorage.setItem on some deployments and causes
+  // the "Uncaught ReferenceError: btn is not defined" cascade. The session
+  // cookie kept by the server is the authoritative store; /api/me is called
+  // on every page load to restore state, so in-memory is sufficient.
   setCurrentUser: (user) => {
     SESSION.user = user;
-    // Optionally cache ONLY the user object for page reloads
-    if(user) {
-      sessionStorage.setItem('currentUser', JSON.stringify(user));
-    }
   },
-  
+
   // Clear on logout
   clearCurrentUser: () => {
     SESSION.user = null;
-    sessionStorage.removeItem('currentUser');
   },
-  
-  // Load from sessionStorage on app startup
-  restoreFromSession: () => {
-    const cached = sessionStorage.getItem('currentUser');
-    if(cached) {
-      SESSION.user = JSON.parse(cached);
-      return SESSION.user;
-    }
-    return null;
-  }
+
+  // No-op stub kept for backward compat (callers may reference this)
+  restoreFromSession: () => SESSION.user
 };
 
-// At app startup, try to restore from server:
+// ═══ NORMALIZE USER ═══
+// Single authoritative function that maps server snake_case → camelCase
+// and sanitises the profile_photo value from the server.
+// Call this on every user object that comes back from any API endpoint.
+function normalizeUser(u) {
+  if (!u) return u;
+  u.firstName   = u.firstName   || u.first_name  || '';
+  u.surname     = u.surname     || '';
+  u.voterNumber = u.voterNumber || u.voter_number || null;
+  u.nationalId  = u.nationalId  || u.national_id || '';
+
+  // profile_photo comes back from the server as a base64 data-URL string
+  // (after the sanitizeUser fix in server.js).  Accept both field names.
+  const raw = u.profilePhoto || u.profile_photo || null;
+  if (raw && typeof raw === 'string' && raw.trim() !== '' &&
+      !raw.startsWith('null') && !raw.startsWith('undefined') &&
+      (raw.startsWith('data:image/') || raw.startsWith('http'))) {
+    u.profilePhoto = raw;
+  } else {
+    u.profilePhoto = null;
+  }
+  // Keep snake_case fields intact so existing code that reads them still works
+  return u;
+}
 async function initializeSession() {
   try {
     const response = await fetch('/api/me');
@@ -3099,10 +3115,7 @@ async function loadSession(){
     const res = await fetch('/api/me');
     if(res.ok){ 
       const d = await res.json();
-      const u = d.user;
-      // Normalize server snake_case to camelCase
-      u.firstName = u.first_name;
-      if (!u.profilePhoto && u.profile_photo) u.profilePhoto = u.profile_photo;
+      const u = normalizeUser(d.user);
       SESSION.setCurrentUser(u); 
       return u; 
     }
@@ -4388,7 +4401,9 @@ async function saveProfileChanges(){
     const data=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
       body:JSON.stringify({firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId,language:lang})}).then(r=>r.json());
     if(data.success){
-      currentUser={...currentUser,...(data.user||{}),firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId};
+      currentUser=normalizeUser({...currentUser,...(data.user||{}),firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId});
+      SESSION.setCurrentUser(currentUser);
+      if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
       showToast("✅ Profile updated","success"); loadProfileData();
     } else { showToast(data.error||"Save failed","error"); }
   } catch(e){ showToast("Network error","error"); }
@@ -4411,24 +4426,81 @@ async function changePassword(){
 }
 
 function handlePhotoUpload(file){
-  if(!file) return; if(!["image/jpeg","image/png"].includes(file.type)){showToast("JPG or PNG only","error");return;} if(file.size>2*1024*1024){showToast("Max 2MB","error");return;}
-  const r=new FileReader(); r.onload=e=>{
-    currentUser.profilePhoto=e.target.result;
-    // Persist photo via server (DB.upsertUser does not exist client-side)
-    fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-      body:JSON.stringify({profilePhoto:e.target.result})}).catch(()=>{});
-    document.getElementById("profileAvatar").src=e.target.result;
-    if(typeof updateHeaderAvatar==='function')updateHeaderAvatar();
-    showToast("📸 Photo updated","success");
-  };r.readAsDataURL(file);
+  if(!file) return;
+  if(!["image/jpeg","image/png"].includes(file.type)){showToast("JPG or PNG only","error");return;}
+  if(file.size>2*1024*1024){showToast("Max 2MB","error");return;}
+
+  const r=new FileReader();
+  r.onload=async e=>{
+    const dataUrl=e.target.result;
+
+    // 1. Show immediately in all avatar locations for instant feedback
+    currentUser.profilePhoto=dataUrl;
+    document.getElementById("profileAvatar").src=dataUrl;
+    if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
+
+    // 2. Persist to server and confirm from authoritative response
+    try {
+      const res=await fetch('/api/profile',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include',
+        body:JSON.stringify({
+          firstName: currentUser.firstName||currentUser.first_name,
+          surname:   currentUser.surname,
+          profilePhoto: dataUrl
+        })
+      });
+      const data=await res.json();
+      if(data.success && data.user){
+        // Update currentUser from server — this is the source of truth
+        currentUser=normalizeUser({...currentUser,...data.user});
+        SESSION.setCurrentUser(currentUser);
+        if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
+        showToast("📸 Photo updated","success");
+      } else {
+        // Server rejected — roll back preview
+        currentUser.profilePhoto=null;
+        if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
+        showToast(data.error||"Photo upload failed","error");
+      }
+    } catch(err){
+      console.error('Photo upload error:',err);
+      showToast("Network error — photo not saved","error");
+    }
+  };
+  r.readAsDataURL(file);
 }
-function removePhoto(){
+async function removePhoto(){
+  // Optimistic UI — clear immediately
   currentUser.profilePhoto=null;
-  fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-    body:JSON.stringify({profilePhoto:null})}).catch(()=>{});
-  if(typeof loadProfileData==='function')loadProfileData();
-  if(typeof updateHeaderAvatar==='function')updateHeaderAvatar();
-  showToast("Photo removed","info");
+  if(typeof loadProfileData==='function') loadProfileData();
+  if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
+
+  try {
+    const res=await fetch('/api/profile',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body:JSON.stringify({
+        firstName: currentUser.firstName||currentUser.first_name,
+        surname:   currentUser.surname,
+        profilePhoto: null   // explicit null → server clears the column
+      })
+    });
+    const data=await res.json();
+    if(data.success && data.user){
+      currentUser=normalizeUser({...currentUser,...data.user});
+      SESSION.setCurrentUser(currentUser);
+      if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
+      showToast("Photo removed","info");
+    } else {
+      showToast(data.error||"Remove failed","error");
+    }
+  } catch(err){
+    console.error('Remove photo error:',err);
+    showToast("Network error — please try again","error");
+  }
 }
 function exportUserData(){
   // DB.getTransactions() does not exist — export available local user data only
@@ -4918,9 +4990,8 @@ async function loginUser() {
       return;
     }
 
-    // Normalise server snake_case → camelCase
-    currentUser = data.user;
-    currentUser.firstName = currentUser.first_name;
+    // Normalise server snake_case → camelCase (including profilePhoto)
+    currentUser = normalizeUser(data.user);
 
     if (spinner) spinner.classList.add('hidden');
     btn.disabled = false;
@@ -5787,8 +5858,11 @@ window.updateProfilePhoto = function(){
   if(typeof showToast === 'function') showToast("Feature coming soon", "info");
 };
 
-window.removePhoto = function(){
-  if(typeof showToast === 'function') showToast("Feature coming soon", "info");
+window.removePhoto = async function(){
+  // Delegate to the real async removePhoto defined earlier
+  if (typeof removePhoto === 'function') {
+    await removePhoto();
+  }
 };
 
 window.saveProfile = async function(){
@@ -5806,14 +5880,17 @@ window.saveProfile = async function(){
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ firstName: fn, surname: sn, email: em, sublocation: sub, nationalId: nid })
+      // Note: no profilePhoto key here → server will leave existing photo untouched
     }).then(r => r.json());
 
     if (data.success) {
-      // Merge updates back into currentUser and refresh hero display
-      currentUser = { ...currentUser, ...data.user,
+      // Normalise and merge server response — server is the source of truth
+      currentUser = normalizeUser({ ...currentUser, ...data.user,
         firstName: data.user?.first_name || data.user?.firstName || fn,
-        surname:   data.user?.surname    || sn };
+        surname:   data.user?.surname    || sn });
+      SESSION.setCurrentUser(currentUser);
       if (typeof window.loadProfileData === 'function') window.loadProfileData();
+      if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
       if (typeof showToast === 'function') showToast('✅ Profile saved!', 'success');
     } else {
       if (typeof showToast === 'function') showToast(data.error || 'Save failed', 'error');
@@ -5970,7 +6047,10 @@ window.enterDashboard = function(){
   }, 3000);
   
   if (typeof startCountdown === 'function') startCountdown();
-  
+
+  // ── AVATAR: always paint from the current source of truth on every login ──
+  if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
+
   if(typeof showToast === 'function') showToast(`Welcome, ${currentUser.firstName || 'User'}! 👋`, "success");
   
   const lp = document.getElementById("livePulse");
@@ -6005,11 +6085,9 @@ window.loadSession = async function(){
       const d = await res.json();
       const u = d.user;
       if (u) {
-        // Normalize snake_case → camelCase
-        u.firstName = u.firstName || u.first_name || '';
-        u.surname   = u.surname   || u.last_name  || '';
-        SESSION.setCurrentUser(u);
-        return u;
+        const normalized = normalizeUser(u);
+        SESSION.setCurrentUser(normalized);
+        return normalized;
       }
     }
   } catch(e) {

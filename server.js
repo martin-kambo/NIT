@@ -367,6 +367,24 @@ async function ensureNoticesTable() {
       console.log('✅ notices table seeded with sample data');
     }
     console.log('✅ notices table ready');
+
+    // ── AVATAR COLUMN MIGRATION ──
+    // profile_photo was originally BYTEA but we store base64 data-URL strings.
+    // Migrate to TEXT so the pg driver returns a plain string instead of a Buffer.
+    // This is idempotent — Postgres will no-op if the column is already TEXT.
+    try {
+      await pool.query(`
+        ALTER TABLE users
+          ALTER COLUMN profile_photo TYPE TEXT
+          USING convert_from(profile_photo, 'UTF8')
+      `);
+      console.log('✅ profile_photo column migrated to TEXT');
+    } catch (migErr) {
+      // Silently ignore if already TEXT or column has incompatible binary data
+      if (!migErr.message.includes('already exists') && !migErr.message.includes('type text')) {
+        console.warn('⚠️  profile_photo migration skipped:', migErr.message);
+      }
+    }
   } catch (err) {
     console.error('❌ ensureNoticesTable error:', err.message);
   }
@@ -477,6 +495,31 @@ function verifySession(cookieHeader) {
 
 function sanitizeUser(user) {
   const { password_hash, salt, ...safe } = user;
+
+  // ── AVATAR FIX: profile_photo is stored as BYTEA in Postgres.
+  // The pg driver returns it as a Node.js Buffer; we must turn it back into
+  // the original base64 data-URL string before sending it to the browser.
+  // If the column was already migrated to TEXT it arrives as a plain string
+  // — both cases are handled here so this function is safe in either state.
+  if (safe.profile_photo != null) {
+    if (Buffer.isBuffer(safe.profile_photo)) {
+      const decoded = safe.profile_photo.toString('utf8');
+      // Only accept recognised image data-URLs; discard corrupted bytes.
+      safe.profile_photo =
+        decoded.startsWith('data:image/') ? decoded : null;
+    } else if (typeof safe.profile_photo === 'string') {
+      // Reject anything that isn't a data-URL or an http URL
+      if (
+        !safe.profile_photo.startsWith('data:image/') &&
+        !safe.profile_photo.startsWith('http')
+      ) {
+        safe.profile_photo = null;
+      }
+    } else {
+      safe.profile_photo = null;
+    }
+  }
+
   return safe;
 }
 
@@ -678,19 +721,59 @@ app.post('/api/auth', async (req, res) => {
 app.post('/api/profile', async (req, res) => {
   const session = verifySession(req.headers.cookie || '');
   if (!session) return res.status(401).json({ success: false, error: 'Unauthorized' });
-  const { firstName, surname, sublocation, email, nationalId, language, profilePhoto } = req.body;
-  if (!firstName || !surname) return res.status(400).json({ success: false, error: 'Name fields required' });
+
+  const { firstName, surname, sublocation, email, nationalId, language } = req.body;
+  if (!firstName || !surname)
+    return res.status(400).json({ success: false, error: 'Name fields required' });
+
+  // ── AVATAR FIX: distinguish three photo states ──
+  //   • key absent  → don't touch the stored photo
+  //   • key = null  → user wants to REMOVE the photo (set DB column to NULL)
+  //   • key = str   → user uploaded a new photo; store it
+  const photoKeyPresent = Object.prototype.hasOwnProperty.call(req.body, 'profilePhoto');
+  const photoValue      = photoKeyPresent ? (req.body.profilePhoto || null) : undefined;
+
   try {
-    const result = await pool.query(
-      `UPDATE users
-       SET first_name=$1, surname=$2, sublocation=$3, email=$4, national_id=$5, language=$6,
-           profile_photo=COALESCE($7, profile_photo), updated_at=NOW()
-       WHERE id=$8
-       RETURNING id, phone, first_name, surname, dob, sublocation, email, national_id, language, voter_number, profile_photo, created_at, updated_at`,
-      [firstName, surname, sublocation || null, email || null, nationalId || null, language || 'en',
-       profilePhoto || null, session.userId]
-    );
-    if (!result.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+    let result;
+    if (photoKeyPresent) {
+      // Update profile_photo explicitly (covers both set and clear)
+      result = await pool.query(
+        `UPDATE users
+           SET first_name=$1, surname=$2, sublocation=$3, email=$4,
+               national_id=$5, language=$6,
+               profile_photo=$7, updated_at=NOW()
+         WHERE id=$8
+         RETURNING id, phone, first_name, surname, dob, sublocation, email,
+                   national_id, language, voter_number, profile_photo,
+                   created_at, updated_at`,
+        [
+          firstName, surname, sublocation || null, email || null,
+          nationalId || null, language || 'en',
+          photoValue,               // null → clear; string → store
+          session.userId
+        ]
+      );
+    } else {
+      // Leave profile_photo unchanged (no photo key in request)
+      result = await pool.query(
+        `UPDATE users
+           SET first_name=$1, surname=$2, sublocation=$3, email=$4,
+               national_id=$5, language=$6, updated_at=NOW()
+         WHERE id=$7
+         RETURNING id, phone, first_name, surname, dob, sublocation, email,
+                   national_id, language, voter_number, profile_photo,
+                   created_at, updated_at`,
+        [
+          firstName, surname, sublocation || null, email || null,
+          nationalId || null, language || 'en',
+          session.userId
+        ]
+      );
+    }
+
+    if (!result.rows.length)
+      return res.status(404).json({ success: false, error: 'User not found' });
+
     return res.json({ success: true, user: sanitizeUser(result.rows[0]) });
   } catch (e) {
     console.error('/api/profile error:', e);
