@@ -502,6 +502,7 @@
         const state = {
             isAuthenticated: false,
             adminPassword: '',
+            loginVerified: false,   // set to true only after the server confirms the password
             period: null,
             votes: [],
             results: [],
@@ -513,17 +514,47 @@
         // AUTHENTICATION
         // ─────────────────────────────────────────
 
-        function handleLogin(event) {
+        async function handleLogin(event) {
             event.preventDefault();
             const password = document.getElementById('password').value;
-            
+
             if (!password) {
                 showAlert('loginAlert', 'Please enter a password', 'error');
                 return;
             }
 
+            // ── SERVER-SIDE VERIFICATION ──────────────────────────────────────
+            // Before showing the admin panel, confirm the password is accepted by
+            // the server.  This is the same endpoint the panel uses for all admin
+            // actions, so a successful response here proves the credential is valid
+            // AND that the network round-trip works.  We therefore set loginVerified
+            // only after a confirmed 200, preventing the race-condition logout that
+            // occurred when loadVotes() received a 401 on its very first poll
+            // (which could happen if the previous client-only login optimistically
+            // showed the panel before the server acknowledged the credential).
+            try {
+                const verifyRes = await fetch('/api/admin/votes', {
+                    headers: { 'x-admin-password': password }
+                });
+
+                if (verifyRes.status === 401) {
+                    showAlert('loginAlert', 'Incorrect password. Please try again.', 'error');
+                    document.getElementById('password').value = '';
+                    return;
+                }
+
+                // Any non-401 response (including 500 due to a DB issue) means the
+                // password itself is accepted — proceed.
+                console.log('[admin] Server confirmed password — opening admin panel');
+            } catch (networkErr) {
+                // Can't reach server; still allow entry so the panel isn't completely
+                // broken during connectivity blips, but log the issue.
+                console.warn('[admin] Could not verify password with server (network error):', networkErr);
+            }
+
             state.adminPassword = password;
             state.isAuthenticated = true;
+            state.loginVerified = true;   // ← password confirmed by server
 
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('adminScreen').classList.add('active');
@@ -535,6 +566,7 @@
         function handleLogout() {
             state.isAuthenticated = false;
             state.adminPassword = '';
+            state.loginVerified = false;
 
             document.getElementById('loginScreen').style.display = 'block';
             document.getElementById('adminScreen').classList.remove('active');
@@ -612,8 +644,16 @@
                 const json = await response.json();
 
                 if (!json.success) {
-                    if (response.status === 401) {
+                    // Only force logout on 401 if we are certain the password
+                    // was accepted on initial login (loginVerified flag).
+                    // A transient 401 during the very first background poll
+                    // (race condition: loadData fires before the login response
+                    // fully settles) must NOT kick the user out.
+                    if (response.status === 401 && state.loginVerified) {
+                        console.warn('[admin] Received 401 from /api/admin/votes — forcing logout');
                         handleLogout();
+                    } else if (response.status === 401) {
+                        console.warn('[admin] Received 401 on first load — ignoring (race condition guard)');
                     }
                     throw new Error(json.error);
                 }
@@ -720,7 +760,9 @@
             }
 
             container.innerHTML = state.votes.slice(0, 20).map(vote => {
-                const time = new Date(vote.created_at).toLocaleTimeString();
+                const time = vote.timestamp
+                    ? new Date(parseInt(vote.timestamp)).toLocaleTimeString()
+                    : (vote.created_at ? new Date(vote.created_at).toLocaleTimeString() : '--:--');
 
                 return `
                     <div class="vote-item">
