@@ -34,12 +34,21 @@ function broadcastVoteUpdate(eventType, data) {
  * Get or create current voting period
  */
 async function getCurrentPeriod(pool) {
+    // Guard: pool must be the pg.Pool injected by server.js middleware
+    if (!pool || typeof pool.query !== 'function') {
+        throw new Error('getCurrentPeriod: req.pool is not a valid pg.Pool — ' +
+                        'ensure app.use((req,res,next)=>{req.pool=pool;next()}) ' +
+                        'is registered before the voting router in server.js');
+    }
+
     try {
-        // Check if active period exists
+        // Check if active period exists — all columns are guaranteed by
+        // ensureVotingPeriodsTable() which runs on every server startup.
         let result = await pool.query(`
-            SELECT id, period_start, period_end, total_votes 
-            FROM voting_periods 
-            WHERE is_active = true 
+            SELECT id, period_start, period_end, total_votes
+            FROM voting_periods
+            WHERE is_active = true
+            ORDER BY id DESC
             LIMIT 1
         `);
 
@@ -47,9 +56,11 @@ async function getCurrentPeriod(pool) {
             return result.rows[0];
         }
 
-        // No active period, create one
+        // No active period — create a 24-hour one so the site stays usable.
+        // Note: a 5-min period was here before; changed to 24h to match
+        // ensureVotingPeriodsTable() so there is no surprise period expiry.
         const periodStart = new Date();
-        const periodEnd = new Date(periodStart.getTime() + 5 * 60 * 1000); // 5 minutes
+        const periodEnd   = new Date(periodStart.getTime() + 24 * 60 * 60 * 1000);
 
         result = await pool.query(`
             INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
@@ -63,8 +74,16 @@ async function getCurrentPeriod(pool) {
         return result.rows[0];
 
     } catch (error) {
-        console.error('Error getting current period:', error);
-        throw error;
+        // Re-throw with FULL detail so the caller can log the real PostgreSQL error.
+        // Previously this was swallowed into a generic 500 with no diagnostic info.
+        const wrapped = new Error(
+            `getCurrentPeriod DB error: ${error.message}` +
+            (error.detail  ? ` | detail: ${error.detail}`   : '') +
+            (error.hint    ? ` | hint: ${error.hint}`       : '') +
+            (error.code    ? ` | pg code: ${error.code}`    : '')
+        );
+        wrapped.original = error;
+        throw wrapped;
     }
 }
 
@@ -196,10 +215,15 @@ router.get('/api/voting-period', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error fetching voting period:', error);
+        // Log the FULL error (includes the pg column/table error if schema is wrong)
+        console.error('Error fetching voting period:', error.message || error);
         res.status(500).json({
             success: false,
-            error: 'Failed to fetch voting period'
+            error: 'Failed to fetch voting period',
+            // Include detail in non-production so curl can show the real cause
+            detail: process.env.NODE_ENV !== 'production'
+                ? (error.message || String(error))
+                : undefined
         });
     }
 });

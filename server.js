@@ -424,24 +424,71 @@ app.use((req, res, next) => {
   if (connected) {
     await initDB();
     await ensureNoticesTable();
-    await ensureActivePeriod();
+    await ensureVotingPeriodsTable();  // ← must run BEFORE ensureActivePeriod so schema is ready
+    await ensureActivePeriod();        // now a no-op alias for backward compat
   } else {
     console.warn('⚠️  Continuing without database. Some features may not work.');
   }
 })();
 
-// ── Ensure Active Voting Period ──
-async function ensureActivePeriod() {
+// ── Ensure voting_periods table exists with correct schema ──
+// Mirrors ensureNoticesTable() — runs every startup, idempotent.
+// This is the fix for GET /api/voting-period returning 500:
+//   initDB() early-exits when 'users' already exists, so voting_periods
+//   was never migrated and could be missing winner_id / winner_votes
+//   columns that voting.js requires. getCurrentPeriod() in voting.js
+//   uses an explicit column list — any mismatch throws and is swallowed
+//   as "Failed to fetch voting period".
+async function ensureVotingPeriodsTable() {
   try {
+    // 1. Create with full schema if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS voting_periods (
+        id           INT PRIMARY KEY,
+        period_start TIMESTAMP,
+        period_end   TIMESTAMP,
+        is_active    BOOLEAN DEFAULT true,
+        total_votes  INT DEFAULT 0,
+        winner_id    INT,
+        winner_votes INT DEFAULT 0
+      )
+    `);
+
+    // 2. Idempotent column migrations — add anything that might be missing
+    //    from an older schema without touching existing data.
+    const cols = [
+      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS winner_id    INT`,
+      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS winner_votes INT DEFAULT 0`,
+      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS total_votes  INT DEFAULT 0`,
+      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS is_active    BOOLEAN DEFAULT true`,
+      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS period_start TIMESTAMP`,
+      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS period_end   TIMESTAMP`,
+    ];
+    for (const sql of cols) {
+      try { await pool.query(sql); } catch (_) { /* already exists */ }
+    }
+
+    // 3. Index for fast active-period look-ups
+    try {
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_voting_periods_active
+          ON voting_periods (is_active)
+          WHERE is_active = true
+      `);
+    } catch (_) {}
+
+    console.log('\u2705 voting_periods table ready');
+
+    // 4. Ensure there is always at least one active period
     const existing = await pool.query(
-      'SELECT * FROM voting_periods WHERE is_active = true LIMIT 1'
+      'SELECT id FROM voting_periods WHERE is_active = true LIMIT 1'
     );
-    
+
     if (existing.rows.length === 0) {
-      console.log('📝 Creating initial voting period...');
-      const now = new Date();
-      const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
-      
+      console.log('\ud83d\udcdd Creating initial voting period...');
+      const now     = new Date();
+      const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
       await pool.query(`
         INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
         VALUES (
@@ -449,14 +496,21 @@ async function ensureActivePeriod() {
           $1, $2, true, 0
         )
       `, [now, endTime]);
-      
-      console.log('✅ Active voting period created');
+
+      console.log('\u2705 Active voting period created');
     } else {
-      console.log('✅ Active voting period already exists');
+      console.log('\u2705 Active voting period already exists (id=' + existing.rows[0].id + ')');
     }
+
   } catch (e) {
-    console.error('Failed to ensure active period:', e);
+    console.error('\u274c ensureVotingPeriodsTable error:', e.message);
   }
+}
+
+// ── Ensure Active Voting Period (legacy alias) ──
+// Superseded by ensureVotingPeriodsTable() — kept so the startup call still works.
+async function ensureActivePeriod() {
+  await ensureVotingPeriodsTable();
 }
 
 // ── Middleware ──
