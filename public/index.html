@@ -398,7 +398,8 @@ body::before {
 #authContainer {
   position: fixed; inset: 0; z-index: 900;
   display: flex; align-items: center; justify-content: center;
-  overflow: hidden;
+  overflow-y: auto; /* was overflow:hidden — caused clipping on mobile */
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Animated particle canvas behind everything */
@@ -596,6 +597,11 @@ body::before {
   .profile-hero-inner { flex-direction: column; align-items: flex-start; gap: 1rem; }
   /* AI insights prediction bar full width */
   .prediction-conf-bar { width: 100%; }
+  /* Auth form tightening on small phones */
+  .auth-form-panel { padding: 1.75rem 1rem 1.25rem; }
+  .auth-form-title { font-size: 1.5rem; }
+  .field-input { font-size: 0.88rem; }
+  .btn-primary { padding: 0.8rem 1.25rem; font-size: 0.88rem; }
 }
 
 /* ── Extra small safety net (iPhone SE, Galaxy A03, 320px devices) ── */
@@ -603,6 +609,9 @@ body::before {
   .nav-pill { padding: 0.25rem 0.45rem; font-size: 0.62rem; }
   .logo-text { font-size: 0.88rem; }
   .feature-tab { font-size: 0.6rem; padding: 0.32rem 0.45rem; }
+  /* Auth: single-column fields on 320px */
+  .field-grid { grid-template-columns: 1fr !important; }
+  .auth-form-panel { padding: 1.5rem 0.85rem 1rem; }
 }
 
 .error-msg {
@@ -678,16 +687,74 @@ body::before {
 .auth-card.register-active .login-panel .anim-item { opacity: 0; transform: translateX(-60px); filter: blur(6px); }
 .auth-card:not(.register-active) .register-panel .anim-item { opacity: 0; transform: translateX(60px); filter: blur(6px); }
 
-/* ── MOBILE ── */
+/* ── MOBILE AUTH ── */
 @media (max-width: 700px) {
-  .auth-card { flex-direction: column; height: auto; min-height: 100vh; border-radius: 0; width: 100%; }
+  /* Container: allow natural scroll when content is tall */
+  #authContainer {
+    align-items: flex-start;   /* don't vertically-center — let it be top-anchored so scroll works */
+    padding: 0;
+  }
+
+  /* Card fills the screen, no fixed height, scrolls naturally */
+  .auth-card {
+    flex-direction: column;
+    height: auto;
+    min-height: 100%;          /* fill container but grow beyond if needed */
+    min-height: -webkit-fill-available; /* iOS fix */
+    border-radius: 0;
+    width: 100%;
+    overflow: visible;         /* let children scroll, not clip */
+  }
+
+  /* Overlay slides are hidden — we use inline mobile switchers instead */
   .auth-overlay-container { display: none; }
-  .auth-forms-container { flex-direction: column; }
-  .auth-form-panel { width: 100%; padding: 2rem 1.5rem; }
+
+  /* Forms stack vertically, each panel is full-width */
+  .auth-forms-container { flex-direction: column; width: 100%; }
+
+  .auth-form-panel {
+    width: 100%;
+    padding: 2rem 1.25rem 1.5rem;
+    overflow-y: visible;       /* no trapped scroll — container scrolls */
+    justify-content: flex-start;
+    min-height: unset;
+  }
+
+  /* Show only the active panel, hide the other */
   .auth-form-panel.register-panel { display: none; }
   .auth-card.register-active .auth-form-panel.login-panel { display: none; }
-  .auth-card.register-active .auth-form-panel.register-panel { display: flex; }
+  .auth-card.register-active .auth-form-panel.register-panel {
+    display: flex;
+    padding-top: 1.75rem;
+  }
+
+  /* Mobile auth tab switcher row — visible only on mobile */
+  .mobile-auth-switch {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    margin-top: 1.25rem;
+    font-size: 0.82rem;
+    color: rgba(255,255,255,0.45);
+    padding-bottom: 2rem;      /* breathing room at bottom of form */
+  }
+  .mobile-auth-switch button {
+    background: none;
+    border: none;
+    color: var(--gold);
+    font-weight: 700;
+    font-size: 0.82rem;
+    cursor: pointer;
+    padding: 0.25rem 0;
+    font-family: 'Outfit', sans-serif;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 }
+
+/* Mobile auth tab switcher — hidden on desktop, shown via mobile media query */
+.mobile-auth-switch { display: none; }
 
 /* ── SELECT dark style ── */
 select.field-input {
@@ -729,6 +796,52 @@ select.field-input option { background: #1a2535; color: white; }
 /* Auth container background */
 #authContainer {
   background: radial-gradient(ellipse 100% 80% at 60% 40%, #0a1f0f 0%, #060d0a 60%, #030705 100%);
+}
+
+/* ── LANDSCAPE: phones in landscape where height < 500px ──
+   The split-panel layout can work but form must scroll freely */
+@media (max-width: 900px) and (orientation: landscape) {
+  /* Treat landscape phones like mobile: single scrollable column */
+  #authContainer {
+    align-items: flex-start;
+    padding: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .auth-card {
+    flex-direction: column;
+    height: auto;
+    min-height: 100%;
+    border-radius: 0;
+    width: 100%;
+    overflow: visible;
+  }
+  .auth-overlay-container { display: none; }
+  .auth-forms-container { flex-direction: column; width: 100%; }
+  .auth-form-panel {
+    width: 100%;
+    padding: 1.5rem 1.25rem 1rem;
+    overflow-y: visible;
+    justify-content: flex-start;
+    min-height: unset;
+  }
+  .auth-form-panel.register-panel { display: none; }
+  .auth-card.register-active .auth-form-panel.login-panel { display: none; }
+  .auth-card.register-active .auth-form-panel.register-panel { display: flex; padding-top: 1.25rem; }
+  .mobile-auth-switch { display: flex; }
+  /* Tighter spacing in landscape to reduce vertical footprint */
+  .field-group { margin-bottom: 0.65rem; }
+  .field-label { font-size: 0.68rem; margin-bottom: 0.25rem; }
+  .field-input { padding: 0.6rem 0.85rem 0.6rem 2.5rem; font-size: 0.82rem; }
+  .auth-form-title { font-size: 1.3rem; margin-bottom: 0.2rem; }
+  .auth-form-sub { font-size: 0.75rem; margin-bottom: 0.75rem; }
+  .auth-extras { margin-bottom: 0.65rem; }
+}
+
+/* ── TABLETS in landscape: keep split layout but allow scrolling ── */
+@media (min-width: 701px) and (max-width: 1024px) and (orientation: landscape) {
+  .auth-card { height: min(600px, 96vh); }
+  .auth-form-panel { overflow-y: auto; padding: 1.5rem 2rem; }
 }
 
 /* Buttons */
@@ -2054,6 +2167,11 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <span>Sign In</span> <i class="fas fa-arrow-right"></i>
             </button>
 
+            <!-- Mobile-only: link to register (overlay hidden on mobile) -->
+            <div class="mobile-auth-switch" id="mobileToRegister">
+              Don't have an account? <button type="button" id="showRegisterTab">Sign Up</button>
+            </div>
+
           </div>
 
           <!-- REGISTER PANEL -->
@@ -2084,6 +2202,12 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <div class="field-group"><label class="field-label">Confirm Password *</label><input type="password" id="regConfirmPassword" class="field-input no-icon" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;"></div>
             </div>
             <button class="btn-primary ripple-wrap anim-item" id="doRegisterBtn" style="--i:7"><span>Create Account</span> <i class="fas fa-user-plus"></i></button>
+
+            <!-- Mobile-only: link back to login -->
+            <div class="mobile-auth-switch" id="mobileToLogin">
+              Already registered? <button type="button" id="showLoginTab">Sign In</button>
+            </div>
+
           </div>
 
         </div><!-- end forms-container -->
