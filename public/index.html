@@ -220,54 +220,6 @@ body::before {
 .avatar-dd-item.danger { color: #dc2626; }
 .avatar-dd-item.danger i { color: #dc2626; }
 .avatar-dd-item.danger:hover { background: rgba(220,38,38,0.07); color: #b91c1c; }
-
-/* ═══ VOTING HISTORY PANEL (profile page) ═══ */
-.vote-hist-row {
-  display: flex; align-items: flex-start; gap: 0.9rem;
-  padding: 0.75rem 0; border-bottom: 1px solid rgba(0,0,0,0.06);
-}
-.vote-hist-row:last-child { border-bottom: none; }
-.vote-hist-icon {
-  width: 38px; height: 38px; border-radius: 50%;
-  background: linear-gradient(135deg, var(--forest), var(--forest-light));
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; color: white; font-size: 1rem;
-}
-.vote-hist-icon.active { background: linear-gradient(135deg, var(--emerald), #40c27a); }
-.vote-hist-icon.ended  { background: linear-gradient(135deg, var(--mid-gray), #9ca3af); }
-.vote-hist-body { flex: 1; min-width: 0; }
-.vote-hist-candidate {
-  font-weight: 700; font-size: 0.9rem; color: var(--ink);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.vote-hist-meta {
-  font-size: 0.75rem; color: var(--mid-gray); margin-top: 0.15rem;
-  display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
-}
-.vote-hist-badge {
-  display: inline-block; padding: 0.1rem 0.5rem; border-radius: 50px;
-  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em;
-}
-.vote-hist-badge.active {
-  background: rgba(22,163,74,0.12); color: #16a34a;
-}
-.vote-hist-badge.ended {
-  background: rgba(100,116,139,0.12); color: #475569;
-}
-.vote-hist-badge.winner {
-  background: linear-gradient(90deg,#e9c46a,#c9a027); color: #1a1a1a;
-}
-.vote-hist-cycle {
-  font-size: 0.72rem; color: var(--mid-gray); white-space: nowrap;
-}
-.vote-hist-timestamp {
-  font-size: 0.7rem; color: var(--mid-gray); text-align: right; white-space: nowrap;
-}
-.vote-hist-empty {
-  text-align: center; padding: 1.5rem 0;
-  color: var(--mid-gray); font-size: 0.85rem;
-}
-
 /* ═══ NOTIFICATION PANEL (inside avatar dropdown) ═══ */
 .notif-panel {
   width: 100%;
@@ -446,7 +398,8 @@ body::before {
 #authContainer {
   position: fixed; inset: 0; z-index: 900;
   display: flex; align-items: center; justify-content: center;
-  overflow: hidden;
+  overflow-y: auto; /* was overflow:hidden — caused clipping on mobile */
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Animated particle canvas behind everything */
@@ -628,11 +581,37 @@ body::before {
   /* Tighten further for very small phones */
   .container { padding: 0 0.65rem; }
   .hero-title { font-size: 1.4rem; }
-  .feature-tab { padding: 0.45rem 0.65rem; font-size: 0.68rem; }
+  .feature-tab { padding: 0.38rem 0.55rem; font-size: 0.65rem; }
   .notice-header { padding: 0.9rem 0.85rem; }
   .notice-header-title { font-size: 1rem; }
   .analytics-grid { grid-template-columns: 1fr; }
-  .header-nav { display: none; }   /* hide Dashboard pill on very small screens; avatar hub remains visible */
+  /* Keep header-nav visible on small screens — hiding it was the portrait nav bug */
+  .header-nav { display: flex; }
+  .nav-pill { padding: 0.3rem 0.55rem; font-size: 0.68rem; }
+  /* Touch target safety — buttons/pills must be at least 40px tall */
+  .feature-tab { min-height: 36px; }
+  .nav-pill { min-height: 32px; }
+  /* Prevent any card or widget from causing horizontal overflow */
+  .analytics-kpi, .leaderboard-card, .forum-post-card, .notice-card { max-width: 100%; }
+  /* Profile hero wraps vertically */
+  .profile-hero-inner { flex-direction: column; align-items: flex-start; gap: 1rem; }
+  /* AI insights prediction bar full width */
+  .prediction-conf-bar { width: 100%; }
+  /* Auth form tightening on small phones */
+  .auth-form-panel { padding: 1.75rem 1rem 1.25rem; }
+  .auth-form-title { font-size: 1.5rem; }
+  .field-input { font-size: 0.88rem; }
+  .btn-primary { padding: 0.8rem 1.25rem; font-size: 0.88rem; }
+}
+
+/* ── Extra small safety net (iPhone SE, Galaxy A03, 320px devices) ── */
+@media (max-width: 360px) {
+  .nav-pill { padding: 0.25rem 0.45rem; font-size: 0.62rem; }
+  .logo-text { font-size: 0.88rem; }
+  .feature-tab { font-size: 0.6rem; padding: 0.32rem 0.45rem; }
+  /* Auth: single-column fields on 320px */
+  .field-grid { grid-template-columns: 1fr !important; }
+  .auth-form-panel { padding: 1.5rem 0.85rem 1rem; }
 }
 
 .error-msg {
@@ -708,16 +687,80 @@ body::before {
 .auth-card.register-active .login-panel .anim-item { opacity: 0; transform: translateX(-60px); filter: blur(6px); }
 .auth-card:not(.register-active) .register-panel .anim-item { opacity: 0; transform: translateX(60px); filter: blur(6px); }
 
-/* ── MOBILE ── */
+/* ── MOBILE AUTH ── */
+
+/* Mobile auth tab switcher — hidden on desktop.
+   NOTE: This MUST live BEFORE the mobile media queries so that the
+   media-query display:flex declarations appear later in the cascade
+   and correctly override it on small screens. Moving it after either
+   media query caused the Sign Up button to vanish in portrait mode. */
+.mobile-auth-switch { display: none; }
+
 @media (max-width: 700px) {
-  .auth-card { flex-direction: column; height: auto; min-height: 100vh; border-radius: 0; width: 100%; }
+  /* Container: allow natural scroll when content is tall */
+  #authContainer {
+    align-items: flex-start;   /* don't vertically-center — let it be top-anchored so scroll works */
+    padding: 0;
+  }
+
+  /* Card fills the screen, no fixed height, scrolls naturally */
+  .auth-card {
+    flex-direction: column;
+    height: auto;
+    min-height: 100%;          /* fill container but grow beyond if needed */
+    min-height: -webkit-fill-available; /* iOS fix */
+    border-radius: 0;
+    width: 100%;
+    overflow: visible;         /* let children scroll, not clip */
+  }
+
+  /* Overlay slides are hidden — we use inline mobile switchers instead */
   .auth-overlay-container { display: none; }
-  .auth-forms-container { flex-direction: column; }
-  .auth-form-panel { width: 100%; padding: 2rem 1.5rem; }
+
+  /* Forms stack vertically, each panel is full-width */
+  .auth-forms-container { flex-direction: column; width: 100%; }
+
+  .auth-form-panel {
+    width: 100%;
+    padding: 2rem 1.25rem 1.5rem;
+    overflow-y: visible;       /* no trapped scroll — container scrolls */
+    justify-content: flex-start;
+    min-height: unset;
+  }
+
+  /* Show only the active panel, hide the other */
   .auth-form-panel.register-panel { display: none; }
   .auth-card.register-active .auth-form-panel.login-panel { display: none; }
-  .auth-card.register-active .auth-form-panel.register-panel { display: flex; }
+  .auth-card.register-active .auth-form-panel.register-panel {
+    display: flex;
+    padding-top: 1.75rem;
+  }
+
+  /* Mobile auth tab switcher row — visible only on mobile */
+  .mobile-auth-switch {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    margin-top: 1.25rem;
+    font-size: 0.82rem;
+    color: rgba(255,255,255,0.45);
+    padding-bottom: 2rem;      /* breathing room at bottom of form */
+  }
+  .mobile-auth-switch button {
+    background: none;
+    border: none;
+    color: var(--gold);
+    font-weight: 700;
+    font-size: 0.82rem;
+    cursor: pointer;
+    padding: 0.25rem 0;
+    font-family: 'Outfit', sans-serif;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 }
+
 
 /* ── SELECT dark style ── */
 select.field-input {
@@ -759,6 +802,52 @@ select.field-input option { background: #1a2535; color: white; }
 /* Auth container background */
 #authContainer {
   background: radial-gradient(ellipse 100% 80% at 60% 40%, #0a1f0f 0%, #060d0a 60%, #030705 100%);
+}
+
+/* ── LANDSCAPE: phones in landscape where height < 500px ──
+   The split-panel layout can work but form must scroll freely */
+@media (max-width: 900px) and (orientation: landscape) {
+  /* Treat landscape phones like mobile: single scrollable column */
+  #authContainer {
+    align-items: flex-start;
+    padding: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .auth-card {
+    flex-direction: column;
+    height: auto;
+    min-height: 100%;
+    border-radius: 0;
+    width: 100%;
+    overflow: visible;
+  }
+  .auth-overlay-container { display: none; }
+  .auth-forms-container { flex-direction: column; width: 100%; }
+  .auth-form-panel {
+    width: 100%;
+    padding: 1.5rem 1.25rem 1rem;
+    overflow-y: visible;
+    justify-content: flex-start;
+    min-height: unset;
+  }
+  .auth-form-panel.register-panel { display: none; }
+  .auth-card.register-active .auth-form-panel.login-panel { display: none; }
+  .auth-card.register-active .auth-form-panel.register-panel { display: flex; padding-top: 1.25rem; }
+  .mobile-auth-switch { display: flex; }
+  /* Tighter spacing in landscape to reduce vertical footprint */
+  .field-group { margin-bottom: 0.65rem; }
+  .field-label { font-size: 0.68rem; margin-bottom: 0.25rem; }
+  .field-input { padding: 0.6rem 0.85rem 0.6rem 2.5rem; font-size: 0.82rem; }
+  .auth-form-title { font-size: 1.3rem; margin-bottom: 0.2rem; }
+  .auth-form-sub { font-size: 0.75rem; margin-bottom: 0.75rem; }
+  .auth-extras { margin-bottom: 0.65rem; }
+}
+
+/* ── TABLETS in landscape: keep split layout but allow scrolling ── */
+@media (min-width: 701px) and (max-width: 1024px) and (orientation: landscape) {
+  .auth-card { height: min(600px, 96vh); }
+  .auth-form-panel { overflow-y: auto; padding: 1.5rem 2rem; }
 }
 
 /* Buttons */
@@ -1264,11 +1353,13 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
   /* ── Header ── */
   .site-header { padding: 0.6rem 0; }
-  .header-inner { gap: 0.5rem; flex-wrap: nowrap; }
+  .header-inner { gap: 0.5rem; flex-wrap: nowrap; align-items: center; }
+  .logo-block { min-width: 0; flex-shrink: 1; }
   .logo-sub { display: none; }
-  .logo-text { font-size: 1rem; }
+  .logo-text { font-size: 1rem; white-space: nowrap; }
   .logo-mark { width: 34px; height: 34px; font-size: 1rem; border-radius: 9px; }
-  .header-nav { gap: 0.25rem; }
+  .header-nav { gap: 0.25rem; flex-shrink: 0; }
+  .header-actions { flex-shrink: 0; }
   .nav-pill { padding: 0.35rem 0.65rem; font-size: 0.72rem; }
   .header-actions { gap: 0.4rem; }
   .avatar-wrap { width: 32px; height: 32px; }
@@ -1279,24 +1370,13 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
   /* ── Feature tabs — scrollable row, no wrapping ── */
   .feature-nav {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scroll-snap-type: x mandatory;
     gap: 0.2rem;
     padding: 0.3rem;
     margin-bottom: 1.25rem;
-    /* hide scrollbar but keep scroll */
-    scrollbar-width: none;
   }
-  .feature-nav::-webkit-scrollbar { display: none; }
   .feature-tab {
-    flex: 0 0 auto;           /* stop flex from squishing tabs */
-    scroll-snap-align: start;
-    min-width: unset;
-    padding: 0.5rem 0.8rem;
+    padding: 0.45rem 0.75rem;
     font-size: 0.72rem;
-    white-space: nowrap;
   }
 
   /* ── Notice header banner ── */
@@ -1405,11 +1485,21 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
 /* ═══ NEW FEATURE TABS ═══ */
 .feature-nav {
-  display: flex; gap: 0; background: var(--light-gray); border-radius: var(--radius-lg);
-  padding: 0.35rem; margin-bottom: 1.75rem; flex-wrap: wrap; gap: 0.25rem;
+  display: flex; background: var(--light-gray); border-radius: var(--radius-lg);
+  padding: 0.35rem; margin-bottom: 1.75rem;
+  /* Mobile-first: horizontal scroll, never wrap */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
+  gap: 0.25rem;
+  scrollbar-width: none; /* Firefox */
 }
+.feature-nav::-webkit-scrollbar { display: none; }
 .feature-tab {
-  flex: 1; min-width: 80px; padding: 0.6rem 0.75rem; background: none; border: none;
+  flex: 0 0 auto; /* never shrink — stops cramping */
+  scroll-snap-align: start;
+  padding: 0.55rem 0.85rem; background: none; border: none;
   border-radius: calc(var(--radius-lg) - 4px); font-family: 'Outfit', sans-serif;
   font-weight: 600; font-size: 0.78rem; color: var(--mid-gray); cursor: none;
   transition: all 0.2s; text-align: center; white-space: nowrap;
@@ -1418,6 +1508,17 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .feature-tab:hover:not(.active) { background: rgba(0,0,0,0.06); color: var(--text-dark); }
 .feature-pane { display: none; }
 .feature-pane.active { display: block; }
+
+/* On desktop, tabs fill the row evenly — no scroll needed */
+@media (min-width: 769px) {
+  .feature-nav {
+    flex-wrap: nowrap;
+    overflow-x: visible;
+  }
+  .feature-tab {
+    flex: 1 1 0;
+  }
+}
 
 /* ═══ ANALYTICS ═══ */
 .analytics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
@@ -1458,7 +1559,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .prediction-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.1rem; color: white; }
 .prediction-candidate { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.6rem; color: var(--gold); margin: 0.25rem 0; }
 .prediction-confidence { font-size: 0.8rem; color: rgba(255,255,255,0.55); }
-.prediction-conf-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin-top: 0.5rem; width: 200px; }
+.prediction-conf-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin-top: 0.5rem; width: min(200px, 100%); }
 .prediction-conf-fill { height: 100%; background: var(--gold); border-radius: 3px; }
 .time-heatmap { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; margin: 0.75rem 0; }
 .time-cell { height: 28px; border-radius: 4px; background: var(--light-gray); transition: transform 0.2s; cursor: none; position: relative; }
@@ -2072,6 +2173,11 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <span>Sign In</span> <i class="fas fa-arrow-right"></i>
             </button>
 
+            <!-- Mobile-only: link to register (overlay hidden on mobile) -->
+            <div class="mobile-auth-switch" id="mobileToRegister">
+              Don't have an account? <button type="button" id="showRegisterTab">Sign Up</button>
+            </div>
+
           </div>
 
           <!-- REGISTER PANEL -->
@@ -2102,6 +2208,12 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <div class="field-group"><label class="field-label">Confirm Password *</label><input type="password" id="regConfirmPassword" class="field-input no-icon" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;"></div>
             </div>
             <button class="btn-primary ripple-wrap anim-item" id="doRegisterBtn" style="--i:7"><span>Create Account</span> <i class="fas fa-user-plus"></i></button>
+
+            <!-- Mobile-only: link back to login -->
+            <div class="mobile-auth-switch" id="mobileToLogin">
+              Already registered? <button type="button" id="showLoginTab">Sign In</button>
+            </div>
+
           </div>
 
         </div><!-- end forms-container -->
@@ -2593,15 +2705,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         <div class="error-msg" id="profilePwdError" style="max-width:400px;margin-top:0.5rem;"></div>
         <button class="btn-primary btn-sm ripple-wrap" id="changePasswordBtn" style="margin-top:1rem;width:auto;padding:0.65rem 1.5rem;border-radius:var(--radius-md);"><span>Update Password</span></button>
       </div>
-
-      <!-- ── Voting History ── -->
-      <div class="glass-panel" id="voteHistoryPanel">
-        <div class="profile-section-title"><i class="fas fa-vote-yea"></i> My Voting History</div>
-        <div id="voteHistoryList" style="margin-top:0.75rem;">
-          <div class="vote-hist-empty">Loading your votes…</div>
-        </div>
-      </div>
-
     </div>
 
   </div><!-- end container -->
@@ -2882,37 +2985,53 @@ let deferredPWAPrompt = null;
 // ═══ server storage ═══
 const SESSION = {
   user: null, // Only stores currently logged-in user
-  
+
   // Load current user from memory (not localStorage!)
   loadCurrentUser: () => SESSION.user,
-  
+
   // Set after server authentication
+  // NOTE: we intentionally do NOT use sessionStorage here — Edge's Tracking
+  // Prevention blocks sessionStorage.setItem on some deployments and causes
+  // the "Uncaught ReferenceError: btn is not defined" cascade. The session
+  // cookie kept by the server is the authoritative store; /api/me is called
+  // on every page load to restore state, so in-memory is sufficient.
   setCurrentUser: (user) => {
     SESSION.user = user;
-    // Optionally cache ONLY the user object for page reloads
-    if(user) {
-      sessionStorage.setItem('currentUser', JSON.stringify(user));
-    }
   },
-  
+
   // Clear on logout
   clearCurrentUser: () => {
     SESSION.user = null;
-    sessionStorage.removeItem('currentUser');
   },
-  
-  // Load from sessionStorage on app startup
-  restoreFromSession: () => {
-    const cached = sessionStorage.getItem('currentUser');
-    if(cached) {
-      SESSION.user = JSON.parse(cached);
-      return SESSION.user;
-    }
-    return null;
-  }
+
+  // No-op stub kept for backward compat (callers may reference this)
+  restoreFromSession: () => SESSION.user
 };
 
-// At app startup, try to restore from server:
+// ═══ NORMALIZE USER ═══
+// Single authoritative function that maps server snake_case → camelCase
+// and sanitises the profile_photo value from the server.
+// Call this on every user object that comes back from any API endpoint.
+function normalizeUser(u) {
+  if (!u) return u;
+  u.firstName   = u.firstName   || u.first_name  || '';
+  u.surname     = u.surname     || '';
+  u.voterNumber = u.voterNumber || u.voter_number || null;
+  u.nationalId  = u.nationalId  || u.national_id || '';
+
+  // profile_photo comes back from the server as a base64 data-URL string
+  // (after the sanitizeUser fix in server.js).  Accept both field names.
+  const raw = u.profilePhoto || u.profile_photo || null;
+  if (raw && typeof raw === 'string' && raw.trim() !== '' &&
+      !raw.startsWith('null') && !raw.startsWith('undefined') &&
+      (raw.startsWith('data:image/') || raw.startsWith('http'))) {
+    u.profilePhoto = raw;
+  } else {
+    u.profilePhoto = null;
+  }
+  // Keep snake_case fields intact so existing code that reads them still works
+  return u;
+}
 async function initializeSession() {
   try {
     const response = await fetch('/api/me');
@@ -3153,22 +3272,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ═══ LOAD SESSION ═══
 async function loadSession(){
   try {
-    const res = await fetch('/api/me', { credentials: 'include' });
-    if(res.ok){
+    const res = await fetch('/api/me');
+    if(res.ok){ 
       const d = await res.json();
-      const u = d.user;
-      // Normalise server snake_case → camelCase (server now sends both, be defensive)
-      u.firstName   = u.firstName   || u.first_name   || '';
-      u.surname     = u.surname     || '';
-      u.voterNumber = u.voterNumber || u.voter_number  || null;
-      // profilePhoto: server sanitizeUser now sends both profile_photo and profilePhoto;
-      // prefer the camelCase alias, fall back to snake_case, coerce Buffer objects to null
-      if (u.profilePhoto && typeof u.profilePhoto !== 'string') u.profilePhoto = null;
-      if (!u.profilePhoto && u.profile_photo && typeof u.profile_photo === 'string') {
-        u.profilePhoto = u.profile_photo;
-      }
-      SESSION.setCurrentUser(u);
-      return u;
+      const u = normalizeUser(d.user);
+      SESSION.setCurrentUser(u); 
+      return u; 
     }
   } catch(e) {
     console.error('Session load failed:', e);
@@ -4410,120 +4519,33 @@ function initPWAInstall(){
 }
 
 // ═══ PROFILE ═══
-async function loadProfileData(){
+function loadProfileData(){
   if(!currentUser) return;
-
-  // ── Form fields ────────────────────────────────────────────────────────────
-  document.getElementById("profFirstName").value  = currentUser.firstName  || "";
-  document.getElementById("profSurname").value    = currentUser.surname    || "";
-  document.getElementById("profPhone").value      = currentUser.phone      || "";
-  if(document.getElementById("profDob"))
-    document.getElementById("profDob").value      = currentUser.dob        || "";
-  document.getElementById("profSublocation").value = currentUser.sublocation || "";
-  document.getElementById("profEmail").value      = currentUser.email      || "";
-  document.getElementById("profNationalId").value = currentUser.nationalId || currentUser.national_id || "";
-  if(document.getElementById("profLanguage"))
-    document.getElementById("profLanguage").value = currentUser.language   || "en";
-
-  // ── Avatar + hero text ─────────────────────────────────────────────────────
-  const avatar = document.getElementById("profileAvatar");
-  if(avatar){ avatar.src = getAvatarSrc(currentUser, 120); avatar.alt = "Profile"; }
-  document.getElementById("profileName").innerText =
-    `${currentUser.firstName||""} ${currentUser.surname||""}`.trim();
-  document.getElementById("profileSub").innerText =
-    `${currentUser.sublocation||""} · Voter #${currentUser.voterNumber||"—"}`;
-  document.getElementById("profileVoterNum").innerText    = `Voter #${currentUser.voterNumber||"—"}`;
-  document.getElementById("profileSublocationChip").innerText = currentUser.sublocation || "—";
-
-  if(typeof updateHeaderAvatar === "function") updateHeaderAvatar();
-
-  // ── Vote history from server ───────────────────────────────────────────────
-  const histList = document.getElementById("voteHistoryList");
-  if(histList) histList.innerHTML = '<div class="vote-hist-empty">Loading…</div>';
-
-  try {
-    const resp = await fetch('/api/my-votes', { credentials: 'include' });
-    const data = await resp.json();
-    const votes = data.success ? (data.votes || []) : [];
-
-    // Update stat counters
-    const ptvEl = document.getElementById("profileTotalVotes");
-    if(ptvEl) ptvEl.innerText = votes.length;
-
-    // Active period vote (if any) → cycle badge
-    const activeVote = votes.find(v => v.isActivePeriod);
-    const cycleBadge = document.getElementById("profileCycleBadge");
-    if(cycleBadge){
-      if(activeVote){
-        cycleBadge.innerText = `Voted Cycle #${activeVote.periodId}`;
-        cycleBadge.style.display = "";
-      } else {
-        cycleBadge.innerText = ""; cycleBadge.style.display = "none";
-      }
-    }
-    const pcrEl = document.getElementById("profileCurrentRank");
-    if(pcrEl) pcrEl.innerText = activeVote ? `Cycle #${activeVote.periodId}` : "—";
-
-    // ── Render history rows ──────────────────────────────────────────────────
-    if(!histList) return;
-    if(votes.length === 0){
-      histList.innerHTML = <div class="vote-hist-empty">You haven't voted yet. Cast your first vote!</div>;
-      return;
-    }
-
-    const CANDS_IMG = {
-      0:'https://ui-avatars.com/api/?name=James+Mwangi&background=0d2818&color=40c27a&size=40',
-      1:'https://ui-avatars.com/api/?name=Grace+Wanjiku&background=1a3f28&color=e9c46a&size=40',
-      2:'https://ui-avatars.com/api/?name=Peter+Kimani&background=2d6a4f&color=fff&size=40',
-      3:'https://ui-avatars.com/api/?name=Sarah+Nduati&background=4361ee&color=fff&size=40',
-      4:'https://ui-avatars.com/api/?name=John+Otieno&background=e63946&color=fff&size=40',
-      5:'https://ui-avatars.com/api/?name=Mary+Wambui&background=c9a027&color=fff&size=40',
-      6:'https://ui-avatars.com/api/?name=David+Kiprotich&background=6b7280&color=fff&size=40'
-    };
-
-    histList.innerHTML = votes.map(v => {
-      const isActive  = v.isActivePeriod;
-      const isWinner  = !isActive && v.periodWinnerId === v.candidateId;
-      const statusCls = isActive ? 'active' : 'ended';
-      const votedAt   = new Date(v.votedAt);
-      const dateStr   = isNaN(votedAt) ? '—' :
-        votedAt.toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'}) + ' ' +
-        votedAt.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
-
-      const candImg = CANDS_IMG[v.candidateId] ||
-        `https://ui-avatars.com/api/?name=${encodeURIComponent(v.candidateName)}&background=2d6a4f&color=fff&size=40`;
-
-      const winnerBadge  = isWinner  ? '<span class="vote-hist-badge winner">🏆 Winner</span>' : '';
-      const statusBadge  = isActive
-        ? '<span class="vote-hist-badge active">🟢 Active cycle</span>'
-        : '<span class="vote-hist-badge ended">Ended</span>';
-
-      return `<div class="vote-hist-row">
-        <img class="vote-hist-icon" src="${candImg}" alt="${v.candidateName}"
-             style="width:38px;height:38px;border-radius:50%;object-fit:cover;"
-             onerror="this.src='https://ui-avatars.com/api/?name=C&background=2d6a4f&color=fff&size=40'">
-        <div class="vote-hist-body">
-          <div class="vote-hist-candidate">${v.candidateName}</div>
-          <div class="vote-hist-meta">
-            <span class="vote-hist-cycle">Cycle #${v.periodId} · ${v.candidateParty}</span>
-            ${statusBadge}
-            ${winnerBadge}
-          </div>
-          <div class="vote-hist-meta" style="margin-top:0.2rem;font-size:0.68rem;">
-            ${v.periodTotalVotes} total votes in this cycle
-          </div>
-        </div>
-        <div class="vote-hist-timestamp">${dateStr}</div>
-      </div>`;
-    }).join('');
-
-  } catch(e) {
-    console.error('loadProfileData vote history error:', e);
-    if(histList) histList.innerHTML =
-      '<div class="vote-hist-empty">Could not load vote history.</div>';
-    const ptvEl = document.getElementById("profileTotalVotes");
-    if(ptvEl) ptvEl.innerText = "—";
-  }
+  // DB.findUser() does not exist — currentUser is already up-to-date from the server
+  document.getElementById("profFirstName").value=currentUser.firstName||"";
+  document.getElementById("profSurname").value=currentUser.surname||"";
+  document.getElementById("profPhone").value=currentUser.phone||"";
+  if(document.getElementById("profDob")) document.getElementById("profDob").value=currentUser.dob||"";
+  document.getElementById("profSublocation").value=currentUser.sublocation||"";
+  document.getElementById("profEmail").value=currentUser.email||"";
+  document.getElementById("profNationalId").value=currentUser.nationalId||currentUser.national_id||"";
+  if(document.getElementById("profLanguage")) document.getElementById("profLanguage").value=currentUser.language||"en";
+  const avatar=document.getElementById("profileAvatar");
+    if(avatar){avatar.src=getAvatarSrc(currentUser,120);avatar.alt="Profile";}
+  // Hero section
+  document.getElementById("profileName").innerText=`${currentUser.firstName||""} ${currentUser.surname||""}`.trim();
+  document.getElementById("profileSub").innerText=`${currentUser.sublocation||""} · Voter #${currentUser.voterNumber||"—"}`;
+  document.getElementById("profileVoterNum").innerText=`Voter #${currentUser.voterNumber||"—"}`;
+  document.getElementById("profileSublocationChip").innerText=currentUser.sublocation||"—";
+  // DB.getVoterMeta() does not exist — use locally available data only
+  const badge=getUserVoterBadge(currentUser.phone);
+  const cycleBadge=document.getElementById("profileCycleBadge");
+  if(cycleBadge){cycleBadge.innerText=badge?`${badge} voter this cycle`:"";cycleBadge.style.display=badge?"":"none";}
+  const ptvEl=document.getElementById("profileTotalVotes");
+  if(ptvEl) ptvEl.innerText=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes.filter(v=>v.userId===currentUser.phone).length;
+  const pcrEl=document.getElementById("profileCurrentRank");
+  if(pcrEl) pcrEl.innerText="🔥 —";
+  if(typeof updateHeaderAvatar==="function") updateHeaderAvatar();
 }
 
 async function saveProfileChanges(){
@@ -4539,7 +4561,9 @@ async function saveProfileChanges(){
     const data=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
       body:JSON.stringify({firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId,language:lang})}).then(r=>r.json());
     if(data.success){
-      currentUser={...currentUser,...(data.user||{}),firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId};
+      currentUser=normalizeUser({...currentUser,...(data.user||{}),firstName:fn,surname:sn,sublocation:sub,email,nationalId:natId});
+      SESSION.setCurrentUser(currentUser);
+      if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
       showToast("✅ Profile updated","success"); loadProfileData();
     } else { showToast(data.error||"Save failed","error"); }
   } catch(e){ showToast("Network error","error"); }
@@ -4561,58 +4585,82 @@ async function changePassword(){
   ["currentPassword","newPassword1","newPassword2"].forEach(id=>document.getElementById(id).value="");
 }
 
-async function handlePhotoUpload(file){
+function handlePhotoUpload(file){
   if(!file) return;
   if(!["image/jpeg","image/png"].includes(file.type)){showToast("JPG or PNG only","error");return;}
-  if(file.size>3*1024*1024){showToast("Max 3MB","error");return;}
+  if(file.size>2*1024*1024){showToast("Max 2MB","error");return;}
 
-  // Convert to data-URL
-  const dataUrl = await new Promise((resolve,reject)=>{
-    const r=new FileReader();
-    r.onload=e=>resolve(e.target.result);
-    r.onerror=()=>reject(new Error("File read failed"));
-    r.readAsDataURL(file);
-  });
+  const r=new FileReader();
+  r.onload=async e=>{
+    const dataUrl=e.target.result;
 
-  // Optimistic UI update so the user sees the new photo immediately
-  currentUser.profilePhoto = dataUrl;
+    // 1. Show immediately in all avatar locations for instant feedback
+    currentUser.profilePhoto=dataUrl;
+    document.getElementById("profileAvatar").src=dataUrl;
+    if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
+
+    // 2. Persist to server and confirm from authoritative response
+    try {
+      const res=await fetch('/api/profile',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include',
+        body:JSON.stringify({
+          firstName: currentUser.firstName||currentUser.first_name,
+          surname:   currentUser.surname,
+          profilePhoto: dataUrl
+        })
+      });
+      const data=await res.json();
+      if(data.success && data.user){
+        // Update currentUser from server — this is the source of truth
+        currentUser=normalizeUser({...currentUser,...data.user});
+        SESSION.setCurrentUser(currentUser);
+        if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
+        showToast("📸 Photo updated","success");
+      } else {
+        // Server rejected — roll back preview
+        currentUser.profilePhoto=null;
+        if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
+        showToast(data.error||"Photo upload failed","error");
+      }
+    } catch(err){
+      console.error('Photo upload error:',err);
+      showToast("Network error — photo not saved","error");
+    }
+  };
+  r.readAsDataURL(file);
+}
+async function removePhoto(){
+  // Optimistic UI — clear immediately
+  currentUser.profilePhoto=null;
+  if(typeof loadProfileData==='function') loadProfileData();
   if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
 
-  // Persist to server — photo-only update (no firstName/surname required)
   try {
-    const resp = await fetch('/api/profile',{
+    const res=await fetch('/api/profile',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       credentials:'include',
-      body:JSON.stringify({profilePhoto:dataUrl})
+      body:JSON.stringify({
+        firstName: currentUser.firstName||currentUser.first_name,
+        surname:   currentUser.surname,
+        profilePhoto: null   // explicit null → server clears the column
+      })
     });
-    const data = await resp.json();
-    if(resp.ok && data.success){
-      // Merge authoritative server response back into currentUser
-      const srv = data.user;
-      currentUser.profilePhoto = srv.profilePhoto || srv.profile_photo || dataUrl;
+    const data=await res.json();
+    if(data.success && data.user){
+      currentUser=normalizeUser({...currentUser,...data.user});
+      SESSION.setCurrentUser(currentUser);
       if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
-      showToast("📸 Photo updated","success");
+      showToast("Photo removed","info");
     } else {
-      // Revert optimistic update
-      currentUser.profilePhoto = null;
-      if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
-      showToast(data.error || "Upload failed — please try again","error");
+      showToast(data.error||"Remove failed","error");
     }
   } catch(err){
-    console.error("Photo upload error:", err);
-    currentUser.profilePhoto = null;
-    if(typeof updateHeaderAvatar==='function') updateHeaderAvatar();
-    showToast("Network error — photo not saved","error");
+    console.error('Remove photo error:',err);
+    showToast("Network error — please try again","error");
   }
-}
-function removePhoto(){
-  currentUser.profilePhoto=null;
-  fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-    body:JSON.stringify({profilePhoto:null})}).catch(()=>{});
-  if(typeof loadProfileData==='function')loadProfileData();
-  if(typeof updateHeaderAvatar==='function')updateHeaderAvatar();
-  showToast("Photo removed","info");
 }
 function exportUserData(){
   // DB.getTransactions() does not exist — export available local user data only
@@ -5102,9 +5150,8 @@ async function loginUser() {
       return;
     }
 
-    // Normalise server snake_case → camelCase
-    currentUser = data.user;
-    currentUser.firstName = currentUser.first_name;
+    // Normalise server snake_case → camelCase (including profilePhoto)
+    currentUser = normalizeUser(data.user);
 
     if (spinner) spinner.classList.add('hidden');
     btn.disabled = false;
@@ -5941,23 +5988,36 @@ window.updateHeaderBadge = function(){
   if (badge) badge.style.display = 'none';
 };
 
-window.updateHeaderAvatar = function(){
-  // Delegate to real implementation defined above
-  if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
-};
-
 window.loadProfileData = function(){
-  // Delegate to the real async implementation (defined earlier in this file)
-  // which fetches /api/my-votes and renders the full history panel.
-  if (typeof loadProfileData === 'function') loadProfileData();
+  if (!currentUser) return;
+  // ── Hero section (display elements, not inputs) ──
+  const heroName = document.getElementById('profileName');
+  if (heroName) heroName.innerText = `${currentUser.firstName || ''} ${currentUser.surname || ''}`.trim();
+  const heroSub = document.getElementById('profileSub');
+  if (heroSub) heroSub.innerText = `${currentUser.sublocation || ''} · Voter #${currentUser.voterNumber || '—'}`;
+  const voterNum = document.getElementById('profileVoterNum');
+  if (voterNum) voterNum.innerText = `Voter #${currentUser.voterNumber || '—'}`;
+  const subChip = document.getElementById('profileSublocationChip');
+  if (subChip) subChip.innerText = currentUser.sublocation || '—';
+  // ── Form fields — use the ACTUAL HTML IDs (profFirstName etc., not profileName) ──
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+  set('profFirstName',  currentUser.firstName);
+  set('profSurname',    currentUser.surname);
+  set('profPhone',      currentUser.phone);       // read-only field
+  set('profEmail',      currentUser.email);
+  set('profSublocation',currentUser.sublocation);
+  set('profNationalId', currentUser.nationalId || currentUser.national_id);
 };
 
 window.updateProfilePhoto = function(){
   if(typeof showToast === 'function') showToast("Feature coming soon", "info");
 };
 
-window.removePhoto = function(){
-  if(typeof showToast === 'function') showToast("Feature coming soon", "info");
+window.removePhoto = async function(){
+  // Delegate to the real async removePhoto defined earlier
+  if (typeof removePhoto === 'function') {
+    await removePhoto();
+  }
 };
 
 window.saveProfile = async function(){
@@ -5975,14 +6035,17 @@ window.saveProfile = async function(){
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ firstName: fn, surname: sn, email: em, sublocation: sub, nationalId: nid })
+      // Note: no profilePhoto key here → server will leave existing photo untouched
     }).then(r => r.json());
 
     if (data.success) {
-      // Merge updates back into currentUser and refresh hero display
-      currentUser = { ...currentUser, ...data.user,
+      // Normalise and merge server response — server is the source of truth
+      currentUser = normalizeUser({ ...currentUser, ...data.user,
         firstName: data.user?.first_name || data.user?.firstName || fn,
-        surname:   data.user?.surname    || sn };
+        surname:   data.user?.surname    || sn });
+      SESSION.setCurrentUser(currentUser);
       if (typeof window.loadProfileData === 'function') window.loadProfileData();
+      if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
       if (typeof showToast === 'function') showToast('✅ Profile saved!', 'success');
     } else {
       if (typeof showToast === 'function') showToast(data.error || 'Save failed', 'error');
@@ -6139,7 +6202,10 @@ window.enterDashboard = function(){
   }, 3000);
   
   if (typeof startCountdown === 'function') startCountdown();
-  
+
+  // ── AVATAR: always paint from the current source of truth on every login ──
+  if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
+
   if(typeof showToast === 'function') showToast(`Welcome, ${currentUser.firstName || 'User'}! 👋`, "success");
   
   const lp = document.getElementById("livePulse");
@@ -6174,17 +6240,9 @@ window.loadSession = async function(){
       const d = await res.json();
       const u = d.user;
       if (u) {
-        // Normalise snake_case → camelCase (server now sends both)
-        u.firstName   = u.firstName   || u.first_name  || '';
-        u.surname     = u.surname     || '';
-        u.voterNumber = u.voterNumber || u.voter_number || null;
-        // profilePhoto: coerce any Buffer object to null; prefer camelCase alias
-        if (u.profilePhoto && typeof u.profilePhoto !== 'string') u.profilePhoto = null;
-        if (!u.profilePhoto && u.profile_photo && typeof u.profile_photo === 'string') {
-          u.profilePhoto = u.profile_photo;
-        }
-        SESSION.setCurrentUser(u);
-        return u;
+        const normalized = normalizeUser(u);
+        SESSION.setCurrentUser(normalized);
+        return normalized;
       }
     }
   } catch(e) {
