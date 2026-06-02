@@ -551,6 +551,19 @@
                 // Connect to real-time updates
                 connectSSE();
 
+                // Polling fallback: refresh results every 5s regardless of SSE
+                setInterval(async () => {
+                    try {
+                        const r = await fetch('/api/voting-results', { credentials: 'include' });
+                        const j = await r.json();
+                        if (j.success && j.data && j.data.results) {
+                            state.results = j.data.results;
+                            renderResults();
+                            if (!state.userVoted) renderCandidates();
+                        }
+                    } catch(_) {}
+                }, 5000);
+
             } catch (error) {
                 console.error('Error initializing voting:', error);
                 showAlert('Failed to load voting system', 'error');
@@ -641,10 +654,33 @@
 
                 state.userVoted = true;
                 const candidate = state.candidates.find(c => c.id === candidateId);
-                showAlert(`✓ Vote recorded for ${candidate.name}`, 'success');
+                showAlert(`✓ Vote recorded for ${candidate ? candidate.name : candidateId}`, 'success');
 
-                // Update UI
+                // Immediately refresh results from the server response
+                if (json.votesByCandidate) {
+                    const total = json.totalVotes || 0;
+                    // Merge server counts into state.results
+                    state.candidates.forEach(c => {
+                        const count = json.votesByCandidate[c.id] || 0;
+                        let existing = state.results.find(r => r.candidateId === c.id);
+                        if (existing) {
+                            existing.votes = count;
+                            existing.percentage = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
+                        } else {
+                            state.results.push({
+                                candidateId: c.id,
+                                name: c.name,
+                                party: c.party,
+                                votes: count,
+                                percentage: total > 0 ? ((count / total) * 100).toFixed(1) : '0.0'
+                            });
+                        }
+                    });
+                }
+
+                // Refresh both panels
                 renderCandidates();
+                renderResults();
 
             } catch (error) {
                 console.error('Error submitting vote:', error);

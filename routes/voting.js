@@ -34,21 +34,12 @@ function broadcastVoteUpdate(eventType, data) {
  * Get or create current voting period
  */
 async function getCurrentPeriod(pool) {
-    // Guard: pool must be the pg.Pool injected by server.js middleware
-    if (!pool || typeof pool.query !== 'function') {
-        throw new Error('getCurrentPeriod: req.pool is not a valid pg.Pool — ' +
-                        'ensure app.use((req,res,next)=>{req.pool=pool;next()}) ' +
-                        'is registered before the voting router in server.js');
-    }
-
     try {
-        // Check if active period exists — all columns are guaranteed by
-        // ensureVotingPeriodsTable() which runs on every server startup.
+        // Check if active period exists
         let result = await pool.query(`
-            SELECT id, period_start, period_end, total_votes
-            FROM voting_periods
-            WHERE is_active = true
-            ORDER BY id DESC
+            SELECT id, period_start, period_end, total_votes 
+            FROM voting_periods 
+            WHERE is_active = true 
             LIMIT 1
         `);
 
@@ -56,11 +47,9 @@ async function getCurrentPeriod(pool) {
             return result.rows[0];
         }
 
-        // No active period — create a 24-hour one so the site stays usable.
-        // Note: a 5-min period was here before; changed to 24h to match
-        // ensureVotingPeriodsTable() so there is no surprise period expiry.
+        // No active period, create one
         const periodStart = new Date();
-        const periodEnd   = new Date(periodStart.getTime() + 24 * 60 * 60 * 1000);
+        const periodEnd = new Date(periodStart.getTime() + 5 * 60 * 1000); // 5 minutes
 
         result = await pool.query(`
             INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
@@ -74,16 +63,8 @@ async function getCurrentPeriod(pool) {
         return result.rows[0];
 
     } catch (error) {
-        // Re-throw with FULL detail so the caller can log the real PostgreSQL error.
-        // Previously this was swallowed into a generic 500 with no diagnostic info.
-        const wrapped = new Error(
-            `getCurrentPeriod DB error: ${error.message}` +
-            (error.detail  ? ` | detail: ${error.detail}`   : '') +
-            (error.hint    ? ` | hint: ${error.hint}`       : '') +
-            (error.code    ? ` | pg code: ${error.code}`    : '')
-        );
-        wrapped.original = error;
-        throw wrapped;
+        console.error('Error getting current period:', error);
+        throw error;
     }
 }
 
@@ -150,14 +131,17 @@ async function getVotesBySublocations(pool, periodId) {
  * Format vote results with candidate information
  */
 function formatVoteResults(voteCounts, candidates) {
+    const total = voteCounts.reduce((s, r) => s + parseInt(r.vote_count), 0);
     return voteCounts.map(row => {
-        const candidate = candidates.find(c => c.id === row.candidate_id) || {};
+        const candId = parseInt(row.candidate_id);           // DB returns string
+        const candidate = candidates.find(c => c.id === candId) || {};
+        const votes = parseInt(row.vote_count);
         return {
-            candidateId: row.candidate_id,
+            candidateId: candId,
             name: candidate.name || 'Unknown',
             party: candidate.party,
-            votes: parseInt(row.vote_count),
-            percentage: 0 // Will be calculated by frontend
+            votes,
+            percentage: total > 0 ? ((votes / total) * 100).toFixed(1) : '0.0'
         };
     });
 }
@@ -215,15 +199,10 @@ router.get('/api/voting-period', async (req, res) => {
         });
 
     } catch (error) {
-        // Log the FULL error (includes the pg column/table error if schema is wrong)
-        console.error('Error fetching voting period:', error.message || error);
+        console.error('Error fetching voting period:', error);
         res.status(500).json({
             success: false,
-            error: 'Failed to fetch voting period',
-            // Include detail in non-production so curl can show the real cause
-            detail: process.env.NODE_ENV !== 'production'
-                ? (error.message || String(error))
-                : undefined
+            error: 'Failed to fetch voting period'
         });
     }
 });
@@ -242,13 +221,15 @@ router.get('/api/voting-results', async (req, res) => {
         const totalVotes = voteCounts.reduce((sum, row) => sum + parseInt(row.vote_count), 0);
 
         const results = voteCounts.map(row => {
-            const candidate = candidates.find(c => c.id === row.candidate_id) || {};
+            const candId = parseInt(row.candidate_id);
+            const candidate = candidates.find(c => c.id === candId) || {};
+            const votes = parseInt(row.vote_count);
             return {
-                candidateId: row.candidate_id,
+                candidateId: candId,
                 name: candidate.name || 'Unknown',
                 party: candidate.party,
-                votes: parseInt(row.vote_count),
-                percentage: totalVotes > 0 ? ((parseInt(row.vote_count) / totalVotes) * 100).toFixed(1) : 0
+                votes,
+                percentage: totalVotes > 0 ? ((votes / totalVotes) * 100).toFixed(1) : '0.0'
             };
         });
 
@@ -322,12 +303,14 @@ router.get('/api/leaderboard', async (req, res) => {
         const totalVotes = voteCounts.reduce((sum, row) => sum + parseInt(row.vote_count), 0);
         
         const current = voteCounts.map(row => {
-            const candidate = candidates.find(c => c.id === row.candidate_id) || {};
+            const candId = parseInt(row.candidate_id);
+            const candidate = candidates.find(c => c.id === candId) || {};
+            const votes = parseInt(row.vote_count);
             return {
-                candidateId: row.candidate_id,
-                name: candidate.name,
-                votes: parseInt(row.vote_count),
-                percentage: totalVotes > 0 ? ((parseInt(row.vote_count) / totalVotes) * 100).toFixed(1) : 0
+                candidateId: candId,
+                name: candidate.name || 'Unknown',
+                votes,
+                percentage: totalVotes > 0 ? ((votes / totalVotes) * 100).toFixed(1) : '0.0'
             };
         });
 
@@ -645,6 +628,8 @@ router.get('/api/admin/votes', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.router               = router;
+module.exports.broadcastVoteUpdate  = broadcastVoteUpdate;
 
 // ============================================
 // HOW TO INTEGRATE INTO SERVER.JS

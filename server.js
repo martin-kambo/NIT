@@ -12,7 +12,9 @@ const axios = require('axios');
 // notices routes are defined inline — no separate router file needed
 
 // ── PHASE 2: Voting Router ──
-const votingRouter = require('./routes/voting');
+const votingRouterModule = require('./routes/voting');
+const votingRouter          = votingRouterModule.router || votingRouterModule;
+const broadcastVoteUpdate   = votingRouterModule.broadcastVoteUpdate || function(){};
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -956,17 +958,45 @@ app.post('/api/vote', async (req, res) => {
       [periodId]
     );
 
-    let badge = null;
-    const voterCountResult = await pool.query(
+    // ── Count totals and per-candidate ────────────────────────────────────
+    const totalRes = await pool.query(
       'SELECT COUNT(*) as count FROM votes WHERE period_id = $1',
       [periodId]
     );
-    const voterCount = parseInt(voterCountResult.rows[0].count);
+    const voterCount = parseInt(totalRes.rows[0].count);
+
+    let badge = null;
     if (voterCount === 1) badge = '1st';
     else if (voterCount === 2) badge = '2nd';
     else if (voterCount === 3) badge = '3rd';
 
-    return res.json({ success: true, badge, totalVotes: voterCount });
+    // Per-candidate counts for faceoff / live display
+    const perCandRes = await pool.query(
+      'SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
+      [periodId]
+    );
+    const votesByCandidate = {};
+    perCandRes.rows.forEach(r => {
+      votesByCandidate[r.candidate_id] = parseInt(r.vote_count);
+    });
+
+    // ── Broadcast to every SSE subscriber (faceoff, voting-page live tab) ──
+    broadcastVoteUpdate('vote-received', {
+      candidateId,
+      periodId,
+      totalVotes: voterCount,
+      votes: votesByCandidate[candidateId] || 1,
+      votesByCandidate
+    });
+
+    return res.json({
+      success: true,
+      badge,
+      totalVotes: voterCount,
+      votesByCandidate,
+      candidateId,
+      periodId
+    });
   } catch (e) {
     console.error('/api/vote error:', e);
     return res.status(500).json({ error: 'Internal server error' });
@@ -1135,6 +1165,69 @@ app.post('/api/transaction/confirm', async (req, res) => {
   }
 });
 
+
+// ════════════════════════════════════════════════
+// ROUTE: /api/my-votes  — voter's personal vote history
+// ════════════════════════════════════════════════
+app.get('/api/my-votes', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         v.id,
+         v.candidate_id,
+         v.period_id,
+         v.sublocation,
+         v.timestamp,
+         vp.period_start,
+         vp.period_end,
+         vp.is_active,
+         vp.total_votes  AS period_total_votes,
+         vp.winner_id    AS period_winner_id
+       FROM votes v
+       JOIN voting_periods vp ON vp.id = v.period_id
+       WHERE v.user_id = $1
+       ORDER BY v.timestamp DESC`,
+      [session.userId]
+    );
+
+    // Enrich with candidate name from the in-memory list
+    const CANDS = [
+      { id: 0, name: 'Hon. James Mwangi', party: 'Jubilee' },
+      { id: 1, name: 'Grace Wanjiku',     party: 'ODM'     },
+      { id: 2, name: 'Peter Kimani',      party: 'UDA'     },
+      { id: 3, name: 'Sarah Nduati',      party: 'Wiper'   },
+      { id: 4, name: 'John Otieno',       party: 'ANC'     },
+      { id: 5, name: 'Mary Wambui',       party: 'Ford-K'  },
+      { id: 6, name: 'David Kiprotich',   party: 'Independent' }
+    ];
+
+    const votes = result.rows.map(row => {
+      const cand = CANDS.find(c => c.id === parseInt(row.candidate_id)) || {};
+      return {
+        id:               row.id,
+        candidateId:      parseInt(row.candidate_id),
+        candidateName:    cand.name  || 'Unknown',
+        candidateParty:   cand.party || '—',
+        periodId:         row.period_id,
+        periodStart:      row.period_start,
+        periodEnd:        row.period_end,
+        isActivePeriod:   row.is_active,
+        periodTotalVotes: parseInt(row.period_total_votes) || 0,
+        periodWinnerId:   row.period_winner_id != null ? parseInt(row.period_winner_id) : null,
+        sublocation:      row.sublocation,
+        votedAt:          new Date(parseInt(row.timestamp)).toISOString()
+      };
+    });
+
+    return res.json({ success: true, votes });
+  } catch (e) {
+    console.error('/api/my-votes error:', e);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
 // ════════════════════════════════════════════════
 // CATCH-ALL & ERROR HANDLING
 // ════════════════════════════════════════════════
@@ -1299,25 +1392,57 @@ app.post('/api/forum', async (req, res) => {
 app.get('/api/faceoff', async (req, res) => {
   try {
     const period = await pool.query(
-      'SELECT id FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
+      'SELECT id, total_votes FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
     );
     if (!period.rows.length) {
-      return res.json({ success: true, candidates: CANDIDATES.slice(0, 2) });
+      return res.json({
+        success: true,
+        candidates: CANDIDATES.slice(0, 2).map(c => ({ ...c, vote_count: 0 })),
+        periodId: null,
+        totalVotes: 0
+      });
     }
-    const votes = await pool.query(
+
+    const { id: periodId, total_votes: periodTotalVotes } = period.rows[0];
+
+    // All candidate counts (not just top 2) — frontend needs this for bar widths
+    const allVotes = await pool.query(
       `SELECT candidate_id, COUNT(*) as vote_count
        FROM votes WHERE period_id = $1
-       GROUP BY candidate_id ORDER BY vote_count DESC LIMIT 2`,
-      [period.rows[0].id]
+       GROUP BY candidate_id`,
+      [periodId]
     );
-    // Map vote results back to CANDIDATES array
-    const top = votes.rows.length
-      ? votes.rows.map(r => ({
-          ...CANDIDATES.find(c => c.id === parseInt(r.candidate_id)),
-          vote_count: parseInt(r.vote_count)
-        }))
-      : CANDIDATES.slice(0, 2);
-    res.json({ success: true, candidates: top });
+
+    // Build a full map: candidateId → vote count
+    const voteMap = {};
+    allVotes.rows.forEach(r => {
+      voteMap[parseInt(r.candidate_id)] = parseInt(r.vote_count);
+    });
+
+    // Attach counts to every candidate and sort descending
+    const ranked = CANDIDATES.map(c => ({
+      ...c,
+      vote_count: voteMap[c.id] || 0
+    })).sort((a, b) => b.vote_count - a.vote_count);
+
+    const totalVotes = Object.values(voteMap).reduce((s, n) => s + n, 0);
+
+    // Top 2 for the faceoff widget
+    const top2 = ranked.slice(0, 2).map(c => ({
+      ...c,
+      percentage: totalVotes > 0 ? ((c.vote_count / totalVotes) * 100).toFixed(1) : '0.0'
+    }));
+
+    res.json({
+      success: true,
+      candidates: top2,
+      allCandidates: ranked.map(c => ({
+        ...c,
+        percentage: totalVotes > 0 ? ((c.vote_count / totalVotes) * 100).toFixed(1) : '0.0'
+      })),
+      periodId,
+      totalVotes
+    });
   } catch (error) {
     console.error('/api/faceoff error:', error);
     res.status(500).json({ success: false, error: 'Failed to get faceoff data' });
