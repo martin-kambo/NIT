@@ -3291,7 +3291,7 @@ function enterDashboard(){
   showPane("dashboardContent");
   renderDashboard();
   showWelcomePopup();
-  initLiveTicker();
+  //initLiveTicker();
   initPWAInstall();
   seedInitialNotifications();
   renderNotifBell();
@@ -3303,8 +3303,8 @@ function enterDashboard(){
   updateHeaderAvatar();  // paint avatar immediately on login
   showToast(`Welcome back, ${currentUser.firstName}! 👋`,"success");
   // Show live viewers (simulated)
- // const lp=document.getElementById("livePulse"); if(lp) lp.style.display="flex";
- // setInterval(()=>{ const n=Math.floor(Math.random()*12)+3; const el=document.getElementById("liveViewers"); if(el) el.innerText=`${n} viewing live`; },8000);
+ const lp=document.getElementById("livePulse"); if(lp) lp.style.display="flex";
+ setInterval(()=>{ const n=Math.floor(Math.random()*12)+3; const el=document.getElementById("liveViewers"); if(el) el.innerText=`${n} viewing live`; },8000);
 }
 
 function showPane(id){
