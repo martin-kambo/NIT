@@ -688,6 +688,14 @@ body::before {
 .auth-card:not(.register-active) .register-panel .anim-item { opacity: 0; transform: translateX(60px); filter: blur(6px); }
 
 /* ── MOBILE AUTH ── */
+
+/* Mobile auth tab switcher — hidden on desktop.
+   NOTE: This MUST live BEFORE the mobile media queries so that the
+   media-query display:flex declarations appear later in the cascade
+   and correctly override it on small screens. Moving it after either
+   media query caused the Sign Up button to vanish in portrait mode. */
+.mobile-auth-switch { display: none; }
+
 @media (max-width: 700px) {
   /* Container: allow natural scroll when content is tall */
   #authContainer {
@@ -753,8 +761,6 @@ body::before {
   }
 }
 
-/* Mobile auth tab switcher — hidden on desktop, shown via mobile media query */
-.mobile-auth-switch { display: none; }
 
 /* ── SELECT dark style ── */
 select.field-input {
