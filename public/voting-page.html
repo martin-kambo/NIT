@@ -5,25 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Live Voting - Ngoliba InfoTrack</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --primary: #2563eb;
-            --primary-dark: #1e40af;
-            --danger: #dc2626;
-            --success: #16a34a;
-            --warning: #ea580c;
-            --light: #f1f5f9;
-            --border: #e2e8f0;
-            --text: #1e293b;
-            --text-light: #64748b;
-            --radius: 8px;
-            --shadow: 0 1px 3px rgba(0,0,0,0.1);
-            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+            --primary:     #2563eb;
+            --primary-dark:#1e40af;
+            --danger:      #dc2626;
+            --success:     #16a34a;
+            --warning:     #ea580c;
+            --light:       #f1f5f9;
+            --border:      #e2e8f0;
+            --text:        #1e293b;
+            --text-light:  #64748b;
+            --radius:      8px;
+            --shadow:      0 1px 3px rgba(0,0,0,0.1);
+            --shadow-lg:   0 10px 15px -3px rgba(0,0,0,0.1);
         }
 
         body {
@@ -33,13 +29,9 @@
             min-height: 100vh;
         }
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
 
-        /* HEADER */
+        /* ── HEADER ─────────────────────────────────────── */
         header {
             background: white;
             padding: 24px;
@@ -58,12 +50,8 @@
             background-clip: text;
         }
 
-        .subtitle {
-            color: var(--text-light);
-            font-size: 16px;
-        }
+        .subtitle { color: var(--text-light); font-size: 16px; }
 
-        /* TIMER AND STATUS */
         .status-bar {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
@@ -73,11 +61,7 @@
             border-top: 1px solid var(--border);
         }
 
-        .status-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
+        .status-item { display: flex; align-items: center; gap: 12px; }
 
         .status-label {
             color: var(--text-light);
@@ -87,11 +71,7 @@
             letter-spacing: 0.5px;
         }
 
-        .status-value {
-            font-size: 24px;
-            font-weight: 700;
-            color: var(--primary);
-        }
+        .status-value { font-size: 24px; font-weight: 700; color: var(--primary); }
 
         .timer-badge {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -102,19 +82,10 @@
             min-width: 120px;
         }
 
-        .timer-value {
-            font-size: 32px;
-            font-weight: 700;
-            line-height: 1;
-        }
+        .timer-value { font-size: 32px; font-weight: 700; line-height: 1; }
+        .timer-label { font-size: 11px; margin-top: 4px; opacity: 0.9; }
 
-        .timer-label {
-            font-size: 11px;
-            margin-top: 4px;
-            opacity: 0.9;
-        }
-
-        /* MAIN GRID */
+        /* ── MAIN GRID ───────────────────────────────────── */
         .main-grid {
             display: grid;
             grid-template-columns: 1fr 320px;
@@ -122,18 +93,11 @@
             align-items: start;
         }
 
-        @media (max-width: 1024px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-            }
-        }
+        @media (max-width: 1024px) { .main-grid { grid-template-columns: 1fr; } }
 
-        /* CANDIDATES SECTION */
+        /* ── CANDIDATES ──────────────────────────────────── */
         .candidates-section h2 {
-            font-size: 24px;
-            font-weight: 700;
-            margin-bottom: 24px;
-            color: white;
+            font-size: 24px; font-weight: 700; margin-bottom: 24px; color: white;
         }
 
         .candidates-grid {
@@ -154,34 +118,19 @@
             border: 2px solid transparent;
         }
 
-        .candidate-card:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--shadow-lg);
-            border-color: var(--primary);
-        }
-
-        .candidate-card.voted {
-            border-color: var(--success);
-            background: #f0fdf4;
-        }
+        .candidate-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); border-color: var(--primary); }
+        .candidate-card.voted { border-color: var(--success); background: #f0fdf4; }
 
         .candidate-photo {
             width: 100%;
             aspect-ratio: 1;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow: hidden;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 64px;
-            color: white;
-            overflow: hidden;
         }
 
-        .candidate-photo img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
+        .candidate-photo img { width: 100%; height: 100%; object-fit: cover; }
 
         .candidate-info {
             padding: 16px;
@@ -190,43 +139,25 @@
             flex-direction: column;
         }
 
-        .candidate-name {
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 4px;
-            color: var(--text);
-        }
+        .candidate-name  { font-size: 16px; font-weight: 700; margin-bottom: 4px; color: var(--text); }
 
         .candidate-party {
-            font-size: 12px;
-            color: var(--text-light);
-            margin-bottom: 8px;
-            padding: 4px 8px;
-            background: var(--light);
-            border-radius: 4px;
-            display: inline-block;
-            width: fit-content;
+            font-size: 12px; color: var(--text-light); margin-bottom: 8px;
+            padding: 4px 8px; background: var(--light); border-radius: 4px;
+            display: inline-block; width: fit-content;
         }
 
         .candidate-vote-count {
             margin-top: auto;
-            padding: 12px 0 0 0;
+            padding: 12px 0 0;
             border-top: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
 
-        .vote-number {
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--primary);
-        }
-
-        .vote-percentage {
-            font-size: 12px;
-            color: var(--text-light);
-        }
+        .vote-number    { font-size: 20px; font-weight: 700; color: var(--primary); }
+        .vote-percentage{ font-size: 12px; color: var(--text-light); }
 
         .vote-btn {
             width: 100%;
@@ -241,23 +172,13 @@
             transition: all 0.2s;
         }
 
-        .vote-btn:hover {
-            background: var(--primary-dark);
-        }
+        .vote-btn:hover    { background: var(--primary-dark); }
+        .vote-btn:disabled { background: var(--text-light); cursor: not-allowed; opacity: 0.6; }
 
-        .vote-btn:disabled {
-            background: var(--text-light);
-            cursor: not-allowed;
-            opacity: 0.6;
-        }
+        /* ── SIDEBAR ─────────────────────────────────────── */
+        .sidebar { position: sticky; top: 20px; }
 
-        /* SIDEBAR */
-        .sidebar {
-            position: sticky;
-            top: 20px;
-        }
-
-        .leaderboard-card {
+        .sidebar-card {
             background: white;
             border-radius: var(--radius);
             padding: 24px;
@@ -265,601 +186,709 @@
             margin-bottom: 24px;
         }
 
-        .leaderboard-card h3 {
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 16px;
-            color: var(--text);
-        }
+        .sidebar-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--text); }
 
-        .leaderboard-item {
+        /* Standing rows */
+        .standing-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px 0;
+            padding: 10px 0;
             border-bottom: 1px solid var(--border);
         }
 
-        .leaderboard-item:last-child {
-            border-bottom: none;
+        .standing-item:last-child { border-bottom: none; }
+        .standing-rank  { font-size: 18px; width: 28px; }
+        .standing-name  { flex: 1; font-size: 13px; font-weight: 600; margin: 0 8px; }
+        .standing-votes { font-size: 14px; font-weight: 700; color: var(--primary); min-width: 40px; text-align: right; }
+
+        /* ── FACE-OFF ────────────────────────────────────── */
+        .faceoff-section { margin-top: 40px; }
+
+        .faceoff-section h2 {
+            font-size: 22px; font-weight: 700; margin-bottom: 20px; color: white; text-align: center;
         }
 
-        .leaderboard-rank {
-            font-size: 12px;
-            font-weight: 700;
-            color: var(--text-light);
-            width: 24px;
+        .faceoff-grid {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 16px;
+            align-items: center;
         }
 
-        .leaderboard-rank.first {
-            color: #fbbf24;
+        .faceoff-card {
+            background: white;
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: var(--shadow-lg);
+            text-align: center;
         }
 
-        .leaderboard-rank.second {
-            color: #a78bfa;
+        .faceoff-card.leader { border: 2px solid #fbbf24; }
+
+        .faceoff-photo {
+            width: 80px; height: 80px;
+            border-radius: 50%;
+            overflow: hidden;
+            margin: 0 auto 12px;
+            background: var(--light);
         }
 
-        .leaderboard-rank.third {
-            color: #f97316;
+        .faceoff-photo img { width: 100%; height: 100%; object-fit: cover; }
+
+        .faceoff-name  { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+        .faceoff-party { font-size: 12px; color: var(--text-light); margin-bottom: 12px; }
+        .faceoff-votes { font-size: 28px; font-weight: 700; color: var(--primary); }
+        .faceoff-pct   { font-size: 13px; color: var(--text-light); margin-top: 4px; }
+
+        .faceoff-divider {
+            font-size: 28px; font-weight: 900; color: white;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }
 
-        .leaderboard-name {
-            flex: 1;
-            font-size: 12px;
+        .faceoff-bar-wrap { margin-top: 16px; }
+
+        .faceoff-bar {
+            height: 8px;
+            background: var(--light);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 6px 0 2px;
+        }
+
+        .faceoff-bar-fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 4px; transition: width 0.5s; }
+
+        /* ── VOTE HISTORY ────────────────────────────────── */
+        .history-section { margin-top: 40px; }
+
+        .history-section h2 { font-size: 22px; font-weight: 700; margin-bottom: 20px; color: white; }
+
+        .history-card { background: white; border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+
+        .history-header {
+            display: grid;
+            grid-template-columns: 80px 1fr 140px;
+            padding: 14px 20px;
+            background: var(--light);
+            font-size: 11px;
             font-weight: 600;
-            margin: 0 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-light);
+            border-bottom: 1px solid var(--border);
         }
 
-        .leaderboard-votes {
+        .history-row {
+            display: grid;
+            grid-template-columns: 80px 1fr 140px;
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            align-items: center;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+
+        .history-row:last-child { border-bottom: none; }
+        .history-row:hover { background: var(--light); }
+
+        .history-cycle { font-weight: 700; color: var(--primary); }
+        .history-name  { font-weight: 600; }
+        .history-party { font-size: 11px; color: var(--text-light); }
+        .history-time  { font-size: 12px; color: var(--text-light); }
+
+        .history-empty {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-light);
             font-size: 14px;
-            font-weight: 700;
-            color: var(--primary);
-            min-width: 40px;
-            text-align: right;
         }
 
-        /* STATUS MESSAGE */
+        /* ── ALERTS ──────────────────────────────────────── */
         .alert {
-            padding: 16px;
-            border-radius: 6px;
-            margin-bottom: 16px;
+            padding: 16px; border-radius: 6px; margin-bottom: 16px; display: none;
+        }
+
+        .alert.show        { display: block; }
+        .alert-success     { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .alert-error       { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .alert-warning     { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+
+        /* ── CYCLE NOTICE ────────────────────────────────── */
+        .cycle-notice {
+            background: #fef3c7;
+            border: 1px solid #fde68a;
+            color: #92400e;
+            padding: 14px 18px;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            font-size: 14px;
+            font-weight: 600;
             display: none;
         }
 
-        .alert.show {
-            display: block;
-        }
+        .cycle-notice.show { display: flex; align-items: center; gap: 10px; }
 
-        .alert-success {
-            background: #dcfce7;
-            color: #166534;
-            border: 1px solid #bbf7d0;
-        }
-
-        .alert-error {
-            background: #fee2e2;
-            color: #991b1b;
-            border: 1px solid #fecaca;
-        }
-
-        .alert-warning {
-            background: #fef3c7;
-            color: #92400e;
-            border: 1px solid #fde68a;
-        }
-
-        /* LOADING STATE */
-        .loading {
-            opacity: 0.6;
-            pointer-events: none;
-        }
-
-        .loading::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255,255,255,0.5);
-        }
-
-        /* REAL-TIME INDICATOR */
-        .live-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: var(--success);
-            font-size: 12px;
-            font-weight: 600;
-        }
-
-        .live-dot {
-            width: 8px;
-            height: 8px;
-            background: var(--success);
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        /* VOTING DISABLED STATE */
-        .voting-disabled {
-            background: var(--light);
-            padding: 32px;
-            border-radius: var(--radius);
-            text-align: center;
-            color: var(--text-light);
-        }
-
-        .voting-disabled h2 {
-            font-size: 24px;
-            margin-bottom: 8px;
-            color: var(--text);
-        }
-
-        /* RESPONSIVE */
+        /* ── RESPONSIVE ──────────────────────────────────── */
         @media (max-width: 480px) {
-            h1 {
-                font-size: 24px;
-            }
-
-            .status-bar {
-                grid-template-columns: 1fr;
-            }
-
-            .candidates-grid {
-                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            }
-
-            .vote-btn {
-                padding: 8px;
-                font-size: 12px;
-            }
+            h1 { font-size: 24px; }
+            .status-bar { grid-template-columns: 1fr; }
+            .candidates-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+            .faceoff-grid { grid-template-columns: 1fr 1fr; }
+            .faceoff-divider { display: none; }
+            .history-header, .history-row { grid-template-columns: 60px 1fr; }
+            .history-row > :last-child, .history-header > :last-child { display: none; }
         }
     </style>
 </head>
 <body>
+
     <!-- HEADER -->
     <header class="container">
         <h1>🗳️ Live Voting</h1>
-        <p class="subtitle">Vote for your preferred candidate - each period is 5 minutes</p>
+        <p class="subtitle">Vote for your preferred candidate — one vote per cycle</p>
 
         <div class="status-bar">
             <div class="status-item">
                 <div>
-                    <div class="status-label">Period</div>
+                    <div class="status-label">Cycle</div>
                     <div class="status-value" id="periodId">-</div>
                 </div>
             </div>
             <div class="status-item">
                 <div>
-                    <div class="status-label">Total Votes</div>
+                    <div class="status-label">Total Votes (All Cycles)</div>
                     <div class="status-value" id="totalVotes">0</div>
                 </div>
             </div>
             <div class="status-item">
                 <div class="timer-badge">
                     <div class="timer-value" id="timer">--:--</div>
-                    <div class="timer-label">Time Left</div>
+                    <div class="timer-label">Cycle Time Left</div>
                 </div>
             </div>
         </div>
     </header>
 
     <!-- ALERT -->
-    <div class="container" style="margin-bottom: 20px;">
+    <div class="container" style="margin-bottom: 0;">
         <div id="alert" class="alert"></div>
     </div>
 
     <!-- MAIN CONTENT -->
     <div class="container">
+
+        <!-- Cycle lock notice -->
+        <div id="cycleNotice" class="cycle-notice">
+            ⏳ You have already voted in this cycle. You may vote again when the next cycle begins.
+        </div>
+
         <div class="main-grid">
+
             <!-- CANDIDATES -->
             <section>
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px;">
-                    <h2 style="color: white; margin: 0; font-size: 24px;">Candidates</h2>
-                    <div class="live-indicator">
-                        <div class="live-dot"></div>
-                        <span>Live Updates</span>
-                    </div>
-                </div>
-
+                <h2 style="color: white; margin-bottom: 24px;">Candidates</h2>
                 <div id="candidatesContainer" class="candidates-grid">
-                    <!-- Filled by JavaScript -->
-                </div>
-
-                <div id="votingDisabled" class="voting-disabled" style="display: none;">
-                    <h2>Voting Period Ended</h2>
-                    <p>Please wait for the next voting period to vote.</p>
+                    <!-- Rendered by JS -->
                 </div>
             </section>
 
             <!-- SIDEBAR -->
             <aside class="sidebar">
-                <div class="leaderboard-card">
-                    <h3>📊 Current Standings</h3>
-                    <div id="leaderboardContainer">
-                        <!-- Filled by JavaScript -->
+                <div class="sidebar-card">
+                    <h3>📊 Cumulative Standings</h3>
+                    <div id="standingsContainer">
+                        <p style="color: var(--text-light); font-size: 13px;">Loading...</p>
                     </div>
                 </div>
 
-                <div class="leaderboard-card">
-                    <h3>ℹ️ Instructions</h3>
-                    <p style="font-size: 13px; line-height: 1.6; color: var(--text-light);">
-                        <strong>How to Vote:</strong><br>
-                        1. Select a candidate<br>
-                        2. Click "Vote Now"<br>
-                        3. You can only vote once per period<br>
-                        4. New period starts when timer ends
+                <div class="sidebar-card">
+                    <h3>ℹ️ How to Vote</h3>
+                    <p style="font-size: 13px; line-height: 1.8; color: var(--text-light);">
+                        1. Select a candidate below<br>
+                        2. Click <strong>Vote Now</strong><br>
+                        3. One vote per cycle — totals accumulate across all cycles<br>
+                        4. A new cycle starts when the timer ends
                     </p>
                 </div>
             </aside>
         </div>
-    </div>
 
-    <!-- SCRIPTS -->
+        <!-- FACE-OFF -->
+        <div class="faceoff-section">
+            <h2>⚔️ Top 2 Face-Off</h2>
+            <div id="faceoffContainer" class="faceoff-grid">
+                <div class="faceoff-card">
+                    <div style="padding: 20px; text-align: center; color: var(--text-light);">Loading...</div>
+                </div>
+                <div class="faceoff-divider">VS</div>
+                <div class="faceoff-card">
+                    <div style="padding: 20px; text-align: center; color: var(--text-light);">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VOTE HISTORY -->
+        <div class="history-section">
+            <h2>🗂️ My Voting History</h2>
+            <div class="history-card">
+                <div class="history-header">
+                    <div>Cycle</div>
+                    <div>Candidate</div>
+                    <div>When</div>
+                </div>
+                <div id="historyContainer">
+                    <div class="history-empty">Loading your history...</div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /container -->
+
+
     <script>
-        // ─────────────────────────────────────────
-        // STATE
-        // ─────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // STATE
+    // ─────────────────────────────────────────────────────────────────────────
+    const state = {
+        period:           null,   // { periodId, endsAt, ... }
+        candidates:       [],
+        results:          [],     // cumulative results
+        userVoted:        false,  // voted in the CURRENT cycle
+        userSublocation:  null,
+        timerInterval:    null,
+        sseSource:        null
+    };
 
-        const state = {
-            period: null,
-            candidates: [],
-            results: [],
-            userVoted: false,
-            userSublocation: null,
-            isConnected: false,
-            timerInterval: null
-        };
-
-        // ─────────────────────────────────────────
-        // INITIALIZATION
-        // ─────────────────────────────────────────
-
-        async function initializeVoting() {
-            try {
-                // Check if user is logged in
-                const meRes = await fetch('/api/me', { credentials: 'include' });
-                if (!meRes.ok) {
-                    showAlert('Please log in to participate in voting. Redirecting...', 'error');
-                    setTimeout(() => { window.location.href = '/'; }, 2500);
-                    return;
-                }
-                const meJson = await meRes.json();
-                if (meJson.user?.sublocation) {
-                    state.userSublocation = meJson.user.sublocation;
-                }
-
-                // Load candidates
-                await loadCandidates();
-
-                // Load voting period
-                await loadVotingPeriod();
-
-                // Load results
-                await loadResults();
-
-                // Start timer
-                startTimer();
-
-                // Connect to real-time updates
-                connectSSE();
-
-                // Polling fallback: refresh results every 5s regardless of SSE
-                setInterval(async () => {
-                    try {
-                        const r = await fetch('/api/voting-results', { credentials: 'include' });
-                        const j = await r.json();
-                        if (j.success && j.data && j.data.results) {
-                            state.results = j.data.results;
-                            renderResults();
-                            if (!state.userVoted) renderCandidates();
-                        }
-                    } catch(_) {}
-                }, 5000);
-
-            } catch (error) {
-                console.error('Error initializing voting:', error);
-                showAlert('Failed to load voting system', 'error');
+    // ─────────────────────────────────────────────────────────────────────────
+    // INITIALISATION
+    // ─────────────────────────────────────────────────────────────────────────
+    async function init() {
+        try {
+            // Auth check
+            const meRes = await fetch('/api/me', { credentials: 'include' });
+            if (!meRes.ok) {
+                showAlert('Please log in to participate in voting. Redirecting…', 'error');
+                setTimeout(() => { window.location.href = '/'; }, 2500);
+                return;
             }
+            const meJson = await meRes.json();
+            if (meJson.user?.sublocation) state.userSublocation = meJson.user.sublocation;
+
+            await Promise.all([
+                loadCandidates(),
+                loadPeriod(),
+                loadResults()
+            ]);
+
+            startTimer();
+            connectSSE();
+            loadVoteHistory();
+
+        } catch (err) {
+            console.error('Init error:', err);
+            showAlert('Failed to load voting system', 'error');
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DATA LOADING
+    // ─────────────────────────────────────────────────────────────────────────
+    async function loadCandidates() {
+        const res  = await fetch('/api/candidates', { credentials: 'include' });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error);
+        state.candidates = json.candidates;
+        renderCandidates();
+    }
+
+    async function loadPeriod() {
+        const res  = await fetch('/api/voting-period', { credentials: 'include' });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error);
+        state.period    = json.data;
+        state.userVoted = !!json.data.userHasVoted;
+        document.getElementById('periodId').textContent = json.data.periodId;
+        updateCycleNotice();
+    }
+
+    async function loadResults() {
+        const res  = await fetch('/api/voting-results', { credentials: 'include' });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error);
+        state.results = json.data.results;
+        document.getElementById('totalVotes').textContent = json.data.totalVotes;
+        renderCandidates();
+        renderStandings();
+        loadFaceOff();   // refresh face-off whenever results refresh
+    }
+
+    async function loadFaceOff() {
+        try {
+            const res  = await fetch('/api/voting-results/face-off', { credentials: 'include' });
+            const json = await res.json();
+            if (!json.success) return;
+            renderFaceOff(json.data.top2, json.data.totalVotes);
+        } catch (_) {}
+    }
+
+    async function loadVoteHistory() {
+        try {
+            const res  = await fetch('/api/my-vote-history', { credentials: 'include' });
+            const json = await res.json();
+            if (!json.success) { renderHistoryEmpty(); return; }
+            renderHistory(json.data.history);
+        } catch (_) {
+            renderHistoryEmpty();
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // VOTE SUBMISSION
+    // ─────────────────────────────────────────────────────────────────────────
+    async function submitVote(candidateId) {
+        // Frontend cycle guard
+        if (state.userVoted) {
+            showAlert('You have already voted in this cycle. Please wait for the next voting period.', 'warning');
+            return;
         }
 
-        // ─────────────────────────────────────────
-        // API CALLS
-        // ─────────────────────────────────────────
-
-        async function loadCandidates() {
-            try {
-                const response = await fetch('/api/candidates', { credentials: 'include' });
-                const json = await response.json();
-
-                if (!json.success) throw new Error(json.error);
-
-                state.candidates = json.candidates;
-                renderCandidates();
-
-            } catch (error) {
-                console.error('Error loading candidates:', error);
-            }
+        if (!state.period) {
+            showAlert('Voting period not loaded yet. Please wait.', 'error');
+            return;
         }
 
-        async function loadVotingPeriod() {
-            try {
-                const response = await fetch('/api/voting-period', { credentials: 'include' });
-                const json = await response.json();
+        try {
+            const res  = await fetch('/api/vote', {
+                method:      'POST',
+                credentials: 'include',
+                headers:     { 'Content-Type': 'application/json' },
+                body:        JSON.stringify({
+                    candidateId,
+                    periodId:    state.period.periodId,
+                    sublocation: state.userSublocation || null
+                })
+            });
+            const json = await res.json();
 
-                if (!json.success) throw new Error(json.error);
-
-                state.period = json.data;
-                document.getElementById('periodId').textContent = state.period.periodId;
-
-            } catch (error) {
-                console.error('Error loading voting period:', error);
-            }
-        }
-
-        async function loadResults() {
-            try {
-                const response = await fetch('/api/voting-results', { credentials: 'include' });
-                const json = await response.json();
-
-                if (!json.success) throw new Error(json.error);
-
-                state.results = json.data.results;
-                renderResults();
-
-            } catch (error) {
-                console.error('Error loading results:', error);
-            }
-        }
-
-        async function submitVote(candidateId) {
-            try {
-                if (!state.period) {
-                    showAlert('Voting period not loaded yet. Please wait.', 'error');
-                    return;
-                }
-
-                const response = await fetch('/api/vote', {
-                    method: 'POST',
-                    credentials: 'include',          // send the session cookie
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        candidateId,
-                        periodId: state.period.periodId,
-                        sublocation: state.userSublocation || null
-                    })
-                });
-
-                const json = await response.json();
-
-                if (response.status === 401) {
-                    showAlert('Please log in to vote. Redirecting...', 'error');
-                    setTimeout(() => { window.location.href = '/'; }, 2000);
-                    return;
-                }
-
-                if (!json.success) {
-                    showAlert(json.error || json.message || 'Failed to submit vote', 'error');
-                    return;
-                }
-
-                state.userVoted = true;
-                const candidate = state.candidates.find(c => c.id === candidateId);
-                showAlert(`✓ Vote recorded for ${candidate ? candidate.name : candidateId}`, 'success');
-
-                // Immediately refresh results from the server response
-                if (json.votesByCandidate) {
-                    const total = json.totalVotes || 0;
-                    // Merge server counts into state.results
-                    state.candidates.forEach(c => {
-                        const count = json.votesByCandidate[c.id] || 0;
-                        let existing = state.results.find(r => r.candidateId === c.id);
-                        if (existing) {
-                            existing.votes = count;
-                            existing.percentage = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
-                        } else {
-                            state.results.push({
-                                candidateId: c.id,
-                                name: c.name,
-                                party: c.party,
-                                votes: count,
-                                percentage: total > 0 ? ((count / total) * 100).toFixed(1) : '0.0'
-                            });
-                        }
-                    });
-                }
-
-                // Refresh both panels
-                renderCandidates();
-                renderResults();
-
-            } catch (error) {
-                console.error('Error submitting vote:', error);
-                showAlert('Failed to submit vote', 'error');
-            }
-        }
-
-        // ─────────────────────────────────────────
-        // RENDERING
-        // ─────────────────────────────────────────
-
-        function renderCandidates() {
-            const container = document.getElementById('candidatesContainer');
-
-            container.innerHTML = state.candidates.map(candidate => {
-                const result = state.results.find(r => r.candidateId === candidate.id);
-                const votes = result?.votes || 0;
-                const percentage = result?.percentage || 0;
-
-                return `
-                    <div class="candidate-card ${state.userVoted ? 'voted' : ''}">
-                        <div class="candidate-photo">
-                            👤
-                        </div>
-                        <div class="candidate-info">
-                            <div class="candidate-name">${candidate.name}</div>
-                            <div class="candidate-party">${candidate.party}</div>
-                            <div class="candidate-vote-count">
-                                <div>
-                                    <div class="vote-number">${votes}</div>
-                                    <div class="vote-percentage">${percentage}%</div>
-                                </div>
-                            </div>
-                            <button 
-                                class="vote-btn" 
-                                onclick="submitVote(${candidate.id})"
-                                ${state.userVoted ? 'disabled' : ''}
-                            >
-                                ${state.userVoted ? '✓ Already Voted' : 'Vote Now'}
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function renderResults() {
-            const container = document.getElementById('leaderboardContainer');
-            const sorted = [...state.results].sort((a, b) => b.votes - a.votes);
-            const total = sorted.reduce((sum, r) => sum + r.votes, 0);
-
-            if (sorted.length === 0) {
-                container.innerHTML = '<p style="color: var(--text-light); text-align: center;">No votes yet</p>';
+            if (res.status === 401) {
+                showAlert('Please log in to vote. Redirecting…', 'error');
+                setTimeout(() => { window.location.href = '/'; }, 2000);
                 return;
             }
 
-            container.innerHTML = sorted.slice(0, 5).map((result, index) => {
-                const medals = ['🥇', '🥈', '🥉', '', ''];
-                const medal = medals[index] || '•';
-
-                return `
-                    <div class="leaderboard-item">
-                        <span class="leaderboard-rank">${medal}</span>
-                        <span class="leaderboard-name">${result.name}</span>
-                        <span class="leaderboard-votes">${result.votes}</span>
-                    </div>
-                `;
-            }).join('');
-
-            document.getElementById('totalVotes').textContent = total;
-        }
-
-        // ─────────────────────────────────────────
-        // TIMER
-        // ─────────────────────────────────────────
-
-        function startTimer() {
-            if (state.timerInterval) clearInterval(state.timerInterval);
-
-            const updateTimer = () => {
-                if (!state.period) return;
-
-                const now = new Date();
-                const end = new Date(state.period.endsAt);
-                const seconds = Math.max(0, Math.floor((end - now) / 1000));
-
-                const minutes = Math.floor(seconds / 60);
-                const secs = seconds % 60;
-
-                document.getElementById('timer').textContent = 
-                    `${minutes}:${secs.toString().padStart(2, '0')}`;
-
-                if (seconds === 0) {
-                    clearInterval(state.timerInterval);
-                    // Period ended, reload
-                    setTimeout(() => {
-                        loadVotingPeriod();
-                        loadResults();
-                        state.userVoted = false;
-                        renderCandidates();
-                        startTimer();
-                    }, 1000);
+            if (res.status === 409 || !json.success) {
+                // 409 = already voted in this cycle (backend guard)
+                const msg = json.error || 'Failed to submit vote';
+                showAlert(msg, 'warning');
+                if (res.status === 409) {
+                    state.userVoted = true;
+                    updateCycleNotice();
+                    renderCandidates();
                 }
-            };
-
-            updateTimer();
-            state.timerInterval = setInterval(updateTimer, 1000);
-        }
-
-        // ─────────────────────────────────────────
-        // REAL-TIME UPDATES (SSE)
-        // ─────────────────────────────────────────
-
-        function connectSSE() {
-            try {
-                const eventSource = new EventSource('/api/votes/stream');
-
-                eventSource.addEventListener('vote-received', (event) => {
-                    const data = JSON.parse(event.data);
-                    // Update results
-                    const result = state.results.find(r => r.candidateId === data.candidateId);
-                    if (result) {
-                        result.votes = data.votes;
-                        result.percentage = ((data.votes / data.totalVotes) * 100).toFixed(1);
-                    }
-                    renderResults();
-                    renderCandidates();
-                });
-
-                eventSource.addEventListener('period-ended', (event) => {
-                    const data = JSON.parse(event.data);
-                    const winner = state.candidates.find(c => c.id === data.winner);
-                    showAlert(`Period ended! Winner: ${winner?.name}`, 'warning');
-                });
-
-                eventSource.addEventListener('new-period', (event) => {
-                    const data = JSON.parse(event.data);
-                    state.period = {
-                        periodId: data.period,
-                        endsAt: data.endsAt,
-                        endsIn: new Date(data.endsAt) - new Date()
-                    };
-                    state.userVoted = false;
-                    state.results = [];
-                    document.getElementById('periodId').textContent = data.period;
-                    renderCandidates();
-                    renderResults();
-                    startTimer();
-                    showAlert('New voting period started!', 'success');
-                });
-
-                state.isConnected = true;
-
-            } catch (error) {
-                console.error('SSE connection failed:', error);
-                // Retry after 5 seconds
-                setTimeout(connectSSE, 5000);
+                return;
             }
+
+            // Success — update state from cumulative totals returned by server
+            state.userVoted = true;
+            updateCycleNotice();
+
+            // Sync all candidate totals immediately (no page reload needed)
+            if (json.votesByCandidate) {
+                const total = json.totalVotes || 0;
+                state.candidates.forEach(c => {
+                    const count    = json.votesByCandidate[c.id] || 0;
+                    let existing   = state.results.find(r => r.candidateId === c.id);
+                    const pct      = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
+                    if (existing) {
+                        existing.votes      = count;
+                        existing.percentage = pct;
+                    } else {
+                        state.results.push({ candidateId: c.id, name: c.name, party: c.party, votes: count, percentage: pct });
+                    }
+                });
+                document.getElementById('totalVotes').textContent = total;
+            }
+
+            const candidate = state.candidates.find(c => c.id === candidateId);
+            showAlert(`✓ Vote recorded for ${candidate ? candidate.name : 'candidate'}`, 'success');
+
+            renderCandidates();
+            renderStandings();
+            loadFaceOff();
+            loadVoteHistory();   // refresh history panel immediately
+
+        } catch (err) {
+            console.error('Vote submission error:', err);
+            showAlert('Failed to submit vote', 'error');
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RENDERING — CANDIDATE CARDS
+    // ─────────────────────────────────────────────────────────────────────────
+    function renderCandidates() {
+        const container = document.getElementById('candidatesContainer');
+        if (!state.candidates.length) return;
+
+        container.innerHTML = state.candidates.map(candidate => {
+            const result = state.results.find(r => r.candidateId === candidate.id);
+            const votes  = result?.votes      || 0;
+            const pct    = result?.percentage || '0.0';
+            const locked = state.userVoted;
+
+            return `
+                <div class="candidate-card ${locked ? 'voted' : ''}">
+                    <div class="candidate-photo">
+                        <img src="${candidate.img}" alt="${candidate.name}" loading="lazy"
+                             onerror="this.style.display='none'">
+                    </div>
+                    <div class="candidate-info">
+                        <div class="candidate-name">${candidate.name}</div>
+                        <div class="candidate-party">${candidate.party}</div>
+                        <div class="candidate-vote-count">
+                            <div>
+                                <div class="vote-number">${votes.toLocaleString()}</div>
+                                <div class="vote-percentage">${pct}% of all votes</div>
+                            </div>
+                        </div>
+                        <button
+                            class="vote-btn"
+                            onclick="submitVote(${candidate.id})"
+                            ${locked ? 'disabled' : ''}>
+                            ${locked ? '✓ Voted This Cycle' : 'Vote Now'}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RENDERING — SIDEBAR STANDINGS
+    // ─────────────────────────────────────────────────────────────────────────
+    function renderStandings() {
+        const container = document.getElementById('standingsContainer');
+        const sorted    = [...state.results].sort((a, b) => b.votes - a.votes);
+        const medals    = ['🥇','🥈','🥉'];
+
+        if (!sorted.length) {
+            container.innerHTML = '<p style="color:var(--text-light);font-size:13px;">No votes yet</p>';
+            return;
         }
 
-        // ─────────────────────────────────────────
-        // UTILITIES
-        // ─────────────────────────────────────────
+        container.innerHTML = sorted.slice(0, 5).map((r, i) => `
+            <div class="standing-item">
+                <span class="standing-rank">${medals[i] || (i + 1)}</span>
+                <span class="standing-name">${r.name}</span>
+                <span class="standing-votes">${r.votes.toLocaleString()}</span>
+            </div>
+        `).join('');
+    }
 
-        function showAlert(message, type = 'info') {
-            const alert = document.getElementById('alert');
-            alert.textContent = message;
-            alert.className = `alert alert-${type} show`;
+    // ─────────────────────────────────────────────────────────────────────────
+    // RENDERING — FACE-OFF
+    // ─────────────────────────────────────────────────────────────────────────
+    function renderFaceOff(top2, totalVotes) {
+        const container = document.getElementById('faceoffContainer');
 
-            setTimeout(() => {
-                alert.classList.remove('show');
-            }, 5000);
+        if (!top2 || top2.length < 2) {
+            container.innerHTML = `
+                <div class="faceoff-card" style="grid-column:1/-1; text-align:center; padding:32px; color:var(--text-light);">
+                    Cast more votes to see the Face-Off
+                </div>`;
+            return;
         }
 
-        // ─────────────────────────────────────────
-        // INITIALIZATION
-        // ─────────────────────────────────────────
+        const [a, b] = top2;
+        const pctA   = totalVotes > 0 ? ((a.votes / totalVotes) * 100).toFixed(1) : '0.0';
+        const pctB   = totalVotes > 0 ? ((b.votes / totalVotes) * 100).toFixed(1) : '0.0';
 
-        document.addEventListener('DOMContentLoaded', initializeVoting);
+        container.innerHTML = `
+            <div class="faceoff-card leader">
+                <div class="faceoff-photo">
+                    <img src="${a.img}" alt="${a.name}" loading="lazy">
+                </div>
+                <div class="faceoff-name">${a.name}</div>
+                <div class="faceoff-party">${a.party}</div>
+                <div class="faceoff-votes">${a.votes.toLocaleString()}</div>
+                <div class="faceoff-pct">${pctA}% of votes</div>
+                <div class="faceoff-bar-wrap">
+                    <div class="faceoff-bar">
+                        <div class="faceoff-bar-fill" style="width:${pctA}%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="faceoff-divider">VS</div>
+
+            <div class="faceoff-card">
+                <div class="faceoff-photo">
+                    <img src="${b.img}" alt="${b.name}" loading="lazy">
+                </div>
+                <div class="faceoff-name">${b.name}</div>
+                <div class="faceoff-party">${b.party}</div>
+                <div class="faceoff-votes">${b.votes.toLocaleString()}</div>
+                <div class="faceoff-pct">${pctB}% of votes</div>
+                <div class="faceoff-bar-wrap">
+                    <div class="faceoff-bar">
+                        <div class="faceoff-bar-fill" style="width:${pctB}%"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RENDERING — VOTE HISTORY
+    // ─────────────────────────────────────────────────────────────────────────
+    function renderHistory(history) {
+        const container = document.getElementById('historyContainer');
+
+        if (!history || !history.length) {
+            renderHistoryEmpty('You haven\'t voted in any cycle yet.');
+            return;
+        }
+
+        container.innerHTML = history.map(entry => {
+            const when = entry.voteTimestamp
+                ? new Date(entry.voteTimestamp).toLocaleString('en-KE', { dateStyle: 'short', timeStyle: 'short' })
+                : '—';
+
+            return `
+                <div class="history-row">
+                    <div class="history-cycle">Cycle ${entry.cycleId}</div>
+                    <div>
+                        <div class="history-name">${entry.candidateName}</div>
+                        <div class="history-party">${entry.candidateParty}</div>
+                    </div>
+                    <div class="history-time">${when}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderHistoryEmpty(msg = 'No voting history found.') {
+        document.getElementById('historyContainer').innerHTML =
+            `<div class="history-empty">${msg}</div>`;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CYCLE LOCK NOTICE
+    // ─────────────────────────────────────────────────────────────────────────
+    function updateCycleNotice() {
+        const el = document.getElementById('cycleNotice');
+        if (state.userVoted) {
+            el.classList.add('show');
+        } else {
+            el.classList.remove('show');
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TIMER
+    // ─────────────────────────────────────────────────────────────────────────
+    function startTimer() {
+        if (state.timerInterval) clearInterval(state.timerInterval);
+
+        const tick = () => {
+            if (!state.period) return;
+            const now     = new Date();
+            const end     = new Date(state.period.endsAt);
+            const seconds = Math.max(0, Math.floor((end - now) / 1000));
+            const mins    = Math.floor(seconds / 60);
+            const secs    = seconds % 60;
+            document.getElementById('timer').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+            if (seconds === 0) {
+                clearInterval(state.timerInterval);
+                // New cycle — reload period + reset userVoted
+                setTimeout(async () => {
+                    await loadPeriod();
+                    await loadResults();
+                    startTimer();
+                    renderCandidates();
+                    showAlert('New voting cycle started!', 'success');
+                }, 1500);
+            }
+        };
+
+        tick();
+        state.timerInterval = setInterval(tick, 1000);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SSE — REAL-TIME SYNC
+    // ─────────────────────────────────────────────────────────────────────────
+    function connectSSE() {
+        if (state.sseSource) state.sseSource.close();
+
+        try {
+            state.sseSource = new EventSource('/api/votes/stream');
+
+            state.sseSource.addEventListener('vote-received', e => {
+                const data = JSON.parse(e.data);
+                // Sync cumulative totals pushed by server
+                if (data.votesByCandidate) {
+                    const total = data.totalVotes || 0;
+                    state.candidates.forEach(c => {
+                        const count  = data.votesByCandidate[c.id] || 0;
+                        const pct    = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
+                        let existing = state.results.find(r => r.candidateId === c.id);
+                        if (existing) {
+                            existing.votes      = count;
+                            existing.percentage = pct;
+                        } else {
+                            state.results.push({ candidateId: c.id, name: c.name, party: c.party, votes: count, percentage: pct });
+                        }
+                    });
+                    document.getElementById('totalVotes').textContent = total;
+                }
+                renderCandidates();
+                renderStandings();
+                loadFaceOff();
+            });
+
+            state.sseSource.addEventListener('period-ended', () => {
+                // Will be handled by the timer hitting zero; nothing extra needed
+            });
+
+            state.sseSource.addEventListener('new-period', async e => {
+                const data = JSON.parse(e.data);
+                await loadPeriod();
+                state.results = [];
+                await loadResults();
+                document.getElementById('periodId').textContent = data.period;
+                startTimer();
+                renderCandidates();
+                renderStandings();
+                showAlert('New voting cycle started!', 'success');
+            });
+
+        } catch (err) {
+            console.error('SSE failed:', err);
+            setTimeout(connectSSE, 5000);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // UTILITIES
+    // ─────────────────────────────────────────────────────────────────────────
+    function showAlert(message, type = 'info') {
+        const el = document.getElementById('alert');
+        el.textContent = message;
+        el.className   = `alert alert-${type} show`;
+        setTimeout(() => el.classList.remove('show'), 6000);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BOOT
+    // ─────────────────────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', init);
+
+    window.addEventListener('beforeunload', () => {
+        if (state.timerInterval) clearInterval(state.timerInterval);
+        if (state.sseSource)     state.sseSource.close();
+    });
     </script>
 </body>
 </html>
