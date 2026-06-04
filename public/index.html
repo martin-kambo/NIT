@@ -2021,6 +2021,47 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .otp-step { display: none; }
 .otp-step.active { display: block; }
 
+/* ── Vote History (profile panel) ── */
+.vh-item{padding:.75rem 0;border-bottom:1px solid var(--light-gray,#e9ecef);}
+.vh-item:last-child{border-bottom:none;}
+.vh-cycle{display:flex;align-items:center;gap:.45rem;margin-bottom:.3rem;}
+.vh-badge{font-size:.68rem;font-weight:700;background:var(--forest,#2d6a4f);color:#fff;padding:.12rem .45rem;border-radius:50px;}
+.vh-active-badge{font-size:.68rem;font-weight:700;background:#16a34a;color:#fff;padding:.12rem .45rem;border-radius:50px;}
+.vh-candidate{font-size:.88rem;font-weight:600;color:var(--text-dark,#1e293b);margin-bottom:.22rem;}
+.vh-candidate i{color:var(--forest-light,#40c27a);margin-right:.3rem;}
+.vh-meta{display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;}
+.vh-status-voted{font-size:.76rem;font-weight:700;color:#16a34a;}
+.vh-date{font-size:.76rem;color:var(--mid-gray,#64748b);}
+.vh-empty{text-align:center;padding:1.5rem 0;color:var(--mid-gray,#64748b);font-size:.88rem;}
+.vh-loading{text-align:center;padding:1rem 0;color:var(--mid-gray,#64748b);font-size:.82rem;}
+
+/* ── Live Standings (below face-off) ── */
+.live-standings-panel{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:var(--radius-lg,1rem);padding:1.25rem;margin-bottom:1.5rem;}
+.ls-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem;}
+.ls-title{display:flex;align-items:center;gap:.45rem;font-family:'Syne',sans-serif;font-weight:700;font-size:.92rem;color:#fff;}
+.ls-live-dot{width:8px;height:8px;border-radius:50%;background:#40c27a;box-shadow:0 0 6px #40c27a;flex-shrink:0;animation:lsDotPulse 1.6s ease-in-out infinite;}
+@keyframes lsDotPulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.45;transform:scale(.75);}}
+.ls-leader-chip{display:inline-flex;align-items:center;gap:.3rem;background:rgba(233,196,106,.15);border:1px solid rgba(233,196,106,.35);color:#e9c46a;font-size:.68rem;font-weight:700;padding:.12rem .45rem;border-radius:50px;margin-left:.3rem;}
+.ls-updated{font-size:.68rem;color:rgba(255,255,255,.38);}
+.ls-row{display:flex;align-items:center;gap:.7rem;padding:.45rem 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.ls-row:last-child{border-bottom:none;}
+.ls-rank{width:1.35rem;text-align:center;font-family:'JetBrains Mono',monospace;font-weight:800;font-size:.82rem;color:rgba(255,255,255,.4);flex-shrink:0;}
+.ls-rank.ls-gold{color:#e9c46a;}
+.ls-rank.ls-silver{color:#9ca3af;}
+.ls-rank.ls-bronze{color:#cd7f32;}
+.ls-img{width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid rgba(255,255,255,.12);}
+.ls-info{flex:1;min-width:0;}
+.ls-name{font-size:.8rem;font-weight:600;color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ls-party{font-size:.66rem;color:rgba(255,255,255,.4);}
+.ls-bar-wrap{width:80px;flex-shrink:0;}
+.ls-bar{height:5px;background:rgba(255,255,255,.1);border-radius:3px;overflow:hidden;}
+.ls-bar-fill{height:100%;background:linear-gradient(90deg,#40c27a,#5ddb96);border-radius:3px;transition:width .7s ease;}
+.ls-bar-fill.ls-leader-bar{background:linear-gradient(90deg,#e9c46a,#f4d35e);}
+.ls-votes-col{text-align:right;flex-shrink:0;min-width:52px;}
+.ls-votes-num{font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:700;color:rgba(255,255,255,.82);}
+.ls-pct{font-size:.64rem;color:rgba(255,255,255,.38);}
+.ls-empty{text-align:center;padding:1rem;color:rgba(255,255,255,.38);font-size:.82rem;}
+
 </style>
 </head>
 <body>
@@ -2319,6 +2360,19 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           </div>
           <div class="fo-total-chip">📈 Total: <strong id="foTotalVotes">0</strong></div>
         </div>
+      </div>
+
+      <!-- Live Candidate Performance -->
+      <div class="live-standings-panel scroll-reveal" id="liveStandingsPanel">
+        <div class="ls-header">
+          <div class="ls-title">
+            <span class="ls-live-dot"></span>
+            Live Candidate Performance
+            <span class="ls-leader-chip" id="lsLeaderChip" style="display:none;">🏆 —</span>
+          </div>
+          <div class="ls-updated" id="lsUpdated">—</div>
+        </div>
+        <div id="liveStandingsList"><div class="ls-empty">Waiting for votes…</div></div>
       </div>
 
       <!-- Voter Registry -->
@@ -2705,6 +2759,13 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         <div class="error-msg" id="profilePwdError" style="max-width:400px;margin-top:0.5rem;"></div>
         <button class="btn-primary btn-sm ripple-wrap" id="changePasswordBtn" style="margin-top:1rem;width:auto;padding:0.65rem 1.5rem;border-radius:var(--radius-md);"><span>Update Password</span></button>
       </div>
+
+      <!-- Voting History -->
+      <div class="glass-panel">
+        <div class="profile-section-title"><i class="fas fa-history"></i> Voting History</div>
+        <div id="voteHistoryList"><div class="vh-loading">Loading your voting history…</div></div>
+      </div>
+
     </div>
 
   </div><!-- end container -->
@@ -3291,7 +3352,7 @@ function enterDashboard(){
   showPane("dashboardContent");
   renderDashboard();
   showWelcomePopup();
-  //initLiveTicker();
+  initLiveTicker();
   initPWAInstall();
   seedInitialNotifications();
   renderNotifBell();
@@ -4542,10 +4603,12 @@ function loadProfileData(){
   const cycleBadge=document.getElementById("profileCycleBadge");
   if(cycleBadge){cycleBadge.innerText=badge?`${badge} voter this cycle`:"";cycleBadge.style.display=badge?"":"none";}
   const ptvEl=document.getElementById("profileTotalVotes");
-  if(ptvEl) ptvEl.innerText=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes.filter(v=>v.userId===currentUser.phone).length;
+  if(ptvEl) ptvEl.innerText="…"; // will be replaced by loadVoteHistory()
   const pcrEl=document.getElementById("profileCurrentRank");
   if(pcrEl) pcrEl.innerText="🔥 —";
   if(typeof updateHeaderAvatar==="function") updateHeaderAvatar();
+  // Load voting history from server (async — updates profileTotalVotes when ready)
+  if(typeof window.loadVoteHistory === 'function') window.loadVoteHistory();
 }
 
 async function saveProfileChanges(){
@@ -6467,6 +6530,291 @@ if (document.readyState === 'loading') {
 }
 
 console.log('✅ ALL DB references removed!');
+
+// ════════════════════════════════════════════════════════════════════════════
+// VOTE HISTORY  ·  LIVE STANDINGS  ·  REAL-TIME SSE
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── 1. loadVoteHistory — fetch /api/my-votes and render into profile panel ──
+window.loadVoteHistory = async function () {
+  const el = document.getElementById('voteHistoryList');
+  if (!el) return;
+  try {
+    const res  = await fetch('/api/my-votes', { credentials: 'include' });
+    const data = await res.json();
+
+    if (!data.success || !Array.isArray(data.votes)) {
+      el.innerHTML = '<div class="vh-empty">Could not load voting history.</div>';
+      return;
+    }
+
+    // Update "Votes Cast" counter in the hero stat row
+    const ptvEl = document.getElementById('profileTotalVotes');
+    if (ptvEl) ptvEl.innerText = data.votes.length;
+
+    if (data.votes.length === 0) {
+      el.innerHTML = '<div class="vh-empty">No voting history yet — cast your first vote!</div>';
+      return;
+    }
+
+    el.innerHTML = data.votes.map(v => {
+      const dateFmt = new Date(v.votedAt).toLocaleDateString('en-KE', {
+        day: 'numeric', month: 'long', year: 'numeric'
+      });
+      const activeTag = v.isActivePeriod
+        ? '<span class="vh-active-badge">Active</span>'
+        : '';
+      return `<div class="vh-item">
+        <div class="vh-cycle">
+          <span class="vh-badge">Cycle #${v.periodId}</span>
+          ${activeTag}
+        </div>
+        <div class="vh-candidate">
+          <i class="fas fa-vote-yea"></i>
+          ${v.candidateName || 'Unknown'} · <em>${v.candidateParty || '—'}</em>
+        </div>
+        <div class="vh-meta">
+          <span class="vh-status-voted">✅ Voted</span>
+          <span class="vh-date">${dateFmt}</span>
+        </div>
+      </div>`;
+    }).join('');
+
+  } catch (e) {
+    console.error('loadVoteHistory error:', e);
+    el.innerHTML = '<div class="vh-empty">Could not load voting history.</div>';
+  }
+};
+
+// ── 2. renderLiveStandings — draws ranked candidate rows from /api/faceoff ──
+window.renderLiveStandings = async function () {
+  try {
+    const res  = await fetch('/api/faceoff');
+    const data = await res.json();
+    if (!data.success) return;
+
+    const allCandidates = data.allCandidates || data.candidates || [];
+    const totalVotes    = data.totalVotes || 0;
+    const listEl        = document.getElementById('liveStandingsList');
+    const leaderChip    = document.getElementById('lsLeaderChip');
+    const updatedEl     = document.getElementById('lsUpdated');
+
+    if (!listEl) return;
+
+    if (updatedEl) {
+      updatedEl.innerText = 'Updated ' + new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    if (totalVotes === 0) {
+      listEl.innerHTML = '<div class="ls-empty">No votes yet this cycle — be the first!</div>';
+      if (leaderChip) leaderChip.style.display = 'none';
+      return;
+    }
+
+    const rankClass = i => i === 0 ? 'ls-gold' : i === 1 ? 'ls-silver' : i === 2 ? 'ls-bronze' : '';
+    const maxVotes  = allCandidates[0]?.vote_count || 1;
+
+    listEl.innerHTML = allCandidates.map((c, i) => {
+      const votes = c.vote_count || 0;
+      const pct   = c.percentage || (totalVotes > 0 ? ((votes / totalVotes) * 100).toFixed(1) : '0.0');
+      const barW  = maxVotes > 0 ? Math.round((votes / maxVotes) * 100) : 0;
+      const isLeader = i === 0;
+      return `<div class="ls-row">
+        <div class="ls-rank ${rankClass(i)}">${i + 1}</div>
+        <img class="ls-img" src="${c.img || ''}" alt="${c.name}" loading="lazy"
+             onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.name)}&background=2d6a4f&color=fff&size=60'">
+        <div class="ls-info">
+          <div class="ls-name">${c.name}</div>
+          <div class="ls-party">${c.party || ''}</div>
+        </div>
+        <div class="ls-bar-wrap">
+          <div class="ls-bar">
+            <div class="ls-bar-fill${isLeader ? ' ls-leader-bar' : ''}" style="width:${barW}%"></div>
+          </div>
+        </div>
+        <div class="ls-votes-col">
+          <div class="ls-votes-num">${votes}</div>
+          <div class="ls-pct">${pct}%</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Leader chip
+    if (leaderChip && allCandidates.length > 0) {
+      leaderChip.innerText = '🏆 ' + allCandidates[0].name.split(' ')[allCandidates[0].name.split(' ').length - 1];
+      leaderChip.style.display = '';
+    }
+
+  } catch (e) {
+    console.error('renderLiveStandings error:', e);
+  }
+};
+
+// ── 3. Override updateFaceoff — use /api/faceoff, update both faceoff widget
+//       AND the live standings panel. Replaces the previous stub/override. ──
+window.updateFaceoff = async function () {
+  try {
+    const res  = await fetch('/api/faceoff');
+    const data = await res.json();
+    if (!data.success) return;
+
+    const top2       = data.candidates || [];
+    const totalVotes = data.totalVotes || 0;
+
+    if (top2.length >= 2) {
+      const right = top2[0]; // leader on right (matches existing HTML intent)
+      const left  = top2[1];
+
+      const setEl = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && el.innerText !== String(val)) {
+          el.innerText = val;
+          el.classList.add('vote-flash');
+          setTimeout(() => el.classList.remove('vote-flash'), 400);
+        }
+      };
+
+      const foLI = document.getElementById('foLeftImg');
+      if (foLI) foLI.src = left.img || '';
+      document.getElementById('foLeftName')?.innerText !== undefined &&
+        (document.getElementById('foLeftName').innerText = left.name || '—');
+      document.getElementById('foLeftParty')?.innerText !== undefined &&
+        (document.getElementById('foLeftParty').innerText = left.party || '—');
+      setEl('foLeftVotes', left.vote_count || 0);
+
+      const foRI = document.getElementById('foRightImg');
+      if (foRI) foRI.src = right.img || '';
+      document.getElementById('foRightName')?.innerText !== undefined &&
+        (document.getElementById('foRightName').innerText = right.name || '—');
+      document.getElementById('foRightParty')?.innerText !== undefined &&
+        (document.getElementById('foRightParty').innerText = right.party || '—');
+      setEl('foRightVotes', right.vote_count || 0);
+
+      const lv = left.vote_count  || 0;
+      const rv = right.vote_count || 0;
+      const tv = lv + rv;
+      setEl('foTotalVotes', totalVotes);
+
+      const lp = tv > 0 ? Math.round((lv / tv) * 100) : 0;
+      const rp = tv > 0 ? Math.round((rv / tv) * 100) : 0;
+      const lpEl = document.getElementById('foLeftPct');
+      const rpEl = document.getElementById('foRightPct');
+      if (lpEl) lpEl.innerText = lp + '%';
+      if (rpEl) rpEl.innerText = rp + '%';
+
+      const progressFill = document.getElementById('foProgressFill');
+      if (progressFill) {
+        progressFill.style.width = `${Math.min(100, Math.floor((totalVotes / 540) * 100))}%`;
+      }
+
+      const winnerChip = document.getElementById('foWinnerChip');
+      if (winnerChip) {
+        winnerChip.innerHTML = rv >= 270 ? '🏆 WINNER DECLARED!' : '⏳ Race in progress';
+      }
+    }
+
+    // Always update the live standings panel too
+    await window.renderLiveStandings();
+
+  } catch (e) {
+    console.error('updateFaceoff error:', e);
+  }
+};
+
+// Also keep renderFaceoff pointing to the same logic (legacy calls)
+window.renderFaceoff = window.updateFaceoff;
+
+// ── 4. SSE — real-time vote stream ─────────────────────────────────────────
+(function initVoteStream () {
+  let sseSource   = null;
+  let sseRetryMs  = 3000;
+  let sseRetryTmr = null;
+
+  function connect() {
+    if (sseSource) { sseSource.close(); sseSource = null; }
+    if (!window.currentUser) return; // only connect when logged in
+
+    try {
+      sseSource = new EventSource('/api/votes/stream');
+
+      sseSource.addEventListener('connected', () => {
+        console.log('[SSE] Connected to vote stream');
+        sseRetryMs = 3000; // reset back-off on successful connection
+      });
+
+      // 'vote-received' fires whenever a new vote is cast (broadcast by voting.js)
+      sseSource.addEventListener('vote-received', async (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          console.log('[SSE] vote-received:', payload);
+          // Refresh both the faceoff widget and the standings panel
+          await window.updateFaceoff();
+        } catch (err) {
+          console.warn('[SSE] vote-received parse error:', err);
+        }
+      });
+
+      // 'new-period' fires when admin starts a new period
+      sseSource.addEventListener('new-period', async () => {
+        console.log('[SSE] new-period — refreshing dashboard');
+        if (typeof window.renderDashboard === 'function') await window.renderDashboard();
+      });
+
+      sseSource.onerror = () => {
+        sseSource.close();
+        sseSource = null;
+        // Exponential back-off (max 30 s)
+        sseRetryMs = Math.min(sseRetryMs * 1.5, 30000);
+        if (sseRetryTmr) clearTimeout(sseRetryTmr);
+        sseRetryTmr = setTimeout(connect, sseRetryMs);
+      };
+
+    } catch (err) {
+      console.warn('[SSE] EventSource not supported or failed:', err);
+    }
+  }
+
+  // Expose so enterDashboard can start the stream
+  window._connectVoteStream    = connect;
+  window._disconnectVoteStream = () => {
+    if (sseRetryTmr) clearTimeout(sseRetryTmr);
+    if (sseSource)   { sseSource.close(); sseSource = null; }
+  };
+})();
+
+// ── 5. Hook SSE connect/disconnect into enterDashboard / logout ─────────────
+(function patchEnterDashboardForSSE () {
+  const _prev = window.enterDashboard;
+  window.enterDashboard = function () {
+    if (typeof _prev === 'function') _prev.apply(this, arguments);
+    // Start real-time stream after login
+    if (typeof window._connectVoteStream === 'function') {
+      window._connectVoteStream();
+    }
+    // Initial render of live standings
+    if (typeof window.updateFaceoff === 'function') {
+      window.updateFaceoff();
+    }
+  };
+})();
+
+// Also disconnect on logout (look for the logout handler)
+(function patchLogoutForSSE () {
+  // The logout flow calls /api/auth {action:'logout'} then reloads.
+  // Disconnecting here is belt-and-suspenders.
+  const _prevLogout = window.handleLogout || window.logout;
+  if (typeof _prevLogout === 'function') {
+    const key = window.handleLogout ? 'handleLogout' : 'logout';
+    window[key] = function () {
+      if (typeof window._disconnectVoteStream === 'function') {
+        window._disconnectVoteStream();
+      }
+      _prevLogout.apply(this, arguments);
+    };
+  }
+})();
+
+
 </script>
 
 <style id="uxGlassStyles">
