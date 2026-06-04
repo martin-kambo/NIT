@@ -234,60 +234,6 @@ body::before {
 
 
 /* ═══ HERO BAND ═══ */
-.hero-band {
-  background: var(--forest);
-  padding: 3rem 0 2rem;
-  position: relative; overflow: hidden;
-}
-.hero-band::before {
-  content: '';
-  position: absolute; inset: 0;
-  background: radial-gradient(ellipse 80% 60% at 60% 50%, rgba(64,194,122,0.08) 0%, transparent 70%);
-}
-.hero-band-inner { position: relative; z-index: 1; }
-.ward-chip {
-  display: inline-flex; align-items: center; gap: 0.5rem;
-  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
-  padding: 0.35rem 1rem; border-radius: 50px;
-  font-size: 0.75rem; font-weight: 600; color: var(--emerald);
-  letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 1rem;
-}
-.hero-title {
-  font-family: 'Syne', sans-serif; font-weight: 800;
-  font-size: clamp(2.5rem, 6vw, 4.5rem); color: white; line-height: 1.05;
-  letter-spacing: -0.02em;
-}
-.hero-title .accent { color: var(--gold); position: relative; display: inline-block; }
-.hero-title .accent::after {
-  content: '';
-  position: absolute; bottom: -4px; left: 0; width: 100%; height: 3px;
-  background: linear-gradient(90deg, var(--gold), transparent);
-  border-radius: 2px;
-}
-.hero-sub { color: rgba(255,255,255,0.55); font-size: 1rem; margin-top: 0.75rem; font-weight: 400; }
-.cycle-badge {
-  display: inline-flex; align-items: center; gap: 0.5rem;
-  background: rgba(233,196,106,0.15); border: 1px solid rgba(233,196,106,0.3);
-  padding: 0.5rem 1.25rem; border-radius: 50px;
-  font-size: 0.8rem; color: var(--gold); font-family: 'JetBrains Mono', monospace;
-  margin-top: 1.5rem;
-}
-.cycle-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--emerald); animation: pulse-dot 2s infinite; }
-@keyframes pulse-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.8); } }
-#heroCountdown { font-weight: 600; }
-
-/* ═══ COUNTDOWN STRIP ═══ */
-.countdown-strip {
-  background: linear-gradient(90deg, var(--forest-mid), var(--forest-light));
-  padding: 0.75rem 0;
-}
-.countdown-inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-.countdown-label { color: rgba(255,255,255,0.6); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; }
-.countdown-time { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: var(--gold); font-weight: 600; }
-.voter-stats-row { display: flex; gap: 1.5rem; }
-.voter-stat-item { text-align: center; }
-.voter-stat-num { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; color: var(--emerald); }
-.voter-stat-label { font-size: 0.65rem; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.08em; }
 
 /* ═══ FACE-OFF ═══ */
 .faceoff-section {
@@ -2007,15 +1953,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .ai-typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--mid-gray); animation: ai-bounce 1s infinite; }
 .ai-typing span:nth-child(2) { animation-delay: 0.15s; } .ai-typing span:nth-child(3) { animation-delay: 0.3s; }
 
-/* ═══ LIVE TICKER ═══ */
-.live-ticker-wrap { overflow: hidden; background: var(--forest); border-radius: var(--radius-lg); padding: 0.6rem 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; }
-.live-ticker-badge { background: var(--red-accent); color: white; font-size: 0.65rem; font-weight: 800; padding: 0.2rem 0.6rem; border-radius: 50px; white-space: nowrap; flex-shrink: 0; animation: pulse-dot 1.5s infinite; }
-.live-ticker-track { overflow: hidden; flex: 1; }
-.live-ticker-inner { display: flex; gap: 3rem; animation: ticker-scroll 30s linear infinite; white-space: nowrap; }
-.live-ticker-inner:hover { animation-play-state: paused; }
-@keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-.ticker-item { font-size: 0.78rem; color: rgba(255,255,255,0.8); }
-.ticker-item strong { color: var(--gold); }
 
 /* OTP step */
 .otp-step { display: none; }
@@ -2137,35 +2074,10 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
   </div>
 </header>
 
-<!-- HERO BAND (logged in) -->
-<div class="hero-band hidden" id="heroBand">
-  <div class="container hero-band-inner">
-    <div class="ward-chip"><span>📍</span> Kiambu County · Ngoliba Ward</div>
-    <h1 class="hero-title">Opinion Poll <span class="accent">Live</span><br>Tracking</h1>
-    <p class="hero-sub">Real-time ward polling · Every vote shapes the future</p>
-    <div class="cycle-badge">
-      <div class="dot"></div>
-      <span>Next cycle reset: </span>
-      <span id="heroCountdown">00:00</span>
-      &nbsp;<span id="periodBadge" style="color:rgba(255,255,255,0.4);font-size:0.75rem;"></span>
-    </div>
-  </div>
-</div>
 
-<!-- COUNTDOWN STRIP -->
-<div class="countdown-strip hidden" id="countdownStrip">
-  <div class="container">
-    <div class="countdown-inner">
-      <div>
-        <div class="countdown-label">⏱ Cycle Timer</div>
-        <div class="countdown-time" id="countdownDisplay">00:00:000</div>
-      </div>
-      <div class="voter-stats-row" id="voterStatsRow">
-        <!-- filled dynamically -->
-      </div>
-    </div>
-  </div>
-</div>
+<!-- COUNTDOWN STRIP removed -->
+
+
 
 <!-- APP SHELL -->
 <div class="app-shell" id="appShell">
@@ -2300,15 +2212,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
     <!-- ═══ DASHBOARD ═══ -->
     <div id="dashboardContent" class="hidden dashboard-wrap">
 
-      <!-- Live Ticker -->
-      <div class="live-ticker-wrap" id="liveTicker">
-        <div class="live-ticker-badge">&#128308; LIVE</div>
-        <div class="live-ticker-track">
-          <div class="live-ticker-inner" id="tickerInner">
-            <span class="ticker-item">Loading live updates&#8230;</span>
-          </div>
-        </div>
-      </div>
 
       <!-- Feature Navigation -->
       <div class="feature-nav" id="featureNav">
@@ -2970,11 +2873,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 </div>
 
 
-<!-- Live Pulse Indicator -->
-<div id="livePulse" style="display:none;position:fixed;top:5rem;right:1.5rem;z-index:400;background:var(--forest);border-radius:50px;padding:0.4rem 1rem;display:flex;align-items:center;gap:0.5rem;font-size:0.75rem;color:white;box-shadow:0 4px 16px rgba(0,0,0,0.25);">
-  <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse-dot 1.5s infinite;"></div>
-  <span id="liveViewers">1 viewer</span>
-</div>
+
+
 
 
 <script>
@@ -3034,7 +2934,7 @@ const CANDIDATES = [
 const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
 
 // Global state
-let currentUser = null, faceoffInterval = null, countdownInterval = null;
+let currentUser = null, faceoffInterval = null;
 let historyChart = null, analyticsChart = null;
 let mpesaPendingVote = null, mpesaActiveCheckoutId = null, mpesaCountdownTimer = null;
 let otpTimer = null, otpDataStore = {};
@@ -3309,11 +3209,10 @@ async function logout() {
     currentUser = null;
     
     document.getElementById("authContainer")?.classList.remove("hidden");
-    ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"]
+    ["headerNav","avatarWrap"]
       .forEach(id => document.getElementById(id)?.classList.add("hidden"));
     
     if(faceoffInterval) clearInterval(faceoffInterval);
-    if(countdownInterval) clearInterval(countdownInterval);
     
     location.reload();
   }
@@ -3348,24 +3247,19 @@ async function loadSession(){
 
 function enterDashboard(){
   ["authContainer"].forEach(id=>document.getElementById(id)?.classList.add("hidden"));
-  ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
+  ["headerNav","avatarWrap"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
   showPane("dashboardContent");
   renderDashboard();
   showWelcomePopup();
-  initLiveTicker();
   initPWAInstall();
   seedInitialNotifications();
   renderNotifBell();
   initAdRequestChat();
   renderNoticeboardTab(); // ✅ tabNotice is the default active tab — load on every login
   if(faceoffInterval)clearInterval(faceoffInterval);
-  faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();updateLiveTicker();},3000);
-  startCountdown();
+  faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();},3000);
   updateHeaderAvatar();  // paint avatar immediately on login
   showToast(`Welcome back, ${currentUser.firstName}! 👋`,"success");
-  // Show live viewers (simulated)
- const lp=document.getElementById("livePulse"); if(lp) lp.style.display="flex";
- setInterval(()=>{ const n=Math.floor(Math.random()*12)+3; const el=document.getElementById("liveViewers"); if(el) el.innerText=`${n} viewing live`; },8000);
 }
 
 function showPane(id){
@@ -4542,26 +4436,6 @@ function generateLocalAIResponse(query){
 }
 
 // ═══ LIVE TICKER ═══
-function initLiveTicker(){
-  updateLiveTicker();
-  setInterval(updateLiveTicker, 15000);
-}
-
-function updateLiveTicker(){
-  const agg=getCurrentPeriodAggregated();
-  const sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
-  const items=[
-    `🏆 Leading Candidate: <strong>${sorted[0]?.name||"—"}</strong> (${sorted[0]?.party||"—"}) — ${sorted[0]?.votes||0} votes`,
-    `<strong>${DB.getUsers().length}</strong> registered voters in Ngoliba Ward`,
-    `<strong>${getAllTimeTotalVotes()}</strong> total votes cast across all cycles`,
-    `Top issue: <strong>💧 Water Access</strong> — 43% of forum posts`,
-    `<strong>${sorted[1]?.name||"—"}</strong> in 2nd with ${sorted[1]?.votes||0} votes`,
-    `<strong>Kilimambogo</strong> turnout is below ward average — every vote counts!`,
-  ];
-  const doubled=[...items,...items]; // duplicate for seamless loop
-  const el=document.getElementById("tickerInner");
-  if(el) el.innerHTML=doubled.map(i=>`<span class="ticker-item">${i}</span>`).join("");
-}
 
 function getTimeToReset(){
   const diff=new Date(getNextPeriodStart())-Date.now();
@@ -4791,18 +4665,6 @@ function showWelcomePopup(){
   const popup=document.getElementById("welcomePopup");popup.classList.add("visible");setTimeout(()=>popup.classList.remove("visible"),5000);
 }
 
-// ═══ COUNTDOWN ═══
-function startCountdown(){
-  if(countdownInterval)clearInterval(countdownInterval);
-  function update(){
-    const diff=new Date(getNextPeriodStart())-Date.now();
-    if(diff<=0){document.getElementById("heroCountdown").innerText="00:00";document.getElementById("countdownDisplay").innerText="00:00:000";return;}
-    const m=Math.floor(diff/60000),s=Math.floor((diff%60000)/1000),ms=diff%1000;
-    document.getElementById("heroCountdown").innerText=`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-    document.getElementById("countdownDisplay").innerText=`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}:${String(ms).padStart(3,"0")}`;
-  }
-  update();countdownInterval=setInterval(update,50);
-}
 
 // ═══ MODALS ═══
 function openModal(id){document.getElementById(id)?.classList.add("open");}
@@ -6194,13 +6056,6 @@ window.renderFaceoff = async function(){
   }
 };
 
-window.updateLiveTicker = function(){
-  // Live ticker animation - optional
-};
-
-window.initLiveTicker = function(){
-  // Initialize ticker - optional
-};
 
 // 4. OVERRIDE PROBLEMATIC FUNCTIONS
 
@@ -6245,13 +6100,12 @@ window.enterDashboard = function(){
   }
   
   ["authContainer"].forEach(id => document.getElementById(id)?.classList.add("hidden"));
-  ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"]
+  ["headerNav","avatarWrap"]
     .forEach(id => document.getElementById(id)?.classList.remove("hidden"));
   
   if (typeof showPane === 'function') showPane("dashboardContent");
   if (typeof renderDashboard === 'function') renderDashboard();
   if (typeof showWelcomePopup === 'function') showWelcomePopup();
-  if (typeof initLiveTicker === 'function') initLiveTicker();
   if (typeof initPWAInstall === 'function') initPWAInstall();
   if (typeof seedInitialNotifications === 'function') seedInitialNotifications();
   if (typeof renderNotifBell === 'function') renderNotifBell();
@@ -6261,24 +6115,12 @@ window.enterDashboard = function(){
   if(typeof faceoffInterval !== 'undefined' && faceoffInterval) clearInterval(faceoffInterval);
   faceoffInterval = setInterval(() => {
     if (typeof updateFaceoff === 'function') updateFaceoff();
-    if (typeof updateLiveTicker === 'function') updateLiveTicker();
   }, 3000);
   
-  if (typeof startCountdown === 'function') startCountdown();
-
   // ── AVATAR: always paint from the current source of truth on every login ──
   if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
 
   if(typeof showToast === 'function') showToast(`Welcome, ${currentUser.firstName || 'User'}! 👋`, "success");
-  
-  const lp = document.getElementById("livePulse");
-  if(lp) lp.style.display = "flex";
-  
-  setInterval(() => {
-    const n = Math.floor(Math.random() * 12) + 3;
-    const el = document.getElementById("liveViewers");
-    if(el) el.innerText = `${n} viewing live`;
-  }, 8000);
 };
 
 console.log('✅ DB references patched! Dashboard should work now.');
