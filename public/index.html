@@ -3328,16 +3328,18 @@ async function renderDashboard(){
     const periodRes = await fetch('/api/polling-results');
     const periodData = await periodRes.json();
     
-    // ━━━ STORE PERIOD ID FOR VOTING ━━━
-    window.currentPeriodId = periodData.periodId;
-    
+    // ━━━ STORE PERIOD ID + END TIME FOR VOTING + TIMER ━━━
+    window.currentPeriodId  = periodData.periodId;
+    window.currentPeriodEnd = periodData.periodEnd;  // ← timer source of truth
+
     // ━━━ 2. FETCH VOTING HISTORY ━━━
     const historyRes = await fetch('/api/history?limit=10');
     const historyData = await historyRes.json();
     
     // ━━━ 3. CHECK IF USER VOTED IN CURRENT PERIOD ━━━
     const hasVoted = periodData.hasVoted ?? false;
-    
+    window.userHasVoted = hasVoted;  // ← vote-eligibility source of truth
+
     // ━━━ 4. RENDER WITH SERVER DATA ━━━
     updateFaceoff(periodData);
     renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
@@ -3563,6 +3565,13 @@ function animatePinDots(count){document.querySelectorAll(".mpesa-pin-dot").forEa
 function showVoteConfirm(cid,btn){ openMpesaModal(cid,btn); }
 
 function openMpesaModal(cid,btn){
+  // ── CYCLE GUARD: block payment if user already voted this cycle ──
+  if(window.userHasVoted){
+    showToast("✋ You have already voted in this cycle. Please wait for the next voting period.","warning");
+    const banner=document.getElementById("alreadyVotedMsg");
+    if(banner) banner.classList.remove("hidden");
+    return;
+  }
   const numericCid = typeof cid === 'string' ? parseInt(cid, 10) : cid;
   const cand=CANDIDATES.find(c=>c.id===numericCid); if(!cand) return;
   mpesaPendingVote={candidateId:numericCid,button:btn};
@@ -3618,6 +3627,7 @@ async function simulateMpesaSuccess(){
       }).then(r=>r.json()).catch(()=>({success:false}));
       const ok=voteRes.success!==false;
       if(ok){
+        window.userHasVoted = true;  // ← lock out further votes for this cycle
         if(mpesaPendingVote.button){mpesaPendingVote.button.innerHTML='<i class="fas fa-check-circle"></i> Voted!';mpesaPendingVote.button.disabled=true;}
         renderDashboard();
         const cn=CANDIDATES.find(c=>c.id===mpesaPendingVote.candidateId);
@@ -4476,7 +4486,8 @@ function generateLocalAIResponse(query){
 }
 
 function getTimeToReset(){
-  const diff=new Date(getNextPeriodStart())-Date.now();
+  if(!window.currentPeriodEnd) return "soon";
+  const diff=new Date(window.currentPeriodEnd)-Date.now();
   if(diff<=0) return "now";
   const m=Math.floor(diff/60000), s=Math.floor((diff%60000)/1000);
   return `${m}m ${s}s`;
@@ -4704,16 +4715,44 @@ function showWelcomePopup(){
 }
 
 // ═══ COUNTDOWN ═══
+// Driven exclusively by window.currentPeriodEnd (set from server on every renderDashboard call).
+// When the timer reaches zero it re-fetches the period from the server, resets vote eligibility,
+// and restarts itself — timer and backend cycle always stay in sync.
 function startCountdown(){
   if(countdownInterval)clearInterval(countdownInterval);
+  let cycleEndHandled = false;
+
   function update(){
-    const diff=new Date(getNextPeriodStart())-Date.now();
-    if(diff<=0){document.getElementById("heroCountdown").innerText="00:00";document.getElementById("countdownDisplay").innerText="00:00:000";return;}
+    const endTime = window.currentPeriodEnd ? new Date(window.currentPeriodEnd) : null;
+    if(!endTime){
+      document.getElementById("heroCountdown").innerText="--:--";
+      document.getElementById("countdownDisplay").innerText="--:--:---";
+      return;
+    }
+    const diff = endTime - Date.now();
+    if(diff <= 0){
+      document.getElementById("heroCountdown").innerText="00:00";
+      document.getElementById("countdownDisplay").innerText="00:00:000";
+      if(!cycleEndHandled){
+        cycleEndHandled = true;
+        clearInterval(countdownInterval);
+        // Cycle ended — fetch new period, reset eligibility, restart timer
+        setTimeout(async()=>{
+          try{
+            await renderDashboard(); // updates window.currentPeriodEnd + window.userHasVoted
+            startCountdown();        // restart with fresh server period
+            showToast("🔄 New voting cycle started! You can vote again.","success");
+          }catch(e){ console.error("Cycle refresh error:",e); }
+        }, 1500);
+      }
+      return;
+    }
+    cycleEndHandled = false;
     const m=Math.floor(diff/60000),s=Math.floor((diff%60000)/1000),ms=diff%1000;
     document.getElementById("heroCountdown").innerText=`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
     document.getElementById("countdownDisplay").innerText=`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}:${String(ms).padStart(3,"0")}`;
   }
-  update();countdownInterval=setInterval(update,50);
+  update(); countdownInterval=setInterval(update,50);
 }
 
 // ═══ MODALS ═══
@@ -6115,12 +6154,14 @@ window.renderDashboard = async function(){
     // Fetch live data from server
     const periodRes = await fetch('/api/polling-results');
     const periodData = await periodRes.json();
-    window.currentPeriodId = periodData.periodId;
+    window.currentPeriodId  = periodData.periodId;
+    window.currentPeriodEnd = periodData.periodEnd;  // ← timer source of truth
 
     const historyRes = await fetch('/api/history?limit=10');
     const historyData = await historyRes.json();
 
     const hasVoted = periodData.hasVoted ?? false;
+    window.userHasVoted = hasVoted;  // ← vote-eligibility source of truth
 
     // Render candidates grid — THIS is what was missing
     if(typeof renderCandidatesGrid === 'function') renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
@@ -6588,6 +6629,9 @@ window.renderFaceoff = window.updateFaceoff;
       sseSource.addEventListener('new-period', async () => {
         console.log('[SSE] new-period — refreshing dashboard');
         if (typeof window.renderDashboard === 'function') await window.renderDashboard();
+        // Restart countdown with fresh periodEnd from server (set by renderDashboard above)
+        if (typeof startCountdown === 'function') startCountdown();
+        showToast("🔄 New voting cycle started! You can vote again.", "success");
       });
 
       sseSource.onerror = () => {
