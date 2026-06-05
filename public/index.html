@@ -1972,6 +1972,26 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .vh-empty{text-align:center;padding:1.5rem 0;color:var(--mid-gray,#64748b);font-size:.88rem;}
 .vh-loading{text-align:center;padding:1rem 0;color:var(--mid-gray,#64748b);font-size:.82rem;}
 
+/* ═══ CYCLE TIMER STRIP ═══ */
+.countdown-strip {
+  background: linear-gradient(90deg, var(--forest-mid), var(--forest-light));
+  padding: 0.65rem 0;
+}
+.countdown-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.countdown-label {
+  color: rgba(255,255,255,0.6); font-size: 0.7rem;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  display: flex; align-items: center; gap: 0.35rem;
+}
+.countdown-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.05rem; color: var(--gold); font-weight: 600;
+  letter-spacing: 0.04em;
+}
+@media (max-width: 480px) {
+  .countdown-time { font-size: 0.9rem; }
+}
+
 
 </style>
 </head>
@@ -2178,6 +2198,16 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
       </div><!-- end auth-card -->
     </div><!-- end authContainer -->
+
+<!-- CYCLE TIMER STRIP (visible when logged in) -->
+<div class="countdown-strip hidden" id="countdownStrip">
+  <div class="container">
+    <div class="countdown-inner">
+      <div class="countdown-label">&#9201; Cycle Timer</div>
+      <div class="countdown-time" id="countdownDisplay">--:--</div>
+    </div>
+  </div>
+</div>
 
     <!-- ═══ DASHBOARD ═══ -->
     <div id="dashboardContent" class="hidden dashboard-wrap">
@@ -3164,7 +3194,7 @@ async function logout() {
     currentUser = null;
     
     document.getElementById("authContainer")?.classList.remove("hidden");
-    ["headerNav","avatarWrap"]
+    ["headerNav","avatarWrap","countdownStrip"]
       .forEach(id => document.getElementById(id)?.classList.add("hidden"));
     
     if(faceoffInterval) clearInterval(faceoffInterval);
@@ -6068,6 +6098,11 @@ window.renderDashboard = async function(){
     const el = document.getElementById("currentPeriodEnd");
     if(el && periodData.periodEnd) el.innerText = new Date(periodData.periodEnd).toLocaleTimeString();
 
+    // Keep the Cycle Timer in sync with the authoritative server periodEnd
+    if (periodData.periodEnd && typeof window.setCycleTimerEnd === 'function') {
+      window.setCycleTimerEnd(periodData.periodEnd);
+    }
+
   } catch (error) {
     console.error('Dashboard render error:', error);
   }
@@ -6078,7 +6113,7 @@ window.enterDashboard = function(){
   if (!currentUser) { console.error('No user logged in'); return; }
 
   ["authContainer"].forEach(id => document.getElementById(id)?.classList.add("hidden"));
-  ["headerNav","avatarWrap"].forEach(id => document.getElementById(id)?.classList.remove("hidden"));
+  ["headerNav","avatarWrap","countdownStrip"].forEach(id => document.getElementById(id)?.classList.remove("hidden"));
 
   if (typeof showPane === 'function') showPane("dashboardContent");
   if (typeof renderDashboard === 'function') renderDashboard();
@@ -6099,6 +6134,134 @@ window.enterDashboard = function(){
 };
 
 console.log('✅ DB references patched! Dashboard should work now.');
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// CYCLE TIMER — server-authoritative real-time countdown
+// Sources periodEnd from /api/polling-results (same call as renderDashboard).
+// Updates every second. Auto-refreshes when a new period starts.
+// ════════════════════════════════════════════════════════════════════════════
+(function initCycleTimer() {
+  let cycleEndTs     = null;   // ms timestamp from server
+  let timerInterval  = null;
+  let refreshTimeout = null;
+
+  // Fetch the active period end time from the server
+  async function fetchPeriodEnd() {
+    try {
+      const res  = await fetch('/api/polling-results', { credentials: 'include' });
+      const data = await res.json();
+      const raw  = data.periodEnd || data.period_end || null;
+      if (raw) {
+        const ts = typeof raw === 'number' ? raw : Date.parse(raw);
+        if (!isNaN(ts)) cycleEndTs = ts;
+      }
+    } catch (e) {
+      console.warn('[CycleTimer] Could not fetch period end:', e);
+    }
+  }
+
+  // Format ms remaining as  MM:SS
+  function formatTime(ms) {
+    if (ms <= 0) return '00:00';
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  }
+
+  // Tick — called every second
+  function tick() {
+    const el = document.getElementById('countdownDisplay');
+    if (!el) return;
+
+    if (cycleEndTs === null) {
+      el.textContent = '--:--';
+      return;
+    }
+
+    const diff = cycleEndTs - Date.now();
+    el.textContent = formatTime(diff);
+
+    if (diff <= 0) {
+      // Cycle ended — fetch new period in 1.5 s then restart
+      el.textContent = '00:00';
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      refreshTimeout = setTimeout(async () => {
+        await fetchPeriodEnd();
+        // Also trigger a faceoff/candidates refresh so data stays in sync
+        if (typeof window.updateFaceoff === 'function') window.updateFaceoff();
+      }, 1500);
+    }
+  }
+
+  // Start/restart the timer
+  function start() {
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(tick, 1000);
+    tick(); // immediate first paint
+  }
+
+  // Public: called by renderDashboard when it already has periodEnd in hand
+  window.setCycleTimerEnd = function(periodEndValue) {
+    if (!periodEndValue) return;
+    const ts = typeof periodEndValue === 'number'
+      ? periodEndValue
+      : Date.parse(periodEndValue);
+    if (!isNaN(ts)) cycleEndTs = ts;
+  };
+
+  // Boot: fetch once, then start ticking
+  async function boot() {
+    // Only run when a user is logged in
+    if (!window.currentUser) return;
+    await fetchPeriodEnd();
+    start();
+  }
+
+  // Patch enterDashboard to boot the timer on login
+  const _prevEnter = window.enterDashboard;
+  window.enterDashboard = function () {
+    if (typeof _prevEnter === 'function') _prevEnter.apply(this, arguments);
+    boot();
+  };
+
+  // Also patch renderDashboard to keep timer in sync whenever data refreshes
+  const _prevRender = window.renderDashboard;
+  window.renderDashboard = async function () {
+    if (typeof _prevRender === 'function') await _prevRender.apply(this, arguments);
+    // setCycleTimerEnd is called from within the renderDashboard override above
+    // via the periodData.periodEnd wire — nothing extra needed here
+  };
+
+  // SSE: when a new period starts, re-fetch end time
+  const _origConnect = window._connectVoteStream;
+  // Patch after SSE module initialises (it uses its own closure)
+  // We listen on 'new-period' events from the existing EventSource
+  document.addEventListener('sseNewPeriod', async () => {
+    await fetchPeriodEnd();
+  });
+
+  // Also refresh period end whenever SSE fires a new-period via the
+  // patchEnterDashboardForSSE wrapper (see bottom of file — it calls updateFaceoff)
+  const _prevUpdateFaceoff = window.updateFaceoff;
+  window.updateFaceoff = async function () {
+    if (typeof _prevUpdateFaceoff === 'function') await _prevUpdateFaceoff.apply(this, arguments);
+    // After each faceoff update, keep timer in sync if period just rolled
+    if (cycleEndTs !== null && (cycleEndTs - Date.now()) < 2000) {
+      await fetchPeriodEnd();
+    }
+  };
+
+  // If the user is already logged in on page load (session restored)
+  document.addEventListener('DOMContentLoaded', () => {
+    // Give loadSession a moment to resolve then boot if logged in
+    setTimeout(() => {
+      if (window.currentUser) boot();
+    }, 1200);
+  });
+
+})(); // end initCycleTimer
 
 
 // ════════════════════════════════════════════════════════════════════════════
