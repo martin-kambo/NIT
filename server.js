@@ -2010,6 +2010,41 @@ app.post('/api/ad-requests/:id/pay', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════
+// ROUTE: /api/period/next  — start a new voting cycle (admin only)
+// ════════════════════════════════════════════════
+app.post('/api/period/next', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+
+  const { durationMinutes } = req.body;
+  const mins = parseInt(durationMinutes) || 5;
+
+  try {
+    // Deactivate all currently active periods
+    await pool.query('UPDATE voting_periods SET is_active = false WHERE is_active = true');
+
+    // Create the new period
+    const result = await pool.query(
+      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+       VALUES (
+         COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
+         NOW(),
+         NOW() + ($1 || ' minutes')::INTERVAL,
+         true,
+         0
+       )
+       RETURNING id, period_start, period_end`,
+      [String(mins)]
+    );
+
+    const newPeriod = result.rows[0];
+    return res.json({ success: true, data: { newPeriod: newPeriod.id, endsAt: newPeriod.period_end } });
+  } catch (e) {
+    console.error('[/api/period/next] ERROR:', e.message);
+    return res.status(500).json({ success: false, error: 'Failed to start new period' });
+  }
+});
+
+// ════════════════════════════════════════════════
 // ROUTE: /api/voting-period  ← defined in server.js (authoritative)
 // Supersedes any version in routes/voting.js to guarantee req.pool
 // is always the live pool instance and errors are fully logged.
