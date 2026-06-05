@@ -3324,23 +3324,26 @@ async function renderDashboard(){
  if(!currentUser) { document.getElementById("authContainer")?.classList.remove("hidden"); return; }
   
   try {
-    // ━━━ 1. FETCH ACTIVE PERIOD ━━━
-    const periodRes = await fetch('/api/polling-results');
-    const periodData = await periodRes.json();
+    // ━━━ 1. FETCH RESULTS + VOTING PERIOD IN PARALLEL ━━━
+    const [periodRes, votingPeriodRes, historyRes] = await Promise.all([
+      fetch('/api/polling-results'),
+      fetch('/api/voting-period'),
+      fetch('/api/history?limit=10')
+    ]);
+    const periodData      = await periodRes.json();
+    const votingPeriodData = await votingPeriodRes.json();
+    const historyData     = await historyRes.json();
     
     // ━━━ STORE PERIOD ID + END TIME FOR VOTING + TIMER ━━━
+    // Use periodId from polling-results; use periodEnd/hasVoted from voting-period (authoritative)
     window.currentPeriodId  = periodData.periodId;
-    window.currentPeriodEnd = periodData.periodEnd;  // ← timer source of truth
+    window.currentPeriodEnd = votingPeriodData?.data?.endsAt ?? periodData.periodEnd;
 
-    // ━━━ 2. FETCH VOTING HISTORY ━━━
-    const historyRes = await fetch('/api/history?limit=10');
-    const historyData = await historyRes.json();
-    
-    // ━━━ 3. CHECK IF USER VOTED IN CURRENT PERIOD ━━━
-    const hasVoted = periodData.hasVoted ?? false;
+    // ━━━ 2. CHECK IF USER VOTED — from /api/voting-period (the only endpoint that checks it) ━━━
+    const hasVoted = votingPeriodData?.data?.userHasVoted ?? periodData.hasVoted ?? false;
     window.userHasVoted = hasVoted;  // ← vote-eligibility source of truth
 
-    // ━━━ 4. RENDER WITH SERVER DATA ━━━
+    // ━━━ 3. RENDER WITH SERVER DATA ━━━
     updateFaceoff(periodData);
     renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
     const votedBanner = document.getElementById('alreadyVotedMsg');
@@ -3350,8 +3353,9 @@ async function renderDashboard(){
     renderPeriodSummary(periodData);
     renderHistoricalChart(historyData.periods);
     
-    document.getElementById("currentPeriodEnd").innerText = 
-      new Date(periodData.periodEnd).toLocaleTimeString();
+    const periodEndEl = document.getElementById("currentPeriodEnd");
+    if (periodEndEl && window.currentPeriodEnd)
+      periodEndEl.innerText = new Date(window.currentPeriodEnd).toLocaleTimeString();
     
   } catch(error) {
     console.error('Dashboard render error:', error);
@@ -6151,16 +6155,21 @@ const origRenderDashboard = window.renderDashboard;
 window.renderDashboard = async function(){
   if(!currentUser) { document.getElementById("authContainer")?.classList.remove("hidden"); return; }
   try {
-    // Fetch live data from server
-    const periodRes = await fetch('/api/polling-results');
-    const periodData = await periodRes.json();
+    // Fetch live data from server — results + voting-period in parallel
+    const [periodRes, votingPeriodRes, historyRes] = await Promise.all([
+      fetch('/api/polling-results'),
+      fetch('/api/voting-period'),
+      fetch('/api/history?limit=10')
+    ]);
+    const periodData       = await periodRes.json();
+    const votingPeriodData = await votingPeriodRes.json();
+    const historyData      = await historyRes.json();
+
     window.currentPeriodId  = periodData.periodId;
-    window.currentPeriodEnd = periodData.periodEnd;  // ← timer source of truth
+    // /api/voting-period is authoritative for endsAt and userHasVoted
+    window.currentPeriodEnd = votingPeriodData?.data?.endsAt ?? periodData.periodEnd;
 
-    const historyRes = await fetch('/api/history?limit=10');
-    const historyData = await historyRes.json();
-
-    const hasVoted = periodData.hasVoted ?? false;
+    const hasVoted = votingPeriodData?.data?.userHasVoted ?? periodData.hasVoted ?? false;
     window.userHasVoted = hasVoted;  // ← vote-eligibility source of truth
 
     // Render candidates grid — THIS is what was missing
@@ -6177,7 +6186,7 @@ window.renderDashboard = async function(){
     if(typeof renderHistoricalChart === 'function') renderHistoricalChart(historyData.periods);
 
     const el = document.getElementById("currentPeriodEnd");
-    if(el && periodData.periodEnd) el.innerText = new Date(periodData.periodEnd).toLocaleTimeString();
+    if(el && window.currentPeriodEnd) el.innerText = new Date(window.currentPeriodEnd).toLocaleTimeString();
 
   } catch (error) {
     console.error('Dashboard render error:', error);

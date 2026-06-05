@@ -104,7 +104,8 @@ async function initDB() {
         period_id INT,
         sublocation VARCHAR(100),
         ip_hash VARCHAR(16),
-        timestamp BIGINT
+        timestamp BIGINT,
+        UNIQUE (user_id, period_id)
       );
 
       CREATE TABLE IF NOT EXISTS period_archives (
@@ -477,6 +478,8 @@ async function ensureVotingPeriodsTable() {
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_candidate ON votes (candidate_id)`); } catch(_){}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_user_period ON votes (user_id, period_id)`); } catch(_){}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_period ON votes (period_id)`); } catch(_){}
+    // Enforce one-vote-per-user-per-period at the DB level (safety net against races)
+    try { await pool.query(`ALTER TABLE votes ADD CONSTRAINT votes_user_period_unique UNIQUE (user_id, period_id)`); } catch(_){}
 
     // 4. Also ensure period_archives table exists
     await pool.query(`
@@ -506,7 +509,7 @@ async function ensureVotingPeriodsTable() {
     if (existing.rows.length === 0) {
       console.log('\ud83d\udcdd No active voting period — creating one...');
       const now     = new Date();
-      const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
+      const endTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
 
       const maxIdRes = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
       const nextId   = parseInt(maxIdRes.rows[0].maxid) + 1;
@@ -526,7 +529,7 @@ async function ensureVotingPeriodsTable() {
         await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
 
         const now     = new Date();
-        const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        const endTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
         const maxIdRes = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
         const nextId   = parseInt(maxIdRes.rows[0].maxid) + 1;
 
@@ -969,7 +972,7 @@ app.post('/api/vote', async (req, res) => {
       [session.userId, periodId]
     );
     if (voteCheck.rows.length > 0)
-      return res.status(400).json({ error: 'Already voted this period' });
+      return res.status(409).json({ error: 'Already voted this period', alreadyVoted: true });
 
     const userResult = await pool.query(
       'SELECT sublocation FROM users WHERE id = $1',
@@ -980,11 +983,18 @@ app.post('/api/vote', async (req, res) => {
     const rawIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     const ipHash = crypto.createHash('sha256').update(rawIp).digest('hex').slice(0, 16);
 
-    await pool.query(
+    const insertResult = await pool.query(
       `INSERT INTO votes (user_id, candidate_id, period_id, sublocation, ip_hash, timestamp)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (user_id, period_id) DO NOTHING
+       RETURNING id`,
       [session.userId, candidateId, periodId, user?.sublocation || null, ipHash, Date.now()]
     );
+
+    // If no row was inserted, a concurrent request already recorded a vote (race condition)
+    if (insertResult.rowCount === 0) {
+      return res.status(409).json({ error: 'Already voted this period', alreadyVoted: true });
+    }
 
     await pool.query(
       `UPDATE voting_periods SET total_votes = total_votes + 1 WHERE id = $1`,
@@ -1062,6 +1072,17 @@ app.get('/api/polling-results', async (req, res) => {
       [period.id]
     );
 
+    // Check if the authenticated user has voted this period
+    let hasVoted = false;
+    const session = verifySession(req.headers.cookie || '');
+    if (session && session.userId) {
+      const voteCheck = await pool.query(
+        'SELECT 1 FROM votes WHERE user_id = $1 AND period_id = $2 LIMIT 1',
+        [session.userId, period.id]
+      );
+      hasVoted = voteCheck.rows.length > 0;
+    }
+
     // Build structure with sublocations and total
     const votesByCandidate = {};
     votesResult.rows.forEach(row => {
@@ -1078,13 +1099,14 @@ app.get('/api/polling-results', async (req, res) => {
     });
 
     return res
-      .set('Cache-Control', 'public, max-age=5')
+      .set('Cache-Control', 'private, no-cache')
       .json({
         periodId: period.id,
         periodStart: period.period_start,
         periodEnd: period.period_end,
         isActive: period.is_active,
         totalVotes: parseInt(period.total_votes),
+        hasVoted,
         votesByCandidate: votesByCandidate,
         votesByUser: []
       });
@@ -2064,7 +2086,7 @@ app.get('/api/voting-period', async (req, res) => {
     if (periodRes.rows.length === 0) {
       console.warn('[voting-period] No active period found — creating one');
       const now     = new Date();
-      const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const endTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
       const maxRes  = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
       const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
       await pool.query(
@@ -2148,6 +2170,36 @@ const server = app.listen(PORT, () => {
   console.log(`📱 M-Pesa: ${process.env.MPESA_CONSUMER_KEY ? '✓ Configured' : '✗ Not configured'}`);
   console.log(`\n🌐 Access the app at: http://localhost:${PORT}`);
 });
+
+// ── Auto-rollover: check every 30s for expired periods and start a fresh 5-min cycle ──
+const PERIOD_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+setInterval(async () => {
+  try {
+    const res = await pool.query(
+      `SELECT id, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
+    );
+    if (res.rows.length === 0) return; // no active period; startup init will handle it
+    const period = res.rows[0];
+    if (new Date(period.period_end) > new Date()) return; // still running
+
+    // Period has expired — close it and start a fresh one
+    console.log(`[auto-rollover] Period ${period.id} expired — rolling over`);
+    await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
+    const now     = new Date();
+    const endTime = new Date(now.getTime() + PERIOD_DURATION_MS);
+    const maxRes  = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
+    const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
+    await pool.query(
+      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+         VALUES ($1, $2, $3, true, 0)`,
+      [nextId, now, endTime]
+    );
+    console.log(`[auto-rollover] New period ${nextId} started, ends ${endTime.toISOString()}`);
+    broadcastVoteUpdate('period-rollover', { newPeriodId: nextId, endsAt: endTime });
+  } catch (e) {
+    console.error('[auto-rollover] ERROR:', e.message);
+  }
+}, 30_000);
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
