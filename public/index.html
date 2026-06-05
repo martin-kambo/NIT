@@ -233,7 +233,61 @@ body::before {
 
 
 
+/* ═══ HERO BAND ═══ */
+.hero-band {
+  background: var(--forest);
+  padding: 3rem 0 2rem;
+  position: relative; overflow: hidden;
+}
+.hero-band::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 80% 60% at 60% 50%, rgba(64,194,122,0.08) 0%, transparent 70%);
+}
+.hero-band-inner { position: relative; z-index: 1; }
+.ward-chip {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+  padding: 0.35rem 1rem; border-radius: 50px;
+  font-size: 0.75rem; font-weight: 600; color: var(--emerald);
+  letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 1rem;
+}
+.hero-title {
+  font-family: 'Syne', sans-serif; font-weight: 800;
+  font-size: clamp(2.5rem, 6vw, 4.5rem); color: white; line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.hero-title .accent { color: var(--gold); position: relative; display: inline-block; }
+.hero-title .accent::after {
+  content: '';
+  position: absolute; bottom: -4px; left: 0; width: 100%; height: 3px;
+  background: linear-gradient(90deg, var(--gold), transparent);
+  border-radius: 2px;
+}
+.hero-sub { color: rgba(255,255,255,0.55); font-size: 1rem; margin-top: 0.75rem; font-weight: 400; }
+.cycle-badge {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: rgba(233,196,106,0.15); border: 1px solid rgba(233,196,106,0.3);
+  padding: 0.5rem 1.25rem; border-radius: 50px;
+  font-size: 0.8rem; color: var(--gold); font-family: 'JetBrains Mono', monospace;
+  margin-top: 1.5rem;
+}
+.cycle-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--emerald); animation: pulse-dot 2s infinite; }
 @keyframes pulse-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.8); } }
+#heroCountdown { font-weight: 600; }
+
+/* ═══ COUNTDOWN STRIP ═══ */
+.countdown-strip {
+  background: linear-gradient(90deg, var(--forest-mid), var(--forest-light));
+  padding: 0.75rem 0;
+}
+.countdown-inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.countdown-label { color: rgba(255,255,255,0.6); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; }
+.countdown-time { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: var(--gold); font-weight: 600; }
+.voter-stats-row { display: flex; gap: 1.5rem; }
+.voter-stat-item { text-align: center; }
+.voter-stat-num { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; color: var(--emerald); }
+.voter-stat-label { font-size: 0.65rem; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.08em; }
 
 /* ═══ FACE-OFF ═══ */
 .faceoff-section {
@@ -1953,6 +2007,15 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .ai-typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--mid-gray); animation: ai-bounce 1s infinite; }
 .ai-typing span:nth-child(2) { animation-delay: 0.15s; } .ai-typing span:nth-child(3) { animation-delay: 0.3s; }
 
+/* ═══ LIVE TICKER ═══ */
+.live-ticker-wrap { overflow: hidden; background: var(--forest); border-radius: var(--radius-lg); padding: 0.6rem 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; }
+.live-ticker-badge { background: var(--red-accent); color: white; font-size: 0.65rem; font-weight: 800; padding: 0.2rem 0.6rem; border-radius: 50px; white-space: nowrap; flex-shrink: 0; animation: pulse-dot 1.5s infinite; }
+.live-ticker-track { overflow: hidden; flex: 1; }
+.live-ticker-inner { display: flex; gap: 3rem; animation: ticker-scroll 30s linear infinite; white-space: nowrap; }
+.live-ticker-inner:hover { animation-play-state: paused; }
+@keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.ticker-item { font-size: 0.78rem; color: rgba(255,255,255,0.8); }
+.ticker-item strong { color: var(--gold); }
 
 /* OTP step */
 .otp-step { display: none; }
@@ -1972,26 +2035,32 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .vh-empty{text-align:center;padding:1.5rem 0;color:var(--mid-gray,#64748b);font-size:.88rem;}
 .vh-loading{text-align:center;padding:1rem 0;color:var(--mid-gray,#64748b);font-size:.82rem;}
 
-/* ═══ CYCLE TIMER STRIP ═══ */
-.countdown-strip {
-  background: linear-gradient(90deg, var(--forest-mid), var(--forest-light));
-  padding: 0.65rem 0;
-}
-.countdown-inner { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.countdown-label {
-  color: rgba(255,255,255,0.6); font-size: 0.7rem;
-  text-transform: uppercase; letter-spacing: 0.1em;
-  display: flex; align-items: center; gap: 0.35rem;
-}
-.countdown-time {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 1.05rem; color: var(--gold); font-weight: 600;
-  letter-spacing: 0.04em;
-}
-@media (max-width: 480px) {
-  .countdown-time { font-size: 0.9rem; }
-}
-
+/* ── Live Standings (below face-off) ── */
+.live-standings-panel{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:var(--radius-lg,1rem);padding:1.25rem;margin-bottom:1.5rem;}
+.ls-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem;}
+.ls-title{display:flex;align-items:center;gap:.45rem;font-family:'Syne',sans-serif;font-weight:700;font-size:.92rem;color:#fff;}
+.ls-live-dot{width:8px;height:8px;border-radius:50%;background:#40c27a;box-shadow:0 0 6px #40c27a;flex-shrink:0;animation:lsDotPulse 1.6s ease-in-out infinite;}
+@keyframes lsDotPulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.45;transform:scale(.75);}}
+.ls-leader-chip{display:inline-flex;align-items:center;gap:.3rem;background:rgba(233,196,106,.15);border:1px solid rgba(233,196,106,.35);color:#e9c46a;font-size:.68rem;font-weight:700;padding:.12rem .45rem;border-radius:50px;margin-left:.3rem;}
+.ls-updated{font-size:.68rem;color:rgba(255,255,255,.38);}
+.ls-row{display:flex;align-items:center;gap:.7rem;padding:.45rem 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.ls-row:last-child{border-bottom:none;}
+.ls-rank{width:1.35rem;text-align:center;font-family:'JetBrains Mono',monospace;font-weight:800;font-size:.82rem;color:rgba(255,255,255,.4);flex-shrink:0;}
+.ls-rank.ls-gold{color:#e9c46a;}
+.ls-rank.ls-silver{color:#9ca3af;}
+.ls-rank.ls-bronze{color:#cd7f32;}
+.ls-img{width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid rgba(255,255,255,.12);}
+.ls-info{flex:1;min-width:0;}
+.ls-name{font-size:.8rem;font-weight:600;color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ls-party{font-size:.66rem;color:rgba(255,255,255,.4);}
+.ls-bar-wrap{width:80px;flex-shrink:0;}
+.ls-bar{height:5px;background:rgba(255,255,255,.1);border-radius:3px;overflow:hidden;}
+.ls-bar-fill{height:100%;background:linear-gradient(90deg,#40c27a,#5ddb96);border-radius:3px;transition:width .7s ease;}
+.ls-bar-fill.ls-leader-bar{background:linear-gradient(90deg,#e9c46a,#f4d35e);}
+.ls-votes-col{text-align:right;flex-shrink:0;min-width:52px;}
+.ls-votes-num{font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:700;color:rgba(255,255,255,.82);}
+.ls-pct{font-size:.64rem;color:rgba(255,255,255,.38);}
+.ls-empty{text-align:center;padding:1rem;color:rgba(255,255,255,.38);font-size:.82rem;}
 
 </style>
 </head>
@@ -2068,6 +2137,35 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
   </div>
 </header>
 
+<!-- HERO BAND (logged in) -->
+<div class="hero-band hidden" id="heroBand">
+  <div class="container hero-band-inner">
+    <div class="ward-chip"><span>📍</span> Kiambu County · Ngoliba Ward</div>
+    <h1 class="hero-title">Opinion Poll <span class="accent">Live</span><br>Tracking</h1>
+    <p class="hero-sub">Real-time ward polling · Every vote shapes the future</p>
+    <div class="cycle-badge">
+      <div class="dot"></div>
+      <span>Next cycle reset: </span>
+      <span id="heroCountdown">00:00</span>
+      &nbsp;<span id="periodBadge" style="color:rgba(255,255,255,0.4);font-size:0.75rem;"></span>
+    </div>
+  </div>
+</div>
+
+<!-- COUNTDOWN STRIP -->
+<div class="countdown-strip hidden" id="countdownStrip">
+  <div class="container">
+    <div class="countdown-inner">
+      <div>
+        <div class="countdown-label">⏱ Cycle Timer</div>
+        <div class="countdown-time" id="countdownDisplay">00:00:000</div>
+      </div>
+      <div class="voter-stats-row" id="voterStatsRow">
+        <!-- filled dynamically -->
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- APP SHELL -->
 <div class="app-shell" id="appShell">
@@ -2199,19 +2297,18 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       </div><!-- end auth-card -->
     </div><!-- end authContainer -->
 
-<!-- CYCLE TIMER STRIP (visible when logged in) -->
-<div class="countdown-strip hidden" id="countdownStrip">
-  <div class="container">
-    <div class="countdown-inner">
-      <div class="countdown-label">&#9201; Cycle Timer</div>
-      <div class="countdown-time" id="countdownDisplay">--:--</div>
-    </div>
-  </div>
-</div>
-
     <!-- ═══ DASHBOARD ═══ -->
     <div id="dashboardContent" class="hidden dashboard-wrap">
 
+      <!-- Live Ticker -->
+      <div class="live-ticker-wrap" id="liveTicker">
+        <div class="live-ticker-badge">&#128308; LIVE</div>
+        <div class="live-ticker-track">
+          <div class="live-ticker-inner" id="tickerInner">
+            <span class="ticker-item">Loading live updates&#8230;</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Feature Navigation -->
       <div class="feature-nav" id="featureNav">
@@ -2265,6 +2362,18 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         </div>
       </div>
 
+      <!-- Live Candidate Performance -->
+      <div class="live-standings-panel scroll-reveal" id="liveStandingsPanel">
+        <div class="ls-header">
+          <div class="ls-title">
+            <span class="ls-live-dot"></span>
+            Live Candidate Performance
+            <span class="ls-leader-chip" id="lsLeaderChip" style="display:none;">🏆 —</span>
+          </div>
+          <div class="ls-updated" id="lsUpdated">—</div>
+        </div>
+        <div id="liveStandingsList"><div class="ls-empty">Waiting for votes…</div></div>
+      </div>
 
       <!-- Voter Registry -->
       <div class="voter-registry-panel scroll-reveal">
@@ -2861,6 +2970,12 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 </div>
 
 
+<!-- Live Pulse Indicator -->
+<div id="livePulse" style="display:none;position:fixed;top:5rem;right:1.5rem;z-index:400;background:var(--forest);border-radius:50px;padding:0.4rem 1rem;display:flex;align-items:center;gap:0.5rem;font-size:0.75rem;color:white;box-shadow:0 4px 16px rgba(0,0,0,0.25);">
+  <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse-dot 1.5s infinite;"></div>
+  <span id="liveViewers">1 viewer</span>
+</div>
+
 
 <script>
 // ═══════════════════════════════════════════════════════════════
@@ -2919,7 +3034,7 @@ const CANDIDATES = [
 const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
 
 // Global state
-let currentUser = null, faceoffInterval = null;
+let currentUser = null, faceoffInterval = null, countdownInterval = null;
 let historyChart = null, analyticsChart = null;
 let mpesaPendingVote = null, mpesaActiveCheckoutId = null, mpesaCountdownTimer = null;
 let otpTimer = null, otpDataStore = {};
@@ -3194,10 +3309,11 @@ async function logout() {
     currentUser = null;
     
     document.getElementById("authContainer")?.classList.remove("hidden");
-    ["headerNav","avatarWrap","countdownStrip"]
+    ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"]
       .forEach(id => document.getElementById(id)?.classList.add("hidden"));
     
     if(faceoffInterval) clearInterval(faceoffInterval);
+    if(countdownInterval) clearInterval(countdownInterval);
     
     location.reload();
   }
@@ -3232,19 +3348,24 @@ async function loadSession(){
 
 function enterDashboard(){
   ["authContainer"].forEach(id=>document.getElementById(id)?.classList.add("hidden"));
-  ["headerNav","avatarWrap"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
+  ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
   showPane("dashboardContent");
   renderDashboard();
   showWelcomePopup();
+  initLiveTicker();
   initPWAInstall();
   seedInitialNotifications();
   renderNotifBell();
   initAdRequestChat();
-  renderNoticeboardTab();
+  renderNoticeboardTab(); // ✅ tabNotice is the default active tab — load on every login
   if(faceoffInterval)clearInterval(faceoffInterval);
-  faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();},3000);
-  updateHeaderAvatar();
+  faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();updateLiveTicker();},3000);
+  startCountdown();
+  updateHeaderAvatar();  // paint avatar immediately on login
   showToast(`Welcome back, ${currentUser.firstName}! 👋`,"success");
+  // Show live viewers (simulated)
+ const lp=document.getElementById("livePulse"); if(lp) lp.style.display="flex";
+ setInterval(()=>{ const n=Math.floor(Math.random()*12)+3; const el=document.getElementById("liveViewers"); if(el) el.innerText=`${n} viewing live`; },8000);
 }
 
 function showPane(id){
@@ -3564,8 +3685,6 @@ async function simulateMpesaSuccess(){
       const ok=voteRes.success!==false;
       if(ok){
         if(mpesaPendingVote.button){mpesaPendingVote.button.innerHTML='<i class="fas fa-check-circle"></i> Voted!';mpesaPendingVote.button.disabled=true;}
-        // Immediately sync face-off and candidate cards from real cumulative data
-        if (typeof window.updateFaceoff === 'function') window.updateFaceoff();
         renderDashboard();
         const cn=CANDIDATES.find(c=>c.id===mpesaPendingVote.candidateId);
         if(cn)addNotification({icon:"🗳️",iconCls:"ni-vote",text:`Your vote for <strong>${cn.name}</strong> has been confirmed this cycle.`,type:"vote"});
@@ -4422,6 +4541,27 @@ function generateLocalAIResponse(query){
   return `Based on current Ngoliba InfoTrack data: <strong>${sorted[0].votes>0?sorted[0].name:"No clear leader yet"}</strong> is in the lead. The top ward issues are water access (43%) and roads (28%). Kilimambogo sublocation turnout is the key variable to watch this cycle.`;
 }
 
+// ═══ LIVE TICKER ═══
+function initLiveTicker(){
+  updateLiveTicker();
+  setInterval(updateLiveTicker, 15000);
+}
+
+function updateLiveTicker(){
+  const agg=getCurrentPeriodAggregated();
+  const sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
+  const items=[
+    `🏆 Leading Candidate: <strong>${sorted[0]?.name||"—"}</strong> (${sorted[0]?.party||"—"}) — ${sorted[0]?.votes||0} votes`,
+    `<strong>${DB.getUsers().length}</strong> registered voters in Ngoliba Ward`,
+    `<strong>${getAllTimeTotalVotes()}</strong> total votes cast across all cycles`,
+    `Top issue: <strong>💧 Water Access</strong> — 43% of forum posts`,
+    `<strong>${sorted[1]?.name||"—"}</strong> in 2nd with ${sorted[1]?.votes||0} votes`,
+    `<strong>Kilimambogo</strong> turnout is below ward average — every vote counts!`,
+  ];
+  const doubled=[...items,...items]; // duplicate for seamless loop
+  const el=document.getElementById("tickerInner");
+  if(el) el.innerHTML=doubled.map(i=>`<span class="ticker-item">${i}</span>`).join("");
+}
 
 function getTimeToReset(){
   const diff=new Date(getNextPeriodStart())-Date.now();
@@ -4651,6 +4791,18 @@ function showWelcomePopup(){
   const popup=document.getElementById("welcomePopup");popup.classList.add("visible");setTimeout(()=>popup.classList.remove("visible"),5000);
 }
 
+// ═══ COUNTDOWN ═══
+function startCountdown(){
+  if(countdownInterval)clearInterval(countdownInterval);
+  function update(){
+    const diff=new Date(getNextPeriodStart())-Date.now();
+    if(diff<=0){document.getElementById("heroCountdown").innerText="00:00";document.getElementById("countdownDisplay").innerText="00:00:000";return;}
+    const m=Math.floor(diff/60000),s=Math.floor((diff%60000)/1000),ms=diff%1000;
+    document.getElementById("heroCountdown").innerText=`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    document.getElementById("countdownDisplay").innerText=`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}:${String(ms).padStart(3,"0")}`;
+  }
+  update();countdownInterval=setInterval(update,50);
+}
 
 // ═══ MODALS ═══
 function openModal(id){document.getElementById(id)?.classList.add("open");}
@@ -5901,7 +6053,7 @@ window.updateHeaderBadge = function(){
 
 window.loadProfileData = function(){
   if (!currentUser) return;
-  // ── Hero display ──
+  // ── Hero section (display elements, not inputs) ──
   const heroName = document.getElementById('profileName');
   if (heroName) heroName.innerText = `${currentUser.firstName || ''} ${currentUser.surname || ''}`.trim();
   const heroSub = document.getElementById('profileSub');
@@ -5910,39 +6062,14 @@ window.loadProfileData = function(){
   if (voterNum) voterNum.innerText = `Voter #${currentUser.voterNumber || '—'}`;
   const subChip = document.getElementById('profileSublocationChip');
   if (subChip) subChip.innerText = currentUser.sublocation || '—';
-  // ── Form fields ──
+  // ── Form fields — use the ACTUAL HTML IDs (profFirstName etc., not profileName) ──
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
   set('profFirstName',  currentUser.firstName);
   set('profSurname',    currentUser.surname);
-  set('profPhone',      currentUser.phone);
+  set('profPhone',      currentUser.phone);       // read-only field
   set('profEmail',      currentUser.email);
   set('profSublocation',currentUser.sublocation);
   set('profNationalId', currentUser.nationalId || currentUser.national_id);
-  // ── Stats: show loading state then populate from API ──
-  const ptvEl = document.getElementById('profileTotalVotes');
-  const pcrEl = document.getElementById('profileCurrentRank');
-  if (ptvEl) ptvEl.innerText = '…';
-  if (pcrEl) pcrEl.innerText = '…';
-  // ── Load vote history (updates Votes Cast counter) ──
-  if (typeof window.loadVoteHistory === 'function') window.loadVoteHistory();
-  // ── Fetch cycle rank from /api/faceoff (all candidates sorted by cumulative votes) ──
-  fetch('/api/faceoff')
-    .then(r => r.json())
-    .then(data => {
-      if (!data.success || !currentUser) return;
-      // allCandidates list tells us the current leaderboard position per candidate.
-      // We derive the user's rank as: how many votes has *this user* cast vs total?
-      // Since /api/faceoff doesn't expose per-user rank directly, compute from vote history.
-      // The "Cycle Rank" shown is the user's rank among voters by total votes cast.
-      // We use data.totalVotes for context but actual rank comes from loadVoteHistory count.
-      if (pcrEl) {
-        // rank = position of this user by total votes cast; will be refined once history loads
-        // For now show total votes in cycle as a helpful proxy until history populates
-        const tv = data.totalVotes || 0;
-        if (tv === 0) pcrEl.innerText = '—';
-      }
-    })
-    .catch(() => { if (pcrEl) pcrEl.innerText = '—'; });
 };
 
 window.updateProfilePhoto = function(){
@@ -6067,6 +6194,13 @@ window.renderFaceoff = async function(){
   }
 };
 
+window.updateLiveTicker = function(){
+  // Live ticker animation - optional
+};
+
+window.initLiveTicker = function(){
+  // Initialize ticker - optional
+};
 
 // 4. OVERRIDE PROBLEMATIC FUNCTIONS
 
@@ -6098,11 +6232,6 @@ window.renderDashboard = async function(){
     const el = document.getElementById("currentPeriodEnd");
     if(el && periodData.periodEnd) el.innerText = new Date(periodData.periodEnd).toLocaleTimeString();
 
-    // Keep the Cycle Timer in sync with the authoritative server periodEnd
-    if (periodData.periodEnd && typeof window.setCycleTimerEnd === 'function') {
-      window.setCycleTimerEnd(periodData.periodEnd);
-    }
-
   } catch (error) {
     console.error('Dashboard render error:', error);
   }
@@ -6110,158 +6239,49 @@ window.renderDashboard = async function(){
 
 const origEnterDashboard = window.enterDashboard;
 window.enterDashboard = function(){
-  if (!currentUser) { console.error('No user logged in'); return; }
-
+  if (!currentUser) {
+    console.error('No user logged in');
+    return;
+  }
+  
   ["authContainer"].forEach(id => document.getElementById(id)?.classList.add("hidden"));
-  ["headerNav","avatarWrap","countdownStrip"].forEach(id => document.getElementById(id)?.classList.remove("hidden"));
-
+  ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"]
+    .forEach(id => document.getElementById(id)?.classList.remove("hidden"));
+  
   if (typeof showPane === 'function') showPane("dashboardContent");
   if (typeof renderDashboard === 'function') renderDashboard();
   if (typeof showWelcomePopup === 'function') showWelcomePopup();
+  if (typeof initLiveTicker === 'function') initLiveTicker();
   if (typeof initPWAInstall === 'function') initPWAInstall();
   if (typeof seedInitialNotifications === 'function') seedInitialNotifications();
   if (typeof renderNotifBell === 'function') renderNotifBell();
   if (typeof initAdRequestChat === 'function') initAdRequestChat();
-  if (typeof renderNoticeboardTab === 'function') renderNoticeboardTab();
-
+  if (typeof renderNoticeboardTab === 'function') renderNoticeboardTab(); // ✅ default active tab — load on login
+  
   if(typeof faceoffInterval !== 'undefined' && faceoffInterval) clearInterval(faceoffInterval);
   faceoffInterval = setInterval(() => {
     if (typeof updateFaceoff === 'function') updateFaceoff();
+    if (typeof updateLiveTicker === 'function') updateLiveTicker();
   }, 3000);
+  
+  if (typeof startCountdown === 'function') startCountdown();
 
+  // ── AVATAR: always paint from the current source of truth on every login ──
   if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
-  if (typeof showToast === 'function') showToast(`Welcome, ${currentUser.firstName || 'User'}! 👋`, "success");
+
+  if(typeof showToast === 'function') showToast(`Welcome, ${currentUser.firstName || 'User'}! 👋`, "success");
+  
+  const lp = document.getElementById("livePulse");
+  if(lp) lp.style.display = "flex";
+  
+  setInterval(() => {
+    const n = Math.floor(Math.random() * 12) + 3;
+    const el = document.getElementById("liveViewers");
+    if(el) el.innerText = `${n} viewing live`;
+  }, 8000);
 };
 
 console.log('✅ DB references patched! Dashboard should work now.');
-
-
-// ════════════════════════════════════════════════════════════════════════════
-// CYCLE TIMER — server-authoritative real-time countdown
-// Sources periodEnd from /api/polling-results (same call as renderDashboard).
-// Updates every second. Auto-refreshes when a new period starts.
-// ════════════════════════════════════════════════════════════════════════════
-(function initCycleTimer() {
-  let cycleEndTs     = null;   // ms timestamp from server
-  let timerInterval  = null;
-  let refreshTimeout = null;
-
-  // Fetch the active period end time from the server
-  async function fetchPeriodEnd() {
-    try {
-      const res  = await fetch('/api/polling-results', { credentials: 'include' });
-      const data = await res.json();
-      const raw  = data.periodEnd || data.period_end || null;
-      if (raw) {
-        const ts = typeof raw === 'number' ? raw : Date.parse(raw);
-        if (!isNaN(ts)) cycleEndTs = ts;
-      }
-    } catch (e) {
-      console.warn('[CycleTimer] Could not fetch period end:', e);
-    }
-  }
-
-  // Format ms remaining as  MM:SS
-  function formatTime(ms) {
-    if (ms <= 0) return '00:00';
-    const totalSec = Math.floor(ms / 1000);
-    const m = Math.floor(totalSec / 60);
-    const s = totalSec % 60;
-    return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
-  }
-
-  // Tick — called every second
-  function tick() {
-    const el = document.getElementById('countdownDisplay');
-    if (!el) return;
-
-    if (cycleEndTs === null) {
-      el.textContent = '--:--';
-      return;
-    }
-
-    const diff = cycleEndTs - Date.now();
-    el.textContent = formatTime(diff);
-
-    if (diff <= 0) {
-      // Cycle ended — fetch new period in 1.5 s then restart
-      el.textContent = '00:00';
-      if (refreshTimeout) clearTimeout(refreshTimeout);
-      refreshTimeout = setTimeout(async () => {
-        await fetchPeriodEnd();
-        // Also trigger a faceoff/candidates refresh so data stays in sync
-        if (typeof window.updateFaceoff === 'function') window.updateFaceoff();
-      }, 1500);
-    }
-  }
-
-  // Start/restart the timer
-  function start() {
-    if (timerInterval) clearInterval(timerInterval);
-    timerInterval = setInterval(tick, 1000);
-    tick(); // immediate first paint
-  }
-
-  // Public: called by renderDashboard when it already has periodEnd in hand
-  window.setCycleTimerEnd = function(periodEndValue) {
-    if (!periodEndValue) return;
-    const ts = typeof periodEndValue === 'number'
-      ? periodEndValue
-      : Date.parse(periodEndValue);
-    if (!isNaN(ts)) cycleEndTs = ts;
-  };
-
-  // Boot: fetch once, then start ticking
-  async function boot() {
-    // Only run when a user is logged in
-    if (!window.currentUser) return;
-    await fetchPeriodEnd();
-    start();
-  }
-
-  // Patch enterDashboard to boot the timer on login
-  const _prevEnter = window.enterDashboard;
-  window.enterDashboard = function () {
-    if (typeof _prevEnter === 'function') _prevEnter.apply(this, arguments);
-    boot();
-  };
-
-  // Also patch renderDashboard to keep timer in sync whenever data refreshes
-  const _prevRender = window.renderDashboard;
-  window.renderDashboard = async function () {
-    if (typeof _prevRender === 'function') await _prevRender.apply(this, arguments);
-    // setCycleTimerEnd is called from within the renderDashboard override above
-    // via the periodData.periodEnd wire — nothing extra needed here
-  };
-
-  // SSE: when a new period starts, re-fetch end time
-  const _origConnect = window._connectVoteStream;
-  // Patch after SSE module initialises (it uses its own closure)
-  // We listen on 'new-period' events from the existing EventSource
-  document.addEventListener('sseNewPeriod', async () => {
-    await fetchPeriodEnd();
-  });
-
-  // Also refresh period end whenever SSE fires a new-period via the
-  // patchEnterDashboardForSSE wrapper (see bottom of file — it calls updateFaceoff)
-  const _prevUpdateFaceoff = window.updateFaceoff;
-  window.updateFaceoff = async function () {
-    if (typeof _prevUpdateFaceoff === 'function') await _prevUpdateFaceoff.apply(this, arguments);
-    // After each faceoff update, keep timer in sync if period just rolled
-    if (cycleEndTs !== null && (cycleEndTs - Date.now()) < 2000) {
-      await fetchPeriodEnd();
-    }
-  };
-
-  // If the user is already logged in on page load (session restored)
-  document.addEventListener('DOMContentLoaded', () => {
-    // Give loadSession a moment to resolve then boot if logged in
-    setTimeout(() => {
-      if (window.currentUser) boot();
-    }, 1200);
-  });
-
-})(); // end initCycleTimer
 
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -6519,9 +6539,6 @@ console.log('✅ ALL DB references removed!');
 window.loadVoteHistory = async function () {
   const el = document.getElementById('voteHistoryList');
   if (!el) return;
-
-  el.innerHTML = '<div class="vh-loading">Loading your voting history…</div>';
-
   try {
     const res  = await fetch('/api/my-votes', { credentials: 'include' });
     const data = await res.json();
@@ -6531,37 +6548,9 @@ window.loadVoteHistory = async function () {
       return;
     }
 
-    // ── Update "Votes Cast" ──
+    // Update "Votes Cast" counter in the hero stat row
     const ptvEl = document.getElementById('profileTotalVotes');
     if (ptvEl) ptvEl.innerText = data.votes.length;
-
-    // ── Compute cycle rank from /api/faceoff voter distribution ──
-    // Rank = position of this user by votes cast compared to all voters.
-    // Since the server doesn't expose a per-voter leaderboard we derive a local
-    // proxy: (votes cast by this user) vs the total vote pool.
-    const pcrEl = document.getElementById('profileCurrentRank');
-    if (pcrEl) {
-      try {
-        const foRes  = await fetch('/api/faceoff');
-        const foData = await foRes.json();
-        if (foData.success) {
-          const totalVotes = foData.totalVotes || 0;
-          const userVotes  = data.votes.length;
-          if (totalVotes === 0 || userVotes === 0) {
-            pcrEl.innerText = '—';
-          } else {
-            // Rough rank: how many voters likely have MORE votes than this user.
-            // Without a full per-voter leaderboard we show votes cast / total as a %.
-            const pct = Math.round((userVotes / totalVotes) * 100);
-            pcrEl.innerText = `Top ${Math.max(1, 100 - pct)}%`;
-          }
-        } else {
-          pcrEl.innerText = '—';
-        }
-      } catch (_) {
-        pcrEl.innerText = '—';
-      }
-    }
 
     if (data.votes.length === 0) {
       el.innerHTML = '<div class="vh-empty">No voting history yet — cast your first vote!</div>';
@@ -6569,35 +6558,24 @@ window.loadVoteHistory = async function () {
     }
 
     el.innerHTML = data.votes.map(v => {
-      // votedAt can be ISO string, epoch ms integer, or a pg timestamp string
-      let dateStr = '—';
-      try {
-        const raw = v.votedAt || v.voted_at || v.timestamp || v.created_at;
-        if (raw) {
-          const d = typeof raw === 'number' ? new Date(raw) : new Date(raw);
-          if (!isNaN(d.getTime())) {
-            dateStr = d.toLocaleDateString('en-KE', { day: 'numeric', month: 'long', year: 'numeric' })
-              + ' · ' + d.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
-          }
-        }
-      } catch (_) {}
-
+      const dateFmt = new Date(v.votedAt).toLocaleDateString('en-KE', {
+        day: 'numeric', month: 'long', year: 'numeric'
+      });
       const activeTag = v.isActivePeriod
         ? '<span class="vh-active-badge">Active</span>'
         : '';
-
       return `<div class="vh-item">
         <div class="vh-cycle">
-          <span class="vh-badge">Cycle #${v.periodId || v.period_id || '?'}</span>
+          <span class="vh-badge">Cycle #${v.periodId}</span>
           ${activeTag}
         </div>
         <div class="vh-candidate">
           <i class="fas fa-vote-yea"></i>
-          ${v.candidateName || v.candidate_name || 'Unknown'} · <em>${v.candidateParty || v.candidate_party || '—'}</em>
+          ${v.candidateName || 'Unknown'} · <em>${v.candidateParty || '—'}</em>
         </div>
         <div class="vh-meta">
           <span class="vh-status-voted">✅ Voted</span>
-          <span class="vh-date">${dateStr}</span>
+          <span class="vh-date">${dateFmt}</span>
         </div>
       </div>`;
     }).join('');
@@ -6608,38 +6586,83 @@ window.loadVoteHistory = async function () {
   }
 };
 
+// ── 2. renderLiveStandings — draws ranked candidate rows from /api/faceoff ──
+window.renderLiveStandings = async function () {
+  try {
+    const res  = await fetch('/api/faceoff');
+    const data = await res.json();
+    if (!data.success) return;
 
-// ── 2. Override updateFaceoff — use /api/faceoff for real cumulative data
-//       Also syncs candidate card vote chips so cards stay in perfect sync ──
+    const allCandidates = data.allCandidates || data.candidates || [];
+    const totalVotes    = data.totalVotes || 0;
+    const listEl        = document.getElementById('liveStandingsList');
+    const leaderChip    = document.getElementById('lsLeaderChip');
+    const updatedEl     = document.getElementById('lsUpdated');
+
+    if (!listEl) return;
+
+    if (updatedEl) {
+      updatedEl.innerText = 'Updated ' + new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    if (totalVotes === 0) {
+      listEl.innerHTML = '<div class="ls-empty">No votes yet this cycle — be the first!</div>';
+      if (leaderChip) leaderChip.style.display = 'none';
+      return;
+    }
+
+    const rankClass = i => i === 0 ? 'ls-gold' : i === 1 ? 'ls-silver' : i === 2 ? 'ls-bronze' : '';
+    const maxVotes  = allCandidates[0]?.vote_count || 1;
+
+    listEl.innerHTML = allCandidates.map((c, i) => {
+      const votes = c.vote_count || 0;
+      const pct   = c.percentage || (totalVotes > 0 ? ((votes / totalVotes) * 100).toFixed(1) : '0.0');
+      const barW  = maxVotes > 0 ? Math.round((votes / maxVotes) * 100) : 0;
+      const isLeader = i === 0;
+      return `<div class="ls-row">
+        <div class="ls-rank ${rankClass(i)}">${i + 1}</div>
+        <img class="ls-img" src="${c.img || ''}" alt="${c.name}" loading="lazy"
+             onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.name)}&background=2d6a4f&color=fff&size=60'">
+        <div class="ls-info">
+          <div class="ls-name">${c.name}</div>
+          <div class="ls-party">${c.party || ''}</div>
+        </div>
+        <div class="ls-bar-wrap">
+          <div class="ls-bar">
+            <div class="ls-bar-fill${isLeader ? ' ls-leader-bar' : ''}" style="width:${barW}%"></div>
+          </div>
+        </div>
+        <div class="ls-votes-col">
+          <div class="ls-votes-num">${votes}</div>
+          <div class="ls-pct">${pct}%</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Leader chip
+    if (leaderChip && allCandidates.length > 0) {
+      leaderChip.innerText = '🏆 ' + allCandidates[0].name.split(' ')[allCandidates[0].name.split(' ').length - 1];
+      leaderChip.style.display = '';
+    }
+
+  } catch (e) {
+    console.error('renderLiveStandings error:', e);
+  }
+};
+
+// ── 3. Override updateFaceoff — use /api/faceoff, update both faceoff widget
+//       AND the live standings panel. Replaces the previous stub/override. ──
 window.updateFaceoff = async function () {
   try {
     const res  = await fetch('/api/faceoff');
     const data = await res.json();
     if (!data.success) return;
 
-    const top2           = data.candidates    || [];
-    const allCandidates  = data.allCandidates || data.candidates || [];
-    const totalVotes     = data.totalVotes    || 0;
+    const top2       = data.candidates || [];
+    const totalVotes = data.totalVotes || 0;
 
-    // ── A. Update ALL candidate card vote chips ──────────────────────────────
-    // /api/faceoff returns allCandidates sorted by cumulative votes.
-    // We update every .card-votes-chip whose parent card has a matching data-id.
-    if (allCandidates.length > 0) {
-      allCandidates.forEach(c => {
-        const cid   = String(c.id ?? c.candidate_id ?? '');
-        const votes = c.vote_count || 0;
-        // candidate card container has data-id="${cand.id}"
-        const card  = document.querySelector(`.candidate-card[data-id="${cid}"]`);
-        if (card) {
-          const chip = card.querySelector('.card-votes-chip');
-          if (chip) chip.textContent = `${votes} votes`;
-        }
-      });
-    }
-
-    // ── B. Update face-off widget ────────────────────────────────────────────
     if (top2.length >= 2) {
-      const right = top2[0]; // leader (right side per existing HTML layout)
+      const right = top2[0]; // leader on right (matches existing HTML intent)
       const left  = top2[1];
 
       const setEl = (id, val) => {
@@ -6653,14 +6676,18 @@ window.updateFaceoff = async function () {
 
       const foLI = document.getElementById('foLeftImg');
       if (foLI) foLI.src = left.img || '';
-      const foLN = document.getElementById('foLeftName');  if (foLN) foLN.innerText  = left.name  || '—';
-      const foLP = document.getElementById('foLeftParty'); if (foLP) foLP.innerText  = left.party || '—';
+      document.getElementById('foLeftName')?.innerText !== undefined &&
+        (document.getElementById('foLeftName').innerText = left.name || '—');
+      document.getElementById('foLeftParty')?.innerText !== undefined &&
+        (document.getElementById('foLeftParty').innerText = left.party || '—');
       setEl('foLeftVotes', left.vote_count || 0);
 
       const foRI = document.getElementById('foRightImg');
       if (foRI) foRI.src = right.img || '';
-      const foRN = document.getElementById('foRightName');  if (foRN) foRN.innerText  = right.name  || '—';
-      const foRP = document.getElementById('foRightParty'); if (foRP) foRP.innerText  = right.party || '—';
+      document.getElementById('foRightName')?.innerText !== undefined &&
+        (document.getElementById('foRightName').innerText = right.name || '—');
+      document.getElementById('foRightParty')?.innerText !== undefined &&
+        (document.getElementById('foRightParty').innerText = right.party || '—');
       setEl('foRightVotes', right.vote_count || 0);
 
       const lv = left.vote_count  || 0;
@@ -6676,11 +6703,18 @@ window.updateFaceoff = async function () {
       if (rpEl) rpEl.innerText = rp + '%';
 
       const progressFill = document.getElementById('foProgressFill');
-      if (progressFill) progressFill.style.width = `${Math.min(100, Math.floor((totalVotes / 540) * 100))}%`;
+      if (progressFill) {
+        progressFill.style.width = `${Math.min(100, Math.floor((totalVotes / 540) * 100))}%`;
+      }
 
       const winnerChip = document.getElementById('foWinnerChip');
-      if (winnerChip) winnerChip.innerHTML = rv >= 270 ? '🏆 WINNER DECLARED!' : '⏳ Race in progress';
+      if (winnerChip) {
+        winnerChip.innerHTML = rv >= 270 ? '🏆 WINNER DECLARED!' : '⏳ Race in progress';
+      }
     }
+
+    // Always update the live standings panel too
+    await window.renderLiveStandings();
 
   } catch (e) {
     console.error('updateFaceoff error:', e);
