@@ -936,7 +936,7 @@ app.post('/api/vote', async (req, res) => {
       [session.userId, periodId]
     );
     if (voteCheck.rows.length > 0)
-      return res.status(400).json({ error: 'Already voted this period' });
+      return res.status(409).json({ success: false, alreadyVoted: true, error: 'You have already voted in this cycle. Please wait for the next voting period.' });
 
     const userResult = await pool.query(
       'SELECT sublocation FROM users WHERE id = $1',
@@ -963,28 +963,32 @@ app.post('/api/vote', async (req, res) => {
       'SELECT COUNT(*) as count FROM votes WHERE period_id = $1',
       [periodId]
     );
-    const voterCount = parseInt(totalRes.rows[0].count);
+    const periodTotalVotes = parseInt(totalRes.rows[0].count);
 
     let badge = null;
-    if (voterCount === 1) badge = '1st';
-    else if (voterCount === 2) badge = '2nd';
-    else if (voterCount === 3) badge = '3rd';
+    if (periodTotalVotes === 1) badge = '1st';
+    else if (periodTotalVotes === 2) badge = '2nd';
+    else if (periodTotalVotes === 3) badge = '3rd';
 
-    // Per-candidate counts for faceoff / live display
+    // Cumulative per-candidate counts across ALL periods
     const perCandRes = await pool.query(
-      'SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
-      [periodId]
+      'SELECT candidate_id, COUNT(*) as vote_count FROM votes GROUP BY candidate_id'
     );
     const votesByCandidate = {};
     perCandRes.rows.forEach(r => {
       votesByCandidate[r.candidate_id] = parseInt(r.vote_count);
     });
 
+    // All-time total votes
+    const allTimeRes = await pool.query('SELECT COUNT(*) as count FROM votes');
+    const totalVotes = parseInt(allTimeRes.rows[0].count);
+
     // ── Broadcast to every SSE subscriber (faceoff, voting-page live tab) ──
     broadcastVoteUpdate('vote-received', {
       candidateId,
       periodId,
-      totalVotes: voterCount,
+      totalVotes,
+      periodTotalVotes,
       votes: votesByCandidate[candidateId] || 1,
       votesByCandidate
     });
@@ -992,7 +996,8 @@ app.post('/api/vote', async (req, res) => {
     return res.json({
       success: true,
       badge,
-      totalVotes: voterCount,
+      totalVotes,
+      periodTotalVotes,
       votesByCandidate,
       candidateId,
       periodId
@@ -1008,28 +1013,42 @@ app.post('/api/vote', async (req, res) => {
 // ════════════════════════════════════════════════
 app.get('/api/polling-results', async (req, res) => {
   try {
+    // Check authenticated user for hasVoted flag
+    const session = verifySession(req.headers.cookie || '');
+
     const periodResult = await pool.query(
       'SELECT * FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
     );
 
     if (periodResult.rows.length === 0) {
       return res
-        .set('Cache-Control', 'public, max-age=5')
+        .set('Cache-Control', 'no-store')
         .json({ 
           periodId: null, 
           totalVotes: 0, 
           votesByCandidate: {}, 
-          isActive: false 
+          isActive: false,
+          hasVoted: false
         });
     }
 
     const period = periodResult.rows[0];
+
+    // hasVoted: check if the authenticated user has voted in the current period
+    let hasVoted = false;
+    if (session) {
+      const voteCheck = await pool.query(
+        'SELECT id FROM votes WHERE user_id = $1 AND period_id = $2',
+        [session.userId, period.id]
+      );
+      hasVoted = voteCheck.rows.length > 0;
+    }
+
+    // Cumulative votes across ALL periods with sublocation breakdown
     const votesResult = await pool.query(
-      'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
-      [period.id]
+      'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes GROUP BY candidate_id, sublocation'
     );
 
-    // Build structure with sublocations and total
     const votesByCandidate = {};
     votesResult.rows.forEach(row => {
       if (!votesByCandidate[row.candidate_id]) {
@@ -1044,15 +1063,37 @@ app.get('/api/polling-results', async (req, res) => {
       votesByCandidate[row.candidate_id].sublocations[sublocKey] = count;
     });
 
+    // Also expose current-period breakdown for admin/analytics
+    const periodVotesResult = await pool.query(
+      'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
+      [period.id]
+    );
+    const periodVotesByCandidate = {};
+    periodVotesResult.rows.forEach(row => {
+      if (!periodVotesByCandidate[row.candidate_id]) {
+        periodVotesByCandidate[row.candidate_id] = { total: 0, sublocations: {} };
+      }
+      const count = parseInt(row.count);
+      periodVotesByCandidate[row.candidate_id].total += count;
+      const sublocKey = row.sublocation || 'Unknown';
+      periodVotesByCandidate[row.candidate_id].sublocations[sublocKey] = count;
+    });
+
+    // All-time total votes
+    const allTimeRes = await pool.query('SELECT COUNT(*) as count FROM votes');
+    const totalVotes = parseInt(allTimeRes.rows[0].count);
+
     return res
-      .set('Cache-Control', 'public, max-age=5')
+      .set('Cache-Control', 'no-store')
       .json({
         periodId: period.id,
         periodStart: period.period_start,
         periodEnd: period.period_end,
         isActive: period.is_active,
-        totalVotes: parseInt(period.total_votes),
-        votesByCandidate: votesByCandidate,
+        totalVotes,
+        votesByCandidate,
+        periodVotesByCandidate,
+        hasVoted,
         votesByUser: []
       });
   } catch (e) {
@@ -1252,16 +1293,17 @@ app.get('/api/stats', async (req, res) => {
     );
     const period = periodResult.rows[0] || null;
 
+    // Cumulative vote counts across ALL periods
+    const allVotesResult = await pool.query(
+      'SELECT candidate_id, COUNT(*) as vote_count FROM votes GROUP BY candidate_id'
+    );
     const votesByCandidate = {};
-    if (period) {
-      const votesResult = await pool.query(
-        'SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
-        [period.id]
-      );
-      votesResult.rows.forEach(row => {
-        votesByCandidate[row.candidate_id] = parseInt(row.vote_count);
-      });
-    }
+    allVotesResult.rows.forEach(row => {
+      votesByCandidate[row.candidate_id] = parseInt(row.vote_count);
+    });
+
+    const allTimeRes = await pool.query('SELECT COUNT(*) as count FROM votes');
+    const totalVotes = parseInt(allTimeRes.rows[0].count || 0);
 
     // Real sublocation breakdown from users table
     const sublocResult = await pool.query(
@@ -1274,12 +1316,13 @@ app.get('/api/stats', async (req, res) => {
     res.json({
       success: true,
       registeredVoters,
+      totalVotes,
+      votesByCandidate,
       currentPeriod: period ? {
         periodId: period.id,
         totalVotes: parseInt(period.total_votes || 0),
         periodStart: period.period_start,
-        periodEnd: period.period_end,
-        votesByCandidate
+        periodEnd: period.period_end
       } : null,
       votersBySubLocation
     });
@@ -1388,13 +1431,29 @@ app.post('/api/forum', async (req, res) => {
   }
 });
 
-// GET /api/faceoff - Get top 2 candidates by current vote count
+// GET /api/faceoff - Get top 2 candidates by cumulative (all-time) vote count
 app.get('/api/faceoff', async (req, res) => {
   try {
     const period = await pool.query(
       'SELECT id, total_votes FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
     );
-    if (!period.rows.length) {
+
+    // All-time cumulative vote counts across ALL periods
+    const allVotes = await pool.query(
+      `SELECT candidate_id, COUNT(*) as vote_count
+       FROM votes
+       GROUP BY candidate_id`
+    );
+
+    // Build a full map: candidateId → cumulative vote count
+    const voteMap = {};
+    allVotes.rows.forEach(r => {
+      voteMap[parseInt(r.candidate_id)] = parseInt(r.vote_count);
+    });
+
+    const totalVotes = Object.values(voteMap).reduce((s, n) => s + n, 0);
+
+    if (!period.rows.length && totalVotes === 0) {
       return res.json({
         success: true,
         candidates: CANDIDATES.slice(0, 2).map(c => ({ ...c, vote_count: 0 })),
@@ -1403,29 +1462,13 @@ app.get('/api/faceoff', async (req, res) => {
       });
     }
 
-    const { id: periodId, total_votes: periodTotalVotes } = period.rows[0];
+    const periodId = period.rows[0]?.id ?? null;
 
-    // All candidate counts (not just top 2) — frontend needs this for bar widths
-    const allVotes = await pool.query(
-      `SELECT candidate_id, COUNT(*) as vote_count
-       FROM votes WHERE period_id = $1
-       GROUP BY candidate_id`,
-      [periodId]
-    );
-
-    // Build a full map: candidateId → vote count
-    const voteMap = {};
-    allVotes.rows.forEach(r => {
-      voteMap[parseInt(r.candidate_id)] = parseInt(r.vote_count);
-    });
-
-    // Attach counts to every candidate and sort descending
+    // Attach cumulative counts to every candidate and sort descending
     const ranked = CANDIDATES.map(c => ({
       ...c,
       vote_count: voteMap[c.id] || 0
     })).sort((a, b) => b.vote_count - a.vote_count);
-
-    const totalVotes = Object.values(voteMap).reduce((s, n) => s + n, 0);
 
     // Top 2 for the faceoff widget
     const top2 = ranked.slice(0, 2).map(c => ({

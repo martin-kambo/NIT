@@ -2007,16 +2007,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .ai-typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--mid-gray); animation: ai-bounce 1s infinite; }
 .ai-typing span:nth-child(2) { animation-delay: 0.15s; } .ai-typing span:nth-child(3) { animation-delay: 0.3s; }
 
-/* ═══ LIVE TICKER ═══ */
-.live-ticker-wrap { overflow: hidden; background: var(--forest); border-radius: var(--radius-lg); padding: 0.6rem 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; }
-.live-ticker-badge { background: var(--red-accent); color: white; font-size: 0.65rem; font-weight: 800; padding: 0.2rem 0.6rem; border-radius: 50px; white-space: nowrap; flex-shrink: 0; animation: pulse-dot 1.5s infinite; }
-.live-ticker-track { overflow: hidden; flex: 1; }
-.live-ticker-inner { display: flex; gap: 3rem; animation: ticker-scroll 30s linear infinite; white-space: nowrap; }
-.live-ticker-inner:hover { animation-play-state: paused; }
-@keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-.ticker-item { font-size: 0.78rem; color: rgba(255,255,255,0.8); }
-.ticker-item strong { color: var(--gold); }
-
 /* OTP step */
 .otp-step { display: none; }
 .otp-step.active { display: block; }
@@ -2035,32 +2025,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .vh-empty{text-align:center;padding:1.5rem 0;color:var(--mid-gray,#64748b);font-size:.88rem;}
 .vh-loading{text-align:center;padding:1rem 0;color:var(--mid-gray,#64748b);font-size:.82rem;}
 
-/* ── Live Standings (below face-off) ── */
-.live-standings-panel{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:var(--radius-lg,1rem);padding:1.25rem;margin-bottom:1.5rem;}
-.ls-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem;}
-.ls-title{display:flex;align-items:center;gap:.45rem;font-family:'Syne',sans-serif;font-weight:700;font-size:.92rem;color:#fff;}
-.ls-live-dot{width:8px;height:8px;border-radius:50%;background:#40c27a;box-shadow:0 0 6px #40c27a;flex-shrink:0;animation:lsDotPulse 1.6s ease-in-out infinite;}
-@keyframes lsDotPulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.45;transform:scale(.75);}}
-.ls-leader-chip{display:inline-flex;align-items:center;gap:.3rem;background:rgba(233,196,106,.15);border:1px solid rgba(233,196,106,.35);color:#e9c46a;font-size:.68rem;font-weight:700;padding:.12rem .45rem;border-radius:50px;margin-left:.3rem;}
-.ls-updated{font-size:.68rem;color:rgba(255,255,255,.38);}
-.ls-row{display:flex;align-items:center;gap:.7rem;padding:.45rem 0;border-bottom:1px solid rgba(255,255,255,.06);}
-.ls-row:last-child{border-bottom:none;}
-.ls-rank{width:1.35rem;text-align:center;font-family:'JetBrains Mono',monospace;font-weight:800;font-size:.82rem;color:rgba(255,255,255,.4);flex-shrink:0;}
-.ls-rank.ls-gold{color:#e9c46a;}
-.ls-rank.ls-silver{color:#9ca3af;}
-.ls-rank.ls-bronze{color:#cd7f32;}
-.ls-img{width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid rgba(255,255,255,.12);}
-.ls-info{flex:1;min-width:0;}
-.ls-name{font-size:.8rem;font-weight:600;color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.ls-party{font-size:.66rem;color:rgba(255,255,255,.4);}
-.ls-bar-wrap{width:80px;flex-shrink:0;}
-.ls-bar{height:5px;background:rgba(255,255,255,.1);border-radius:3px;overflow:hidden;}
-.ls-bar-fill{height:100%;background:linear-gradient(90deg,#40c27a,#5ddb96);border-radius:3px;transition:width .7s ease;}
-.ls-bar-fill.ls-leader-bar{background:linear-gradient(90deg,#e9c46a,#f4d35e);}
-.ls-votes-col{text-align:right;flex-shrink:0;min-width:52px;}
-.ls-votes-num{font-family:'JetBrains Mono',monospace;font-size:.78rem;font-weight:700;color:rgba(255,255,255,.82);}
-.ls-pct{font-size:.64rem;color:rgba(255,255,255,.38);}
-.ls-empty{text-align:center;padding:1rem;color:rgba(255,255,255,.38);font-size:.82rem;}
 
 </style>
 </head>
@@ -2300,16 +2264,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
     <!-- ═══ DASHBOARD ═══ -->
     <div id="dashboardContent" class="hidden dashboard-wrap">
 
-      <!-- Live Ticker -->
-      <div class="live-ticker-wrap" id="liveTicker">
-        <div class="live-ticker-badge">&#128308; LIVE</div>
-        <div class="live-ticker-track">
-          <div class="live-ticker-inner" id="tickerInner">
-            <span class="ticker-item">Loading live updates&#8230;</span>
-          </div>
-        </div>
-      </div>
-
       <!-- Feature Navigation -->
       <div class="feature-nav" id="featureNav">
         <button class="feature-tab active" data-tab="tabNotice">&#128204; Notice Board</button>
@@ -2362,19 +2316,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         </div>
       </div>
 
-      <!-- Live Candidate Performance -->
-      <div class="live-standings-panel scroll-reveal" id="liveStandingsPanel">
-        <div class="ls-header">
-          <div class="ls-title">
-            <span class="ls-live-dot"></span>
-            Live Candidate Performance
-            <span class="ls-leader-chip" id="lsLeaderChip" style="display:none;">🏆 —</span>
-          </div>
-          <div class="ls-updated" id="lsUpdated">—</div>
-        </div>
-        <div id="liveStandingsList"><div class="ls-empty">Waiting for votes…</div></div>
-      </div>
-
       <!-- Voter Registry -->
       <div class="voter-registry-panel scroll-reveal">
         <div>
@@ -2390,7 +2331,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="turnout-grid scroll-reveal" id="turnoutGrid"></div>
 
       <!-- Already voted -->
-      <div class="voted-banner hidden" id="alreadyVotedMsg">✅ You've voted in this cycle. Results update every 5 minutes.</div>
+      <div class="voted-banner hidden" id="alreadyVotedMsg">✅ You have already voted in this cycle. Please wait for the next voting period.</div>
 
       <!-- Candidates -->
       <div class="section-header scroll-reveal-left">
@@ -2970,11 +2911,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 </div>
 
 
-<!-- Live Pulse Indicator -->
-<div id="livePulse" style="display:none;position:fixed;top:5rem;right:1.5rem;z-index:400;background:var(--forest);border-radius:50px;padding:0.4rem 1rem;display:flex;align-items:center;gap:0.5rem;font-size:0.75rem;color:white;box-shadow:0 4px 16px rgba(0,0,0,0.25);">
-  <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse-dot 1.5s infinite;"></div>
-  <span id="liveViewers">1 viewer</span>
-</div>
 
 
 <script>
@@ -3172,6 +3108,12 @@ async function submitVote(candidateId) {
     }
     
     // ━━━ 4. HANDLE ERRORS ━━━
+    if(response.status === 409 || data.alreadyVoted) {
+      showToast(data.error || "You have already voted in this cycle. Please wait for the next voting period.", "warning");
+      // refresh cards to show locked state
+      await renderDashboard();
+      return false;
+    }
     if(response.status === 400) {
       showToast(data.error, "warning");
     } else {
@@ -3309,7 +3251,7 @@ async function logout() {
     currentUser = null;
     
     document.getElementById("authContainer")?.classList.remove("hidden");
-    ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"]
+    ["heroBand","countdownStrip","headerNav","avatarWrap"]
       .forEach(id => document.getElementById(id)?.classList.add("hidden"));
     
     if(faceoffInterval) clearInterval(faceoffInterval);
@@ -3348,24 +3290,14 @@ async function loadSession(){
 
 function enterDashboard(){
   ["authContainer"].forEach(id=>document.getElementById(id)?.classList.add("hidden"));
-  ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
+  ["heroBand","countdownStrip","headerNav","avatarWrap"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
   showPane("dashboardContent");
   renderDashboard();
   showWelcomePopup();
-  initLiveTicker();
-  initPWAInstall();
-  seedInitialNotifications();
-  renderNotifBell();
-  initAdRequestChat();
-  renderNoticeboardTab(); // ✅ tabNotice is the default active tab — load on every login
-  if(faceoffInterval)clearInterval(faceoffInterval);
-  faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();updateLiveTicker();},3000);
+  faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();},3000);
   startCountdown();
   updateHeaderAvatar();  // paint avatar immediately on login
   showToast(`Welcome back, ${currentUser.firstName}! 👋`,"success");
-  // Show live viewers (simulated)
- const lp=document.getElementById("livePulse"); if(lp) lp.style.display="flex";
- setInterval(()=>{ const n=Math.floor(Math.random()*12)+3; const el=document.getElementById("liveViewers"); if(el) el.innerText=`${n} viewing live`; },8000);
 }
 
 function showPane(id){
@@ -3404,11 +3336,13 @@ async function renderDashboard(){
     const historyData = await historyRes.json();
     
     // ━━━ 3. CHECK IF USER VOTED IN CURRENT PERIOD ━━━
-    const hasVoted = periodData.votesByUser?.includes(currentUser.id) ?? false;
+    const hasVoted = periodData.hasVoted ?? false;
     
     // ━━━ 4. RENDER WITH SERVER DATA ━━━
     updateFaceoff(periodData);
     renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
+    const votedBanner = document.getElementById('alreadyVotedMsg');
+    if (votedBanner) votedBanner.classList.toggle('hidden', !hasVoted);
     renderVoterRegistry(periodData.totalVotes);
     renderTurnout(periodData);
     renderPeriodSummary(periodData);
@@ -4539,28 +4473,6 @@ function generateLocalAIResponse(query){
   if(q.includes("road")){return "Roads rank as the second most discussed issue (28% of posts). The Ngoliba-Kilimambogo road and Kilimambogo market access road are the most cited problem areas. Peter Kimani and David Kiprotich have made road infrastructure central to their campaigns.";}
   if(q.includes("turnout")||q.includes("voter")){const t=DB.getUsers().length;return `Ngoliba Ward has ${t} registered voters across 4 sublocations. Current cycle turnout is ${JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes.length} votes. Kilimambogo consistently shows below-average turnout — a key swing factor in cycle results.`;}
   return `Based on current Ngoliba InfoTrack data: <strong>${sorted[0].votes>0?sorted[0].name:"No clear leader yet"}</strong> is in the lead. The top ward issues are water access (43%) and roads (28%). Kilimambogo sublocation turnout is the key variable to watch this cycle.`;
-}
-
-// ═══ LIVE TICKER ═══
-function initLiveTicker(){
-  updateLiveTicker();
-  setInterval(updateLiveTicker, 15000);
-}
-
-function updateLiveTicker(){
-  const agg=getCurrentPeriodAggregated();
-  const sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
-  const items=[
-    `🏆 Leading Candidate: <strong>${sorted[0]?.name||"—"}</strong> (${sorted[0]?.party||"—"}) — ${sorted[0]?.votes||0} votes`,
-    `<strong>${DB.getUsers().length}</strong> registered voters in Ngoliba Ward`,
-    `<strong>${getAllTimeTotalVotes()}</strong> total votes cast across all cycles`,
-    `Top issue: <strong>💧 Water Access</strong> — 43% of forum posts`,
-    `<strong>${sorted[1]?.name||"—"}</strong> in 2nd with ${sorted[1]?.votes||0} votes`,
-    `<strong>Kilimambogo</strong> turnout is below ward average — every vote counts!`,
-  ];
-  const doubled=[...items,...items]; // duplicate for seamless loop
-  const el=document.getElementById("tickerInner");
-  if(el) el.innerHTML=doubled.map(i=>`<span class="ticker-item">${i}</span>`).join("");
 }
 
 function getTimeToReset(){
@@ -6194,14 +6106,6 @@ window.renderFaceoff = async function(){
   }
 };
 
-window.updateLiveTicker = function(){
-  // Live ticker animation - optional
-};
-
-window.initLiveTicker = function(){
-  // Initialize ticker - optional
-};
-
 // 4. OVERRIDE PROBLEMATIC FUNCTIONS
 
 const origRenderDashboard = window.renderDashboard;
@@ -6216,10 +6120,12 @@ window.renderDashboard = async function(){
     const historyRes = await fetch('/api/history?limit=10');
     const historyData = await historyRes.json();
 
-    const hasVoted = periodData.votesByUser?.includes(currentUser.id) ?? false;
+    const hasVoted = periodData.hasVoted ?? false;
 
     // Render candidates grid — THIS is what was missing
     if(typeof renderCandidatesGrid === 'function') renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
+    const votedBanner = document.getElementById('alreadyVotedMsg');
+    if (votedBanner) votedBanner.classList.toggle('hidden', !hasVoted);
 
     // Render supporting sections
     if(typeof renderTurnout === 'function') await renderTurnout();
@@ -6245,13 +6151,12 @@ window.enterDashboard = function(){
   }
   
   ["authContainer"].forEach(id => document.getElementById(id)?.classList.add("hidden"));
-  ["heroBand","countdownStrip","headerNav","avatarWrap","livePulse"]
+  ["heroBand","countdownStrip","headerNav","avatarWrap"]
     .forEach(id => document.getElementById(id)?.classList.remove("hidden"));
   
   if (typeof showPane === 'function') showPane("dashboardContent");
   if (typeof renderDashboard === 'function') renderDashboard();
   if (typeof showWelcomePopup === 'function') showWelcomePopup();
-  if (typeof initLiveTicker === 'function') initLiveTicker();
   if (typeof initPWAInstall === 'function') initPWAInstall();
   if (typeof seedInitialNotifications === 'function') seedInitialNotifications();
   if (typeof renderNotifBell === 'function') renderNotifBell();
@@ -6261,7 +6166,6 @@ window.enterDashboard = function(){
   if(typeof faceoffInterval !== 'undefined' && faceoffInterval) clearInterval(faceoffInterval);
   faceoffInterval = setInterval(() => {
     if (typeof updateFaceoff === 'function') updateFaceoff();
-    if (typeof updateLiveTicker === 'function') updateLiveTicker();
   }, 3000);
   
   if (typeof startCountdown === 'function') startCountdown();
@@ -6270,15 +6174,6 @@ window.enterDashboard = function(){
   if (typeof updateHeaderAvatar === 'function') updateHeaderAvatar();
 
   if(typeof showToast === 'function') showToast(`Welcome, ${currentUser.firstName || 'User'}! 👋`, "success");
-  
-  const lp = document.getElementById("livePulse");
-  if(lp) lp.style.display = "flex";
-  
-  setInterval(() => {
-    const n = Math.floor(Math.random() * 12) + 3;
-    const el = document.getElementById("liveViewers");
-    if(el) el.innerText = `${n} viewing live`;
-  }, 8000);
 };
 
 console.log('✅ DB references patched! Dashboard should work now.');
@@ -6586,72 +6481,7 @@ window.loadVoteHistory = async function () {
   }
 };
 
-// ── 2. renderLiveStandings — draws ranked candidate rows from /api/faceoff ──
-window.renderLiveStandings = async function () {
-  try {
-    const res  = await fetch('/api/faceoff');
-    const data = await res.json();
-    if (!data.success) return;
-
-    const allCandidates = data.allCandidates || data.candidates || [];
-    const totalVotes    = data.totalVotes || 0;
-    const listEl        = document.getElementById('liveStandingsList');
-    const leaderChip    = document.getElementById('lsLeaderChip');
-    const updatedEl     = document.getElementById('lsUpdated');
-
-    if (!listEl) return;
-
-    if (updatedEl) {
-      updatedEl.innerText = 'Updated ' + new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    }
-
-    if (totalVotes === 0) {
-      listEl.innerHTML = '<div class="ls-empty">No votes yet this cycle — be the first!</div>';
-      if (leaderChip) leaderChip.style.display = 'none';
-      return;
-    }
-
-    const rankClass = i => i === 0 ? 'ls-gold' : i === 1 ? 'ls-silver' : i === 2 ? 'ls-bronze' : '';
-    const maxVotes  = allCandidates[0]?.vote_count || 1;
-
-    listEl.innerHTML = allCandidates.map((c, i) => {
-      const votes = c.vote_count || 0;
-      const pct   = c.percentage || (totalVotes > 0 ? ((votes / totalVotes) * 100).toFixed(1) : '0.0');
-      const barW  = maxVotes > 0 ? Math.round((votes / maxVotes) * 100) : 0;
-      const isLeader = i === 0;
-      return `<div class="ls-row">
-        <div class="ls-rank ${rankClass(i)}">${i + 1}</div>
-        <img class="ls-img" src="${c.img || ''}" alt="${c.name}" loading="lazy"
-             onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.name)}&background=2d6a4f&color=fff&size=60'">
-        <div class="ls-info">
-          <div class="ls-name">${c.name}</div>
-          <div class="ls-party">${c.party || ''}</div>
-        </div>
-        <div class="ls-bar-wrap">
-          <div class="ls-bar">
-            <div class="ls-bar-fill${isLeader ? ' ls-leader-bar' : ''}" style="width:${barW}%"></div>
-          </div>
-        </div>
-        <div class="ls-votes-col">
-          <div class="ls-votes-num">${votes}</div>
-          <div class="ls-pct">${pct}%</div>
-        </div>
-      </div>`;
-    }).join('');
-
-    // Leader chip
-    if (leaderChip && allCandidates.length > 0) {
-      leaderChip.innerText = '🏆 ' + allCandidates[0].name.split(' ')[allCandidates[0].name.split(' ').length - 1];
-      leaderChip.style.display = '';
-    }
-
-  } catch (e) {
-    console.error('renderLiveStandings error:', e);
-  }
-};
-
-// ── 3. Override updateFaceoff — use /api/faceoff, update both faceoff widget
-//       AND the live standings panel. Replaces the previous stub/override. ──
+// ── 3. Override updateFaceoff — use /api/faceoff. Replaces the previous stub/override. ──
 window.updateFaceoff = async function () {
   try {
     const res  = await fetch('/api/faceoff');
@@ -6713,8 +6543,7 @@ window.updateFaceoff = async function () {
       }
     }
 
-    // Always update the live standings panel too
-    await window.renderLiveStandings();
+    // Faceoff widget updated; live standings panel removed
 
   } catch (e) {
     console.error('updateFaceoff error:', e);
@@ -6747,8 +6576,9 @@ window.renderFaceoff = window.updateFaceoff;
         try {
           const payload = JSON.parse(e.data);
           console.log('[SSE] vote-received:', payload);
-          // Refresh both the faceoff widget and the standings panel
+          // Refresh faceoff widget and full dashboard (updates hasVoted, vote counts, banner)
           await window.updateFaceoff();
+          if (typeof window.renderDashboard === 'function') await window.renderDashboard();
         } catch (err) {
           console.warn('[SSE] vote-received parse error:', err);
         }
