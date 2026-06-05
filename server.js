@@ -2,7 +2,7 @@
 // PostgreSQL version (no Netlify dependency)
 // Production-ready for Render
 require('dotenv').config();
-
+const analyticsRouter = require('./routes/analytics');
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
@@ -2119,12 +2119,18 @@ app.get('/api/voting-period', async (req, res) => {
 // ── PHASE 2: Mount voting router ──
 app.use(votingRouter);
 
+// ── PHASE 3: Mount analytics router ──
+app.use(analyticsRouter);
+
 // ── PHASE 2: Frontend page routes ──
 app.get('/voting', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'voting.html'));
 });
 app.get('/leaderboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'leaderboard.html'));
+});
+app.get('/advanced-leaderboard', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'advanced-leaderboard.html'));
 });
 app.get('/admin-voting', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin-voting.html'));
