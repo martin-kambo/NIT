@@ -3344,7 +3344,7 @@ async function renderDashboard(){
     window.userHasVoted = hasVoted;  // ← vote-eligibility source of truth
 
     // ━━━ 3. RENDER WITH SERVER DATA ━━━
-    updateFaceoff(periodData);
+    updateFaceoff();
     renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
     const votedBanner = document.getElementById('alreadyVotedMsg');
     if (votedBanner) votedBanner.classList.toggle('hidden', !hasVoted);
@@ -3489,19 +3489,52 @@ function renderHistoricalChart(){
   }
 }
 
-function updateFaceoff(){
+async function updateFaceoff(){
   if(!currentUser) return;
-  const agg=getCurrentPeriodAggregated();
-  const sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
+
+  // ── Fetch live cumulative vote totals + real photos from server ──
+  let candidates;
+  try {
+    const res  = await fetch('/api/faceoff');
+    const data = await res.json();
+    if(data.success && data.allCandidates && data.allCandidates.length){
+      // Normalise: server returns vote_count; map to votes for consistent access
+      candidates = data.allCandidates.map(c=>({
+        ...c,
+        votes: typeof c.vote_count === 'number' ? c.vote_count : (c.votes || 0)
+      }));
+    } else {
+      candidates = CANDIDATES.map(c=>({...c, votes:0}));
+    }
+  } catch(e) {
+    // Network failure — fall back to local candidate list with 0 votes
+    candidates = CANDIDATES.map(c=>({...c, votes:0}));
+  }
+
+  const sorted=[...candidates].sort((a,b)=>b.votes-a.votes);
   if(sorted.length<2) return;
   const right=sorted[0], left=sorted[1];
   const setEl=(id,val)=>{const el=document.getElementById(id);if(el&&el.innerText!==String(val)){el.innerText=val;el.classList.add("vote-flash");setTimeout(()=>el.classList.remove("vote-flash"),400);}};
-  document.getElementById("foLeftImg").src=left.img; document.getElementById("foLeftName").innerText=left.name; document.getElementById("foLeftParty").innerText=left.party; setEl("foLeftVotes",left.votes);
-  document.getElementById("foRightImg").src=right.img; document.getElementById("foRightName").innerText=right.name; document.getElementById("foRightParty").innerText=right.party; setEl("foRightVotes",right.votes);
-  const total=left.votes+right.votes; document.getElementById("foTotalVotes").innerText=total;
+
+  // Images — point straight at the portrait URL coming from the server
+  const foLI=document.getElementById("foLeftImg");
+  if(foLI && foLI.src !== left.img){ foLI.src=left.img; foLI.alt=left.name; }
+  document.getElementById("foLeftName").innerText=left.name;
+  document.getElementById("foLeftParty").innerText=left.party;
+  setEl("foLeftVotes",left.votes);
+
+  const foRI=document.getElementById("foRightImg");
+  if(foRI && foRI.src !== right.img){ foRI.src=right.img; foRI.alt=right.name; }
+  document.getElementById("foRightName").innerText=right.name;
+  document.getElementById("foRightParty").innerText=right.party;
+  setEl("foRightVotes",right.votes);
+
+  const total=left.votes+right.votes;
+  document.getElementById("foTotalVotes").innerText=total;
   document.getElementById("foProgressFill").style.width=`${Math.min(100,Math.floor((total/540)*100))}%`;
   const lp=total?Math.round((left.votes/total)*100):0, rp=total?Math.round((right.votes/total)*100):0;
-  document.getElementById("foLeftPct").innerText=`${lp}%`; document.getElementById("foRightPct").innerText=`${rp}%`;
+  document.getElementById("foLeftPct").innerText=`${lp}%`;
+  document.getElementById("foRightPct").innerText=`${rp}%`;
   document.getElementById("foWinnerChip").innerHTML=(right.votes>=270||left.votes>=270)?"🏆 WINNER DECLARED!":"⏳ Race in progress";
 }
 
