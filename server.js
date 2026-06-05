@@ -699,16 +699,10 @@ app.get('/api/candidates', (req, res) => {
 app.get('/api/me', async (req, res) => {
   try {
     const cookieHeader = req.headers.cookie || '';
-    const sessionMatch = cookieHeader.match(/session=([^;]*)/);
-    const sessionToken = sessionMatch ? sessionMatch[1] : null;
-    
-    if (!sessionToken) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    const session = verifySession(sessionToken);
+
+    const session = verifySession(cookieHeader);
     if (!session) {
-      return res.status(401).json({ error: 'Invalid session' });
+      return res.status(401).json({ error: 'Unauthorized' });
     }
     
     const result = await pool.query(
