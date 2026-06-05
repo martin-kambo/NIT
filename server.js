@@ -434,13 +434,6 @@ app.use((req, res, next) => {
 })();
 
 // ── Ensure voting_periods table exists with correct schema ──
-// Mirrors ensureNoticesTable() — runs every startup, idempotent.
-// This is the fix for GET /api/voting-period returning 500:
-//   initDB() early-exits when 'users' already exists, so voting_periods
-//   was never migrated and could be missing winner_id / winner_votes
-//   columns that voting.js requires. getCurrentPeriod() in voting.js
-//   uses an explicit column list — any mismatch throws and is swallowed
-//   as "Failed to fetch voting period".
 async function ensureVotingPeriodsTable() {
   try {
     // 1. Create with full schema if it doesn't exist
@@ -457,7 +450,6 @@ async function ensureVotingPeriodsTable() {
     `);
 
     // 2. Idempotent column migrations — add anything that might be missing
-    //    from an older schema without touching existing data.
     const cols = [
       `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS winner_id    INT`,
       `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS winner_votes INT DEFAULT 0`,
@@ -470,7 +462,32 @@ async function ensureVotingPeriodsTable() {
       try { await pool.query(sql); } catch (_) { /* already exists */ }
     }
 
-    // 3. Index for fast active-period look-ups
+    // 3. Also ensure votes table exists (may be absent on fresh DB after early-exit initDB)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS votes (
+        id           SERIAL PRIMARY KEY,
+        user_id      UUID,
+        candidate_id INT,
+        period_id    INT,
+        sublocation  VARCHAR(100),
+        ip_hash      VARCHAR(32),
+        timestamp    BIGINT
+      )
+    `);
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_candidate ON votes (candidate_id)`); } catch(_){}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_user_period ON votes (user_id, period_id)`); } catch(_){}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_period ON votes (period_id)`); } catch(_){}
+
+    // 4. Also ensure period_archives table exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS period_archives (
+        id          INT PRIMARY KEY,
+        period_data JSONB,
+        archived_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    // 5. Index for fast active-period look-ups
     try {
       await pool.query(`
         CREATE INDEX IF NOT EXISTS idx_voting_periods_active
@@ -481,31 +498,53 @@ async function ensureVotingPeriodsTable() {
 
     console.log('\u2705 voting_periods table ready');
 
-    // 4. Ensure there is always at least one active period
+    // 6. Ensure there is always exactly one active period
     const existing = await pool.query(
-      'SELECT id FROM voting_periods WHERE is_active = true LIMIT 1'
+      'SELECT id, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
     );
 
     if (existing.rows.length === 0) {
-      console.log('\ud83d\udcdd Creating initial voting period...');
+      console.log('\ud83d\udcdd No active voting period — creating one...');
       const now     = new Date();
-      const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
 
-      await pool.query(`
-        INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-        VALUES (
-          COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
-          $1, $2, true, 0
-        )
-      `, [now, endTime]);
+      const maxIdRes = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
+      const nextId   = parseInt(maxIdRes.rows[0].maxid) + 1;
 
-      console.log('\u2705 Active voting period created');
+      await pool.query(
+        `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+         VALUES ($1, $2, $3, true, 0)`,
+        [nextId, now, endTime]
+      );
+      console.log(`\u2705 Active voting period created (id=${nextId}, ends ${endTime.toISOString()})`);
     } else {
-      console.log('\u2705 Active voting period already exists (id=' + existing.rows[0].id + ')');
+      const period = existing.rows[0];
+      const isExpired = new Date(period.period_end) < new Date();
+      if (isExpired) {
+        // Close the expired period and open a fresh one
+        console.log(`\u26a0\ufe0f  Period ${period.id} has expired — closing and creating new one`);
+        await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
+
+        const now     = new Date();
+        const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        const maxIdRes = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
+        const nextId   = parseInt(maxIdRes.rows[0].maxid) + 1;
+
+        await pool.query(
+          `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+           VALUES ($1, $2, $3, true, 0)`,
+          [nextId, now, endTime]
+        );
+        console.log(`\u2705 Fresh voting period created (id=${nextId})`);
+      } else {
+        console.log(`\u2705 Active voting period OK (id=${period.id}, ends ${new Date(period.period_end).toISOString()})`);
+      }
     }
 
   } catch (e) {
-    console.error('\u274c ensureVotingPeriodsTable error:', e.message);
+    // Log the full stack so the real cause is visible in Render logs
+    console.error('\u274c ensureVotingPeriodsTable FAILED:', e.message);
+    console.error(e.stack);
   }
 }
 
@@ -936,7 +975,7 @@ app.post('/api/vote', async (req, res) => {
       [session.userId, periodId]
     );
     if (voteCheck.rows.length > 0)
-      return res.status(409).json({ success: false, alreadyVoted: true, error: 'You have already voted in this cycle. Please wait for the next voting period.' });
+      return res.status(400).json({ error: 'Already voted this period' });
 
     const userResult = await pool.query(
       'SELECT sublocation FROM users WHERE id = $1',
@@ -963,32 +1002,28 @@ app.post('/api/vote', async (req, res) => {
       'SELECT COUNT(*) as count FROM votes WHERE period_id = $1',
       [periodId]
     );
-    const periodTotalVotes = parseInt(totalRes.rows[0].count);
+    const voterCount = parseInt(totalRes.rows[0].count);
 
     let badge = null;
-    if (periodTotalVotes === 1) badge = '1st';
-    else if (periodTotalVotes === 2) badge = '2nd';
-    else if (periodTotalVotes === 3) badge = '3rd';
+    if (voterCount === 1) badge = '1st';
+    else if (voterCount === 2) badge = '2nd';
+    else if (voterCount === 3) badge = '3rd';
 
-    // Cumulative per-candidate counts across ALL periods
+    // Per-candidate counts for faceoff / live display
     const perCandRes = await pool.query(
-      'SELECT candidate_id, COUNT(*) as vote_count FROM votes GROUP BY candidate_id'
+      'SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
+      [periodId]
     );
     const votesByCandidate = {};
     perCandRes.rows.forEach(r => {
       votesByCandidate[r.candidate_id] = parseInt(r.vote_count);
     });
 
-    // All-time total votes
-    const allTimeRes = await pool.query('SELECT COUNT(*) as count FROM votes');
-    const totalVotes = parseInt(allTimeRes.rows[0].count);
-
     // ── Broadcast to every SSE subscriber (faceoff, voting-page live tab) ──
     broadcastVoteUpdate('vote-received', {
       candidateId,
       periodId,
-      totalVotes,
-      periodTotalVotes,
+      totalVotes: voterCount,
       votes: votesByCandidate[candidateId] || 1,
       votesByCandidate
     });
@@ -996,8 +1031,7 @@ app.post('/api/vote', async (req, res) => {
     return res.json({
       success: true,
       badge,
-      totalVotes,
-      periodTotalVotes,
+      totalVotes: voterCount,
       votesByCandidate,
       candidateId,
       periodId
@@ -1013,42 +1047,28 @@ app.post('/api/vote', async (req, res) => {
 // ════════════════════════════════════════════════
 app.get('/api/polling-results', async (req, res) => {
   try {
-    // Check authenticated user for hasVoted flag
-    const session = verifySession(req.headers.cookie || '');
-
     const periodResult = await pool.query(
       'SELECT * FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
     );
 
     if (periodResult.rows.length === 0) {
       return res
-        .set('Cache-Control', 'no-store')
+        .set('Cache-Control', 'public, max-age=5')
         .json({ 
           periodId: null, 
           totalVotes: 0, 
           votesByCandidate: {}, 
-          isActive: false,
-          hasVoted: false
+          isActive: false 
         });
     }
 
     const period = periodResult.rows[0];
-
-    // hasVoted: check if the authenticated user has voted in the current period
-    let hasVoted = false;
-    if (session) {
-      const voteCheck = await pool.query(
-        'SELECT id FROM votes WHERE user_id = $1 AND period_id = $2',
-        [session.userId, period.id]
-      );
-      hasVoted = voteCheck.rows.length > 0;
-    }
-
-    // Cumulative votes across ALL periods with sublocation breakdown
     const votesResult = await pool.query(
-      'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes GROUP BY candidate_id, sublocation'
+      'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
+      [period.id]
     );
 
+    // Build structure with sublocations and total
     const votesByCandidate = {};
     votesResult.rows.forEach(row => {
       if (!votesByCandidate[row.candidate_id]) {
@@ -1063,37 +1083,15 @@ app.get('/api/polling-results', async (req, res) => {
       votesByCandidate[row.candidate_id].sublocations[sublocKey] = count;
     });
 
-    // Also expose current-period breakdown for admin/analytics
-    const periodVotesResult = await pool.query(
-      'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
-      [period.id]
-    );
-    const periodVotesByCandidate = {};
-    periodVotesResult.rows.forEach(row => {
-      if (!periodVotesByCandidate[row.candidate_id]) {
-        periodVotesByCandidate[row.candidate_id] = { total: 0, sublocations: {} };
-      }
-      const count = parseInt(row.count);
-      periodVotesByCandidate[row.candidate_id].total += count;
-      const sublocKey = row.sublocation || 'Unknown';
-      periodVotesByCandidate[row.candidate_id].sublocations[sublocKey] = count;
-    });
-
-    // All-time total votes
-    const allTimeRes = await pool.query('SELECT COUNT(*) as count FROM votes');
-    const totalVotes = parseInt(allTimeRes.rows[0].count);
-
     return res
-      .set('Cache-Control', 'no-store')
+      .set('Cache-Control', 'public, max-age=5')
       .json({
         periodId: period.id,
         periodStart: period.period_start,
         periodEnd: period.period_end,
         isActive: period.is_active,
-        totalVotes,
-        votesByCandidate,
-        periodVotesByCandidate,
-        hasVoted,
+        totalVotes: parseInt(period.total_votes),
+        votesByCandidate: votesByCandidate,
         votesByUser: []
       });
   } catch (e) {
@@ -1270,11 +1268,42 @@ app.get('/api/my-votes', async (req, res) => {
   }
 });
 // ════════════════════════════════════════════════
+// ROUTE: /api/debug/db  (admin-only, logs DB state)
+// GET /api/debug/db?secret=YOUR_SESSION_SECRET
+// ════════════════════════════════════════════════
+app.get('/api/debug/db', async (req, res) => {
+  // Only accessible with the SESSION_SECRET as query param (not for production — remove when done)
+  if (req.query.secret !== process.env.SESSION_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const tables = await pool.query(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name`
+    );
+    const periods = await pool.query(
+      `SELECT id, period_start, period_end, is_active, total_votes FROM voting_periods ORDER BY id DESC LIMIT 5`
+    );
+    const voteCount = await pool.query(`SELECT COUNT(*) AS c FROM votes`);
+    const userCount = await pool.query(`SELECT COUNT(*) AS c FROM users`);
+    res.json({
+      tables:    tables.rows.map(r => r.table_name),
+      periods:   periods.rows,
+      voteCount: parseInt(voteCount.rows[0].c),
+      userCount: parseInt(userCount.rows[0].c),
+      now:       new Date().toISOString()
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message, stack: e.stack });
+  }
+});
+
+// ════════════════════════════════════════════════
 // CATCH-ALL & ERROR HANDLING
 // ════════════════════════════════════════════════
 
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
+  console.error('[GlobalErrorHandler]', req.method, req.path, err.message);
+  console.error(err.stack);
   res.status(500).json({ error: 'Internal server error' });
 });
 
@@ -1293,17 +1322,16 @@ app.get('/api/stats', async (req, res) => {
     );
     const period = periodResult.rows[0] || null;
 
-    // Cumulative vote counts across ALL periods
-    const allVotesResult = await pool.query(
-      'SELECT candidate_id, COUNT(*) as vote_count FROM votes GROUP BY candidate_id'
-    );
     const votesByCandidate = {};
-    allVotesResult.rows.forEach(row => {
-      votesByCandidate[row.candidate_id] = parseInt(row.vote_count);
-    });
-
-    const allTimeRes = await pool.query('SELECT COUNT(*) as count FROM votes');
-    const totalVotes = parseInt(allTimeRes.rows[0].count || 0);
+    if (period) {
+      const votesResult = await pool.query(
+        'SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
+        [period.id]
+      );
+      votesResult.rows.forEach(row => {
+        votesByCandidate[row.candidate_id] = parseInt(row.vote_count);
+      });
+    }
 
     // Real sublocation breakdown from users table
     const sublocResult = await pool.query(
@@ -1316,13 +1344,12 @@ app.get('/api/stats', async (req, res) => {
     res.json({
       success: true,
       registeredVoters,
-      totalVotes,
-      votesByCandidate,
       currentPeriod: period ? {
         periodId: period.id,
         totalVotes: parseInt(period.total_votes || 0),
         periodStart: period.period_start,
-        periodEnd: period.period_end
+        periodEnd: period.period_end,
+        votesByCandidate
       } : null,
       votersBySubLocation
     });
@@ -1431,21 +1458,17 @@ app.post('/api/forum', async (req, res) => {
   }
 });
 
-// GET /api/faceoff - Get top 2 candidates by cumulative (all-time) vote count
+// GET /api/faceoff - Top 2 candidates by CUMULATIVE votes across all cycles
 app.get('/api/faceoff', async (req, res) => {
   try {
-    const period = await pool.query(
-      'SELECT id, total_votes FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
-    );
-
-    // All-time cumulative vote counts across ALL periods
+    // Cumulative vote counts across ALL periods
     const allVotes = await pool.query(
-      `SELECT candidate_id, COUNT(*) as vote_count
-       FROM votes
-       GROUP BY candidate_id`
+      `SELECT candidate_id, COUNT(*) AS vote_count
+         FROM votes
+        GROUP BY candidate_id`
     );
 
-    // Build a full map: candidateId → cumulative vote count
+    // Build vote map
     const voteMap = {};
     allVotes.rows.forEach(r => {
       voteMap[parseInt(r.candidate_id)] = parseInt(r.vote_count);
@@ -1453,41 +1476,30 @@ app.get('/api/faceoff', async (req, res) => {
 
     const totalVotes = Object.values(voteMap).reduce((s, n) => s + n, 0);
 
-    if (!period.rows.length && totalVotes === 0) {
-      return res.json({
-        success: true,
-        candidates: CANDIDATES.slice(0, 2).map(c => ({ ...c, vote_count: 0 })),
-        periodId: null,
-        totalVotes: 0
-      });
-    }
-
-    const periodId = period.rows[0]?.id ?? null;
-
-    // Attach cumulative counts to every candidate and sort descending
+    // Attach counts to every candidate and sort descending
     const ranked = CANDIDATES.map(c => ({
       ...c,
-      vote_count: voteMap[c.id] || 0
+      vote_count: voteMap[c.id] || 0,
+      percentage: totalVotes > 0 ? ((( voteMap[c.id] || 0) / totalVotes) * 100).toFixed(1) : '0.0'
     })).sort((a, b) => b.vote_count - a.vote_count);
 
-    // Top 2 for the faceoff widget
-    const top2 = ranked.slice(0, 2).map(c => ({
-      ...c,
-      percentage: totalVotes > 0 ? ((c.vote_count / totalVotes) * 100).toFixed(1) : '0.0'
-    }));
+    const top2 = ranked.slice(0, 2);
+
+    // Also get current period for context
+    const periodRes = await pool.query(
+      'SELECT id FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
+    );
+    const periodId = periodRes.rows[0]?.id ?? null;
 
     res.json({
       success: true,
-      candidates: top2,
-      allCandidates: ranked.map(c => ({
-        ...c,
-        percentage: totalVotes > 0 ? ((c.vote_count / totalVotes) * 100).toFixed(1) : '0.0'
-      })),
+      candidates:    top2,
+      allCandidates: ranked,
       periodId,
       totalVotes
     });
   } catch (error) {
-    console.error('/api/faceoff error:', error);
+    console.error('/api/faceoff error:', error.message, error.stack);
     res.status(500).json({ success: false, error: 'Failed to get faceoff data' });
   }
 });
@@ -2000,6 +2012,78 @@ app.post('/api/ad-requests/:id/pay', async (req, res) => {
   } catch (err) {
     console.error('POST /api/ad-requests/:id/pay error:', err.message);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════
+// ROUTE: /api/voting-period  ← defined in server.js (authoritative)
+// Supersedes any version in routes/voting.js to guarantee req.pool
+// is always the live pool instance and errors are fully logged.
+// ════════════════════════════════════════════════
+app.get('/api/voting-period', async (req, res) => {
+  try {
+    // 1. Get active period
+    let periodRes = await pool.query(
+      `SELECT id, period_start, period_end, total_votes
+         FROM voting_periods
+        WHERE is_active = true
+        ORDER BY id DESC
+        LIMIT 1`
+    );
+
+    // 2. If none exists, auto-create one (safety net)
+    if (periodRes.rows.length === 0) {
+      console.warn('[voting-period] No active period found — creating one');
+      const now     = new Date();
+      const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const maxRes  = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
+      const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
+      await pool.query(
+        `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+           VALUES ($1, $2, $3, true, 0)`,
+        [nextId, now, endTime]
+      );
+      periodRes = await pool.query(
+        `SELECT id, period_start, period_end, total_votes
+           FROM voting_periods WHERE id = $1`, [nextId]
+      );
+    }
+
+    const period = periodRes.rows[0];
+    const now    = new Date();
+    const endsAt = new Date(period.period_end);
+    const secondsRemaining = Math.max(0, Math.floor((endsAt - now) / 1000));
+    const endsInMs         = Math.max(0, endsAt - now);
+
+    // 3. Check if authenticated user has voted this cycle
+    let userHasVoted = false;
+    const session = verifySession(req.headers.cookie || '');
+    if (session && session.userId) {
+      const voteCheck = await pool.query(
+        `SELECT 1 FROM votes WHERE user_id = $1 AND period_id = $2 LIMIT 1`,
+        [session.userId, period.id]
+      );
+      userHasVoted = voteCheck.rows.length > 0;
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        periodId:         period.id,
+        startedAt:        period.period_start,
+        endsAt:           period.period_end,
+        endsIn:           endsInMs,
+        secondsRemaining,
+        totalVotes:       parseInt(period.total_votes) || 0,
+        isActive:         true,
+        userHasVoted
+      }
+    });
+
+  } catch (e) {
+    console.error('[/api/voting-period] ERROR:', e.message);
+    console.error(e.stack);
+    return res.status(500).json({ success: false, error: 'Failed to fetch voting period' });
   }
 });
 
