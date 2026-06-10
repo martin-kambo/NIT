@@ -429,6 +429,7 @@ app.use((req, res, next) => {
     await ensureNoticesTable();
     await ensureVotingPeriodsTable();  // ← must run BEFORE ensureActivePeriod so schema is ready
     await ensureActivePeriod();        // now a no-op alias for backward compat
+    await ensureCandidatesTable();     // multi-category candidates (preserves MCA IDs 0-6)
   } else {
     console.warn('⚠️  Continuing without database. Some features may not work.');
   }
@@ -557,6 +558,79 @@ async function ensureActivePeriod() {
   await ensureVotingPeriodsTable();
 }
 
+// ══════════════════════════════════════════════════════════════════
+// CANDIDATES TABLE — multi-category support
+// Preserves all existing MCA candidate IDs (0-6) for vote backward-compat
+// ══════════════════════════════════════════════════════════════════
+const CANDIDATE_CATEGORIES = ['MCA', 'MP', 'Governor', 'WomenRep'];
+
+async function ensureCandidatesTable() {
+  try {
+    // Create table with INT primary key so we control IDs (0-6 match existing votes)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS candidates (
+        id         SERIAL  PRIMARY KEY,
+        name       VARCHAR(200) NOT NULL,
+        party      VARCHAR(100) DEFAULT '',
+        bio        TEXT         DEFAULT '',
+        img        VARCHAR(600) DEFAULT '',
+        category   VARCHAR(50)  DEFAULT 'MCA',
+        incumbent  BOOLEAN      DEFAULT false,
+        display_order INT       DEFAULT 0,
+        created_at TIMESTAMP    DEFAULT NOW()
+      )
+    `);
+
+    // Idempotent migrations
+    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS category      VARCHAR(50)  DEFAULT 'MCA'`);
+    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS incumbent     BOOLEAN      DEFAULT false`);
+    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS display_order INT          DEFAULT 0`);
+    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS bio           TEXT         DEFAULT ''`);
+    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS img           VARCHAR(600) DEFAULT ''`);
+
+    // Indexes
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_candidates_category ON candidates(category)`);
+
+    // Seed the original 7 MCA candidates (IDs 0-6) if table is empty.
+    // Using explicit IDs preserves all existing vote records that reference 0-6.
+    const { rows } = await pool.query('SELECT COUNT(*) AS count FROM candidates');
+    if (parseInt(rows[0].count) === 0) {
+      const defaults = [
+        { id:0, name:'Hon. James Mwangi', party:'UDA (Incumbent)',  bio:'Two-term MCA, water projects.',    img:'https://randomuser.me/api/portraits/men/32.jpg',    incumbent:true  },
+        { id:1, name:'Grace Wanjiku',     party:'Independent',      bio:'Teacher & community organizer.',   img:'https://randomuser.me/api/portraits/women/68.jpg',  incumbent:false },
+        { id:2, name:'Peter Kimani',      party:'Jubilee',          bio:'Agri-business entrepreneur.',      img:'https://randomuser.me/api/portraits/men/45.jpg',    incumbent:false },
+        { id:3, name:'Sarah Nduati',      party:'Wiper',            bio:'Public health expert.',            img:'https://randomuser.me/api/portraits/women/22.jpg',  incumbent:false },
+        { id:4, name:'John Otieno',       party:'Independent',      bio:'Farmer cooperative leader.',       img:'https://randomuser.me/api/portraits/men/89.jpg',    incumbent:false },
+        { id:5, name:'Mary Wambui',       party:'Maendeleo',        bio:'ICT & agribusiness graduate.',     img:'https://randomuser.me/api/portraits/women/54.jpg', incumbent:false },
+        { id:6, name:'David Kiprotich',   party:'Roots',            bio:'Governance activist.',             img:'https://randomuser.me/api/portraits/men/99.jpg',    incumbent:false }
+      ];
+      for (const c of defaults) {
+        await pool.query(
+          `INSERT INTO candidates (id, name, party, bio, img, category, incumbent, display_order)
+           VALUES ($1,$2,$3,$4,$5,'MCA',$6,$1)
+           ON CONFLICT (id) DO NOTHING`,
+          [c.id, c.name, c.party, c.bio, c.img, c.incumbent]
+        );
+      }
+      console.log('✅ Default MCA candidates seeded (IDs 0-6)');
+    }
+
+    // Ensure the sequence starts ABOVE the max existing ID so new inserts
+    // never clash with the original 0-6 MCA candidate IDs.
+    await pool.query(`
+      SELECT setval(
+        pg_get_serial_sequence('candidates', 'id'),
+        GREATEST(7, (SELECT COALESCE(MAX(id), 6) + 1 FROM candidates)),
+        false
+      )
+    `);
+
+    console.log('✅ candidates table ready');
+  } catch (e) {
+    console.error('❌ ensureCandidatesTable error:', e.message);
+  }
+}
+
 // ── Middleware ──
 app.use(cors({
   origin: true,
@@ -683,16 +757,37 @@ const CANDIDATES = [
 
 // ════════════════════════════════════════════════
 // ROUTE: /api/candidates (PUBLIC - NO AUTH REQUIRED)
+// Supports ?category=MCA|MP|Governor|WomenRep
+// Defaults to all candidates when no category specified (backward compat)
 // ════════════════════════════════════════════════
-app.get('/api/candidates', (req, res) => {
+app.get('/api/candidates', async (req, res) => {
   try {
-    return res.json({ 
-      success: true, 
-      candidates: CANDIDATES 
-    });
+    const { category } = req.query;
+    let result;
+    if (category) {
+      result = await pool.query(
+        `SELECT id, name, party, bio, img, category, incumbent
+           FROM candidates
+          WHERE category = $1
+          ORDER BY display_order, id`,
+        [category]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT id, name, party, bio, img, category, incumbent
+           FROM candidates
+          ORDER BY category, display_order, id`
+      );
+    }
+
+    // If DB has no rows yet (first boot race condition), fall back to in-memory list
+    const candidates = result.rows.length > 0 ? result.rows : CANDIDATES.map(c => ({ ...c, category: 'MCA' }));
+
+    return res.json({ success: true, candidates });
   } catch (e) {
     console.error('/api/candidates error:', e);
-    return res.status(500).json({ error: 'Failed to fetch candidates' });
+    // Fall back to in-memory for any DB error
+    return res.json({ success: true, candidates: CANDIDATES.map(c => ({ ...c, category: 'MCA' })) });
   }
 });
 
@@ -1248,19 +1343,32 @@ app.get('/api/my-votes', async (req, res) => {
       [session.userId]
     );
 
-    // Enrich with candidate name from the in-memory list
-    const CANDS = [
-      { id: 0, name: 'Hon. James Mwangi', party: 'Jubilee' },
-      { id: 1, name: 'Grace Wanjiku',     party: 'ODM'     },
-      { id: 2, name: 'Peter Kimani',      party: 'UDA'     },
-      { id: 3, name: 'Sarah Nduati',      party: 'Wiper'   },
-      { id: 4, name: 'John Otieno',       party: 'ANC'     },
-      { id: 5, name: 'Mary Wambui',       party: 'Ford-K'  },
-      { id: 6, name: 'David Kiprotich',   party: 'Independent' }
+    // Enrich with candidate name + category from DB (fall back to in-memory for MCA 0-6)
+    const candIdsNeeded = [...new Set(result.rows.map(r => parseInt(r.candidate_id)))];
+    let candMap = {};
+    if (candIdsNeeded.length > 0) {
+      try {
+        const cr = await pool.query(
+          `SELECT id, name, party, category FROM candidates WHERE id = ANY($1)`,
+          [candIdsNeeded]
+        );
+        cr.rows.forEach(c => { candMap[c.id] = c; });
+      } catch (_) {}
+    }
+    // In-memory fallback for original MCA candidates
+    const CANDS_FALLBACK = [
+      { id: 0, name: 'Hon. James Mwangi', party: 'Jubilee',      category: 'MCA' },
+      { id: 1, name: 'Grace Wanjiku',     party: 'ODM',          category: 'MCA' },
+      { id: 2, name: 'Peter Kimani',      party: 'UDA',          category: 'MCA' },
+      { id: 3, name: 'Sarah Nduati',      party: 'Wiper',        category: 'MCA' },
+      { id: 4, name: 'John Otieno',       party: 'ANC',          category: 'MCA' },
+      { id: 5, name: 'Mary Wambui',       party: 'Ford-K',       category: 'MCA' },
+      { id: 6, name: 'David Kiprotich',   party: 'Independent',  category: 'MCA' }
     ];
 
     const votes = result.rows.map(row => {
-      const cand = CANDS.find(c => c.id === parseInt(row.candidate_id)) || {};
+      const cid = parseInt(row.candidate_id);
+      const cand = candMap[cid] || CANDS_FALLBACK.find(c => c.id === cid) || {};
       return {
         id:               row.id,
         candidateId:      parseInt(row.candidate_id),
@@ -1310,6 +1418,95 @@ app.get('/api/debug/db', async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message, stack: e.stack });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// ADMIN CANDIDATE MANAGEMENT — Multi-category support
+// All routes require X-Admin-Password header (same as notices admin)
+// ══════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/candidates?category=MCA — list candidates (optionally filtered)
+app.get('/api/admin/candidates', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  const { category } = req.query;
+  try {
+    const result = category
+      ? await pool.query(
+          `SELECT * FROM candidates WHERE category = $1 ORDER BY display_order, id`,
+          [category]
+        )
+      : await pool.query(
+          `SELECT * FROM candidates ORDER BY category, display_order, id`
+        );
+    res.json({ success: true, candidates: result.rows });
+  } catch (err) {
+    console.error('GET /api/admin/candidates error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/admin/candidates — add a new candidate
+app.post('/api/admin/candidates', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  const { name, party, bio, img, category, incumbent } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ success: false, error: 'name is required' });
+  const cat = CANDIDATE_CATEGORIES.includes(category) ? category : 'MCA';
+  try {
+    // display_order = 1 + current max within category
+    const maxOrd = await pool.query(
+      `SELECT COALESCE(MAX(display_order), -1) AS max_ord FROM candidates WHERE category = $1`,
+      [cat]
+    );
+    const nextOrd = parseInt(maxOrd.rows[0].max_ord) + 1;
+    const result = await pool.query(
+      `INSERT INTO candidates (name, party, bio, img, category, incumbent, display_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', nextOrd]
+    );
+    res.json({ success: true, candidate: result.rows[0] });
+  } catch (err) {
+    console.error('POST /api/admin/candidates error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/admin/candidates/:id — edit an existing candidate
+app.put('/api/admin/candidates/:id', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  const { name, party, bio, img, category, incumbent } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ success: false, error: 'name is required' });
+  const cat = CANDIDATE_CATEGORIES.includes(category) ? category : 'MCA';
+  try {
+    const result = await pool.query(
+      `UPDATE candidates
+          SET name=$1, party=$2, bio=$3, img=$4, category=$5, incumbent=$6
+        WHERE id=$7
+        RETURNING *`,
+      [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    res.json({ success: true, candidate: result.rows[0] });
+  } catch (err) {
+    console.error('PUT /api/admin/candidates/:id error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/admin/candidates/:id — remove a candidate
+app.delete('/api/admin/candidates/:id', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  try {
+    const result = await pool.query(
+      `DELETE FROM candidates WHERE id=$1 RETURNING id, name, category`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    res.json({ success: true, deleted: result.rows[0] });
+  } catch (err) {
+    console.error('DELETE /api/admin/candidates/:id error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1475,16 +1672,42 @@ app.post('/api/forum', async (req, res) => {
 });
 
 // GET /api/faceoff - Top 2 candidates by CUMULATIVE votes across all cycles
+// Supports ?category=MCA|MP|Governor|WomenRep (defaults to MCA for backward compat)
 app.get('/api/faceoff', async (req, res) => {
   try {
-    // Cumulative vote counts across ALL periods
+    const category = req.query.category || 'MCA';
+
+    // Load candidates for this category from DB
+    let candRes;
+    try {
+      candRes = await pool.query(
+        `SELECT id, name, party, bio, img, category, incumbent
+           FROM candidates
+          WHERE category = $1
+          ORDER BY display_order, id`,
+        [category]
+      );
+    } catch (_) { candRes = { rows: [] }; }
+
+    // Fallback to in-memory CANDIDATES if DB not ready / empty
+    const candidates = candRes.rows.length > 0
+      ? candRes.rows
+      : (category === 'MCA' ? CANDIDATES.map(c => ({ ...c, category: 'MCA' })) : []);
+
+    if (candidates.length === 0) {
+      return res.json({ success: true, candidates: [], allCandidates: [], periodId: null, totalVotes: 0 });
+    }
+
+    // Cumulative vote counts for this category's candidates
+    const candidateIds = candidates.map(c => c.id);
     const allVotes = await pool.query(
       `SELECT candidate_id, COUNT(*) AS vote_count
          FROM votes
-        GROUP BY candidate_id`
+        WHERE candidate_id = ANY($1)
+        GROUP BY candidate_id`,
+      [candidateIds]
     );
 
-    // Build vote map
     const voteMap = {};
     allVotes.rows.forEach(r => {
       voteMap[parseInt(r.candidate_id)] = parseInt(r.vote_count);
@@ -1492,16 +1715,14 @@ app.get('/api/faceoff', async (req, res) => {
 
     const totalVotes = Object.values(voteMap).reduce((s, n) => s + n, 0);
 
-    // Attach counts to every candidate and sort descending
-    const ranked = CANDIDATES.map(c => ({
+    const ranked = candidates.map(c => ({
       ...c,
       vote_count: voteMap[c.id] || 0,
-      percentage: totalVotes > 0 ? ((( voteMap[c.id] || 0) / totalVotes) * 100).toFixed(1) : '0.0'
+      percentage: totalVotes > 0 ? (((voteMap[c.id] || 0) / totalVotes) * 100).toFixed(1) : '0.0'
     })).sort((a, b) => b.vote_count - a.vote_count);
 
     const top2 = ranked.slice(0, 2);
 
-    // Also get current period for context
     const periodRes = await pool.query(
       'SELECT id FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
     );

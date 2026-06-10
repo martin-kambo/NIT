@@ -121,6 +121,18 @@ tr:hover td { background: var(--light-gray); }
 
 .hidden { display: none !important; }
 @media (max-width: 768px) { .sidebar { width: 220px; } .main { padding: 1rem; } }
+
+/* CANDIDATE MODAL */
+.cand-modal-wrap { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 300; display: flex; align-items: center; justify-content: center; padding: 1rem; opacity: 0; visibility: hidden; transition: all 0.2s; }
+.cand-modal-wrap.open { opacity: 1; visibility: visible; }
+.cand-modal-box { background: white; border-radius: 1.25rem; padding: 2rem; max-width: 520px; width: 100%; box-shadow: 0 40px 80px rgba(0,0,0,0.3); max-height: 90vh; overflow-y: auto; }
+.cand-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; margin-bottom: 1.25rem; }
+.cand-form-grid .full { grid-column: 1 / -1; }
+.cat-selector { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.cat-btn { padding: 0.4rem 0.9rem; border-radius: 50px; font-size: 0.78rem; font-weight: 700; border: 1.5px solid #e5e7eb; background: var(--light-gray); color: var(--mid-gray); cursor: pointer; transition: all 0.2s; font-family: 'Outfit', sans-serif; }
+.cat-btn.active { background: var(--forest); color: var(--gold); border-color: var(--forest); }
+.candidate-img-preview { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; border: 2px solid var(--light-gray); display: none; }
+.candidate-img-preview.show { display: block; }
 </style>
 </head>
 <body>
@@ -154,6 +166,7 @@ tr:hover td { background: var(--light-gray); }
       </div>
     </div>
     <button class="nav-item active" onclick="showPage('dashboard')"><i class="fas fa-chart-pie"></i> Dashboard</button>
+    <button class="nav-item" onclick="showPage('candidates')"><i class="fas fa-user-tie"></i> Candidates</button>
     <button class="nav-item" onclick="showPage('periods')"><i class="fas fa-clock"></i> Periods</button>
     <button class="nav-item" onclick="showPage('users')"><i class="fas fa-users"></i> Voters</button>
     <div class="sidebar-logout">
@@ -257,7 +270,99 @@ tr:hover td { background: var(--light-gray); }
       </div>
     </div>
 
+    <!-- CANDIDATES PAGE -->
+    <div class="page" id="page-candidates">
+      <div class="page-header">
+        <div class="page-title">Candidate Management</div>
+        <div class="page-sub">Add, edit, and manage candidates across all elective positions</div>
+      </div>
+
+      <!-- Category selector -->
+      <div class="panel" style="padding:1.25rem 1.75rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;">
+          <div>
+            <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--mid-gray);margin-bottom:0.5rem;">Filter by Position</div>
+            <div class="cat-selector" id="adminCatSelector">
+              <button class="cat-btn active" data-cat="MCA"       onclick="selectAdminCategory('MCA')">🏛 MCA</button>
+              <button class="cat-btn"        data-cat="MP"        onclick="selectAdminCategory('MP')">🇰🇪 MP</button>
+              <button class="cat-btn"        data-cat="Governor"  onclick="selectAdminCategory('Governor')">⭐ Governor</button>
+              <button class="cat-btn"        data-cat="WomenRep"  onclick="selectAdminCategory('WomenRep')">👑 Women Rep</button>
+            </div>
+          </div>
+          <button class="btn-sm btn-green" onclick="openAddCandidateModal()"><i class="fas fa-plus"></i> Add Candidate</button>
+        </div>
+      </div>
+
+      <!-- Candidate list for selected category -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title"><i class="fas fa-user-tie" style="color:var(--blue)"></i> <span id="candPanelTitle">MCA Aspirants</span></div>
+          <button class="btn-sm btn-ghost" onclick="loadCandidatesAdmin()"><i class="fas fa-sync"></i> Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Photo</th><th>Name</th><th>Party</th><th>Category</th><th>Incumbent</th><th>Actions</th></tr></thead>
+            <tbody id="candidatesTable">
+              <tr><td colspan="6" style="text-align:center;color:var(--mid-gray);padding:2rem;">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </main>
+</div>
+
+<!-- CANDIDATE MODAL (Add / Edit) -->
+<div class="cand-modal-wrap" id="candidateModal">
+  <div class="cand-modal-box">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
+      <div class="modal-title" id="candModalTitle" style="margin-bottom:0;">Add Candidate</div>
+      <button style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--mid-gray);" onclick="closeCandModal()">×</button>
+    </div>
+    <input type="hidden" id="candEditId">
+    <div style="margin-bottom:1rem;">
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--mid-gray);margin-bottom:0.4rem;">Position / Category</div>
+      <div class="cat-selector" id="modalCatSelector">
+        <button class="cat-btn active" data-cat="MCA"      onclick="setModalCategory('MCA')">🏛 MCA</button>
+        <button class="cat-btn"        data-cat="MP"       onclick="setModalCategory('MP')">🇰🇪 MP</button>
+        <button class="cat-btn"        data-cat="Governor" onclick="setModalCategory('Governor')">⭐ Governor</button>
+        <button class="cat-btn"        data-cat="WomenRep" onclick="setModalCategory('WomenRep')">👑 Women Rep</button>
+      </div>
+    </div>
+    <div class="cand-form-grid">
+      <div class="full field">
+        <label style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--mid-gray);display:block;margin-bottom:0.3rem;">Full Name *</label>
+        <input type="text" id="candName" placeholder="e.g. Grace Wanjiku" style="width:100%;padding:0.7rem 0.9rem;border:1.5px solid #e5e7eb;border-radius:0.6rem;font-size:0.875rem;font-family:'Outfit',sans-serif;outline:none;">
+      </div>
+      <div class="field">
+        <label style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--mid-gray);display:block;margin-bottom:0.3rem;">Party / Affiliation</label>
+        <input type="text" id="candParty" placeholder="e.g. Independent" style="width:100%;padding:0.7rem 0.9rem;border:1.5px solid #e5e7eb;border-radius:0.6rem;font-size:0.875rem;font-family:'Outfit',sans-serif;outline:none;">
+      </div>
+      <div class="field" style="display:flex;align-items:center;gap:0.5rem;padding-top:1.2rem;">
+        <input type="checkbox" id="candIncumbent" style="width:18px;height:18px;accent-color:var(--forest);">
+        <label for="candIncumbent" style="font-size:0.85rem;cursor:pointer;font-weight:600;">Incumbent</label>
+      </div>
+      <div class="full field">
+        <label style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--mid-gray);display:block;margin-bottom:0.3rem;">Bio (short description)</label>
+        <textarea id="candBio" rows="2" placeholder="e.g. Teacher &amp; community organizer." style="width:100%;padding:0.7rem 0.9rem;border:1.5px solid #e5e7eb;border-radius:0.6rem;font-size:0.875rem;font-family:'Outfit',sans-serif;outline:none;resize:vertical;"></textarea>
+      </div>
+      <div class="full field" style="display:flex;align-items:center;gap:0.75rem;">
+        <div style="flex:1;">
+          <label style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--mid-gray);display:block;margin-bottom:0.3rem;">Photo URL</label>
+          <input type="url" id="candImg" placeholder="https://randomuser.me/api/portraits/…" style="width:100%;padding:0.7rem 0.9rem;border:1.5px solid #e5e7eb;border-radius:0.6rem;font-size:0.875rem;font-family:'Outfit',sans-serif;outline:none;" oninput="previewCandImg(this.value)">
+        </div>
+        <div style="flex-shrink:0;margin-top:1.4rem;">
+          <img id="candImgPreview" class="candidate-img-preview" src="" alt="Preview">
+        </div>
+      </div>
+    </div>
+    <div id="candModalError" style="display:none;background:rgba(230,57,70,0.08);border:1px solid rgba(230,57,70,0.3);border-radius:0.5rem;padding:0.6rem 0.85rem;font-size:0.8rem;color:#dc2626;margin-bottom:1rem;"></div>
+    <div style="display:flex;gap:0.75rem;">
+      <button class="btn-sm btn-green" style="flex:1;padding:0.7rem;" onclick="saveCandidateModal()"><i class="fas fa-save"></i> <span id="candSaveBtnText">Save Candidate</span></button>
+      <button class="btn-sm btn-ghost" style="flex:1;padding:0.7rem;" onclick="closeCandModal()">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <!-- Confirm Modal -->
@@ -300,6 +405,7 @@ async function login() {
     if (!res.ok) { showError(errEl, data.error || 'Login failed'); btn.disabled = false; btn.innerHTML = 'Sign In <i class="fas fa-arrow-right"></i>'; return; }
     adminToken = data.token;
     sessionStorage.setItem('adminToken', adminToken);
+    sessionStorage.setItem('adminPwd', pwd);   // stored for x-admin-password header (candidate CRUD)
     document.getElementById('loginWrap').style.display = 'none';
     document.getElementById('adminShell').classList.add('visible');
     loadDashboard();
@@ -307,7 +413,9 @@ async function login() {
 }
 
 function adminLogout() {
-  adminToken = null; sessionStorage.removeItem('adminToken');
+  adminToken = null;
+  sessionStorage.removeItem('adminToken');
+  sessionStorage.removeItem('adminPwd');
   document.getElementById('adminShell').classList.remove('visible');
   document.getElementById('loginWrap').style.display = 'flex';
   document.getElementById('adminPassword').value = '';
@@ -329,31 +437,40 @@ function showPage(page) {
   if (page === 'dashboard') loadDashboard();
   if (page === 'periods') loadPeriods();
   if (page === 'users') loadUsers();
+  if (page === 'candidates') loadCandidatesAdmin();
 }
 
 // ── DASHBOARD ──
 async function loadDashboard() {
-  const data = await adminFetch({ action: 'get_stats' });
+  const [statsData, mcaCandRes] = await Promise.all([
+    adminFetch({ action: 'get_stats' }),
+    fetch('/api/candidates?category=MCA').then(r => r.json()).catch(() => ({ candidates: CANDIDATES }))
+  ]);
+  const data = statsData;
   if (!data) return;
+
+  // Use live DB candidates; fall back to hardcoded list
+  const liveCandidates = (mcaCandRes.candidates && mcaCandRes.candidates.length)
+    ? mcaCandRes.candidates
+    : CANDIDATES;
 
   document.getElementById('statVoters').textContent = data.registeredVoters;
   document.getElementById('statVotes').textContent = data.currentPeriod?.totalVotes ?? 0;
   document.getElementById('statPeriod').textContent = data.currentPeriod ? `#${data.currentPeriod.periodId}` : '—';
-  currentPeriodId = data.currentPeriod?.periodId ?? null; // ✅ Bug 5 fix: store for end_period action
+  currentPeriodId = data.currentPeriod?.periodId ?? null;
 
   // Timer
-  // Timer (use endTime instead of periodEnd)
-if (data.currentPeriod?.endTime) {
-  currentPeriodEnd = new Date(data.currentPeriod.endTime);
+  if (data.currentPeriod?.endTime) {
+    currentPeriodEnd = new Date(data.currentPeriod.endTime);
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(updateTimer, 500);
     updateTimer();
   }
 
-  // Candidate bars
+  // Candidate bars — MCA only on dashboard
   const vbc = data.currentPeriod?.votesByCandidate || {};
-  const maxV = Math.max(...CANDIDATES.map(c => vbc[c.id] || 0), 1);
-  document.getElementById('candidateBars').innerHTML = CANDIDATES
+  const maxV = Math.max(...liveCandidates.map(c => vbc[c.id] || 0), 1);
+  document.getElementById('candidateBars').innerHTML = liveCandidates
     .map(c => ({ ...c, votes: vbc[c.id] || 0 }))
     .sort((a, b) => b.votes - a.votes)
     .map(c => `
@@ -456,10 +573,166 @@ function showToast(msg, type = 'success') {
 }
 function showError(el, msg) { el.textContent = msg; el.classList.add('show'); }
 
+// ── CANDIDATE MANAGEMENT ──
+const ADMIN_PASSWORD = () => sessionStorage.getItem('adminToken') ? null : null; // token used via header
+const CAT_LABELS = { MCA: 'MCA Aspirants', MP: 'MP Candidates', Governor: 'Governor Candidates', WomenRep: 'Women Rep Candidates' };
+let adminCurrentCategory = 'MCA';
+
+function selectAdminCategory(cat) {
+  adminCurrentCategory = cat;
+  // Update button states
+  document.querySelectorAll('#adminCatSelector .cat-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.cat === cat);
+  });
+  const titleEl = document.getElementById('candPanelTitle');
+  if (titleEl) titleEl.textContent = CAT_LABELS[cat] || cat;
+  loadCandidatesAdmin();
+}
+
+async function loadCandidatesAdmin() {
+  const tbody = document.getElementById('candidatesTable');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mid-gray);padding:2rem;">Loading…</td></tr>';
+  try {
+    const res = await fetch(`/api/admin/candidates?category=${adminCurrentCategory}`, {
+      headers: { 'x-admin-password': sessionStorage.getItem('adminPwd') || '' }
+    });
+    const data = await res.json();
+    if (!data.success) { tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red);padding:1.5rem;">${data.error || 'Failed to load'}</td></tr>`; return; }
+    const cands = data.candidates;
+    if (!cands.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mid-gray);padding:2rem;">No candidates yet. Click <strong>Add Candidate</strong> to get started.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = cands.map(c => `
+      <tr>
+        <td><img src="${c.img || 'https://ui-avatars.com/api/?name='+encodeURIComponent(c.name)+'&background=2d6a4f&color=fff&size=40'}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid var(--light-gray);" loading="lazy" alt="${c.name}" onerror="this.src='https://ui-avatars.com/api/?name='+encodeURIComponent('${c.name}')+'&background=2d6a4f&color=fff&size=40'"></td>
+        <td style="font-weight:600;">${c.name}</td>
+        <td style="font-size:0.82rem;">${c.party || '—'}</td>
+        <td><span class="badge badge-blue">${c.category}</span></td>
+        <td style="text-align:center;">${c.incumbent ? '✅' : '—'}</td>
+        <td style="display:flex;gap:0.4rem;padding:0.6rem 0.75rem;">
+          <button class="btn-sm btn-ghost" style="padding:0.35rem 0.65rem;font-size:0.75rem;" onclick="openEditCandidateModal(${JSON.stringify(c).replace(/"/g,'&quot;')})"><i class="fas fa-pen"></i></button>
+          <button class="btn-sm btn-red" style="padding:0.35rem 0.65rem;font-size:0.75rem;" onclick="confirmDeleteCandidate(${c.id},'${c.name.replace(/'/g,"\\'")}')"><i class="fas fa-trash"></i></button>
+        </td>
+      </tr>`).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red);padding:1.5rem;">Network error: ${err.message}</td></tr>`;
+  }
+}
+
+function openAddCandidateModal() {
+  document.getElementById('candModalTitle').textContent = 'Add Candidate';
+  document.getElementById('candSaveBtnText').textContent = 'Save Candidate';
+  document.getElementById('candEditId').value = '';
+  document.getElementById('candName').value = '';
+  document.getElementById('candParty').value = '';
+  document.getElementById('candBio').value = '';
+  document.getElementById('candImg').value = '';
+  document.getElementById('candIncumbent').checked = false;
+  document.getElementById('candImgPreview').classList.remove('show');
+  document.getElementById('candModalError').style.display = 'none';
+  setModalCategory(adminCurrentCategory);
+  document.getElementById('candidateModal').classList.add('open');
+}
+
+function openEditCandidateModal(c) {
+  document.getElementById('candModalTitle').textContent = 'Edit Candidate';
+  document.getElementById('candSaveBtnText').textContent = 'Update Candidate';
+  document.getElementById('candEditId').value = c.id;
+  document.getElementById('candName').value = c.name || '';
+  document.getElementById('candParty').value = c.party || '';
+  document.getElementById('candBio').value = c.bio || '';
+  document.getElementById('candImg').value = c.img || '';
+  document.getElementById('candIncumbent').checked = !!c.incumbent;
+  document.getElementById('candModalError').style.display = 'none';
+  previewCandImg(c.img);
+  setModalCategory(c.category || 'MCA');
+  document.getElementById('candidateModal').classList.add('open');
+}
+
+function closeCandModal() {
+  document.getElementById('candidateModal').classList.remove('open');
+}
+
+function setModalCategory(cat) {
+  document.querySelectorAll('#modalCatSelector .cat-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.cat === cat);
+  });
+}
+
+function previewCandImg(url) {
+  const img = document.getElementById('candImgPreview');
+  if (url && url.startsWith('http')) { img.src = url; img.classList.add('show'); }
+  else { img.classList.remove('show'); }
+}
+
+async function saveCandidateModal() {
+  const id = document.getElementById('candEditId').value;
+  const name = document.getElementById('candName').value.trim();
+  const party = document.getElementById('candParty').value.trim();
+  const bio = document.getElementById('candBio').value.trim();
+  const img = document.getElementById('candImg').value.trim();
+  const incumbent = document.getElementById('candIncumbent').checked;
+  const category = document.querySelector('#modalCatSelector .cat-btn.active')?.dataset.cat || adminCurrentCategory;
+  const errEl = document.getElementById('candModalError');
+
+  if (!name) { errEl.textContent = 'Name is required.'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+
+  const body = JSON.stringify({ name, party, bio, img, category, incumbent });
+  const method = id ? 'PUT' : 'POST';
+  const url = id ? `/api/admin/candidates/${id}` : '/api/admin/candidates';
+  const pwd = sessionStorage.getItem('adminPwd') || '';
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'x-admin-password': pwd },
+      body
+    });
+    const data = await res.json();
+    if (!data.success) { errEl.textContent = data.error || 'Save failed'; errEl.style.display = 'block'; return; }
+    closeCandModal();
+    showToast(id ? '✅ Candidate updated' : '✅ Candidate added', 'success');
+    // Sync admin category view to where the saved candidate lives
+    adminCurrentCategory = category;
+    document.querySelectorAll('#adminCatSelector .cat-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.cat === category);
+    });
+    const titleEl = document.getElementById('candPanelTitle');
+    if (titleEl) titleEl.textContent = CAT_LABELS[category] || category;
+    loadCandidatesAdmin();
+  } catch (err) {
+    errEl.textContent = 'Network error: ' + err.message; errEl.style.display = 'block';
+  }
+}
+
+function confirmDeleteCandidate(id, name) {
+  document.getElementById('confirmTitle').textContent = `Delete ${name}?`;
+  document.getElementById('confirmMsg').textContent = `This will permanently remove "${name}" from the candidate list. Existing vote records referencing this candidate will be unaffected.`;
+  document.getElementById('confirmYes').onclick = async () => {
+    closeModal();
+    try {
+      const res = await fetch(`/api/admin/candidates/${id}`, {
+        method: 'DELETE',
+        headers: { 'x-admin-password': sessionStorage.getItem('adminPwd') || '' }
+      });
+      const data = await res.json();
+      if (data.success) { showToast('✅ Candidate deleted', 'success'); loadCandidatesAdmin(); }
+      else showToast(data.error || 'Delete failed', 'error');
+    } catch (err) {
+      showToast('Network error: ' + err.message, 'error');
+    }
+  };
+  openModal();
+}
+
 // ── INIT ──
 document.getElementById('adminPassword').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 document.getElementById('loginBtn').onclick = login;
 document.getElementById('confirmModal').addEventListener('click', e => { if (e.target === document.getElementById('confirmModal')) closeModal(); });
+document.getElementById('candidateModal').addEventListener('click', e => { if (e.target === document.getElementById('candidateModal')) closeCandModal(); });
 
 // Auto-check existing session
 if (adminToken) {

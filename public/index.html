@@ -1509,6 +1509,31 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .feature-pane { display: none; }
 .feature-pane.active { display: block; }
 
+/* ═══ POLL CATEGORY STRIP ═══ */
+.poll-category-strip {
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  background: white; border-radius: var(--radius-lg); padding: 0.875rem 1.25rem;
+  box-shadow: var(--shadow-card); margin-bottom: 1.5rem;
+  border: 1px solid rgba(0,0,0,0.04);
+}
+.poll-cat-label {
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--mid-gray); white-space: nowrap;
+}
+.poll-cat-tabs { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.poll-cat-btn {
+  padding: 0.45rem 1rem; border-radius: 50px; font-size: 0.8rem; font-weight: 600;
+  border: 1.5px solid #e5e7eb; background: var(--light-gray); color: var(--text-mid);
+  cursor: none; transition: all 0.2s; font-family: 'Outfit', sans-serif;
+}
+.poll-cat-btn:hover { border-color: var(--forest-light); color: var(--forest-light); }
+.poll-cat-btn.active { background: var(--forest); color: var(--gold); border-color: var(--forest); }
+.poll-category-badge {
+  margin-left: auto; font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.65rem;
+  border-radius: 50px; background: rgba(64,194,122,0.12); color: var(--forest-light);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+
 /* On desktop, tabs fill the row evenly — no scroll needed */
 @media (min-width: 769px) {
   .feature-nav {
@@ -2277,6 +2302,18 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <!-- TAB: VOTE -->
       <div class="feature-pane" id="tabVote">
 
+      <!-- POLL CATEGORY STRIP -->
+      <div class="poll-category-strip scroll-reveal" id="pollCategoryStrip">
+        <div class="poll-cat-label">📊 Position</div>
+        <div class="poll-cat-tabs" id="pollCatTabs">
+          <button class="poll-cat-btn active" data-cat="MCA"      onclick="switchPollCategory('MCA')">🏛 MCA</button>
+          <button class="poll-cat-btn"        data-cat="MP"       onclick="switchPollCategory('MP')">🇰🇪 MP</button>
+          <button class="poll-cat-btn"        data-cat="Governor" onclick="switchPollCategory('Governor')">⭐ Governor</button>
+          <button class="poll-cat-btn"        data-cat="WomenRep" onclick="switchPollCategory('WomenRep')">👑 Women Rep</button>
+        </div>
+        <div class="poll-category-badge" id="pollCategoryBadge">MCA Aspirants</div>
+      </div>
+
       <!-- Face-Off -->
       <div class="faceoff-section scroll-reveal" id="faceoffSection">
         <div class="faceoff-bg"></div>
@@ -2958,7 +2995,7 @@ const DB = {
 };
 // ── END DB SHIM ─────────────────────────────────────────────────
 
-const CANDIDATES = [
+const CANDIDATES_DEFAULT = [
   { id:0, name:"Hon. James Mwangi", party:"UDA (Incumbent)", bio:"Two-term MCA, water projects.", img:"https://randomuser.me/api/portraits/men/32.jpg", incumbent:true, fullBio:"Two-term MCA with a track record in water projects & youth empowerment across Ngoliba sublocation.", vision:"Complete water pipeline project, tarmac roads, and expand bursary fund.", track:"Bursary fund for 200+ students; 3 ECD classrooms constructed.", color:"#4361ee" },
   { id:1, name:"Grace Wanjiku", party:"Independent", bio:"Teacher & community organizer.", img:"https://randomuser.me/api/portraits/women/68.jpg", fullBio:"15 years teaching, runs a women's cooperative group with 300+ members.", vision:"Digital hub for youth, women enterprise loan program.", track:"Free tuition campaign; clean water initiative for 5 villages.", color:"#e63946" },
   { id:2, name:"Peter Kimani", party:"Jubilee", bio:"Agri-business entrepreneur.", img:"https://randomuser.me/api/portraits/men/45.jpg", fullBio:"Agri-business owner employing 50+ people. Advocate for modern farming.", vision:"Modern abattoir, tarmac link road, farmer training center.", track:"Cooperative loan for 100 farmers; market linkages secured.", color:"#40c27a" },
@@ -2967,7 +3004,13 @@ const CANDIDATES = [
   { id:5, name:"Mary Wambui", party:"Maendeleo", bio:"ICT & agribusiness graduate.", img:"https://randomuser.me/api/portraits/women/54.jpg", fullBio:"ICT graduate and digital trainer. Bridges technology and agriculture.", vision:"Free Wi-Fi hotspots, solar irrigation, e-commerce for farmers.", track:"Community library; phone repair training for 80 youth.", color:"#9b5de5" },
   { id:6, name:"David Kiprotich", party:"Roots", bio:"Governance activist.", img:"https://randomuser.me/api/portraits/men/99.jpg", fullBio:"Paralegal and governance activist. Advocates for public accountability.", vision:"Public finance watchdog, road safety, disability inclusion.", track:"Petitioned for road project; organized 10 public budget forums.", color:"#f15bb5" }
 ];
+// Mutable — updated when user switches poll category tab
+let CANDIDATES = CANDIDATES_DEFAULT.slice();
 const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
+
+// Poll category state — tracks which election position the user is viewing
+let activePollCategory = 'MCA';
+const POLL_CAT_LABELS  = { MCA:'MCA Aspirants', MP:'MP Candidates', Governor:'Governor Candidates', WomenRep:'Women Rep Candidates' };
 
 // Global state
 let currentUser = null, faceoffInterval = null, countdownInterval = null;
@@ -3317,6 +3360,13 @@ function switchFeatureTab(tabId){
   if(tabId==="tabForum") renderForumTab();
   if(tabId==="tabNotice") renderNoticeboardTab();
   if(tabId==="tabAI") renderAIInsightsTab();
+  if(tabId==="tabVote") {
+    // Refresh candidates + faceoff for the active category whenever Vote tab is opened
+    loadCandidatesForCategory(activePollCategory).then(() => {
+      renderCandidatesGrid(window.userHasVoted || false, {});
+      updateFaceoff();
+    });
+  }
 }
 
 // ═══ DASHBOARD (Vote tab) ═══
@@ -3324,6 +3374,9 @@ async function renderDashboard(){
  if(!currentUser) { document.getElementById("authContainer")?.classList.remove("hidden"); return; }
   
   try {
+    // ━━━ 0. LOAD CANDIDATES FOR ACTIVE CATEGORY FIRST ━━━
+    await loadCandidatesForCategory(activePollCategory);
+
     // ━━━ 1. FETCH RESULTS + VOTING PERIOD IN PARALLEL ━━━
     const [periodRes, votingPeriodRes, historyRes] = await Promise.all([
       fetch('/api/polling-results'),
@@ -3495,7 +3548,7 @@ async function updateFaceoff(){
   // ── Fetch live cumulative vote totals + real photos from server ──
   let candidates;
   try {
-    const res  = await fetch('/api/faceoff');
+    const res  = await fetch(`/api/faceoff?category=${activePollCategory}`);
     const data = await res.json();
     if(data.success && data.allCandidates && data.allCandidates.length){
       // Normalise: server returns vote_count; map to votes for consistent access
@@ -3536,6 +3589,70 @@ async function updateFaceoff(){
   document.getElementById("foLeftPct").innerText=`${lp}%`;
   document.getElementById("foRightPct").innerText=`${rp}%`;
   document.getElementById("foWinnerChip").innerHTML=(right.votes>=270||left.votes>=270)?"🏆 WINNER DECLARED!":"⏳ Race in progress";
+}
+
+// ═══ POLL CATEGORY — switch between MCA / MP / Governor / Women Rep ═══
+async function switchPollCategory(cat) {
+  activePollCategory = cat;
+
+  // Update tab button states
+  document.querySelectorAll('.poll-cat-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.cat === cat);
+  });
+
+  // Update badge label
+  const badge = document.getElementById('pollCategoryBadge');
+  if (badge) badge.textContent = POLL_CAT_LABELS[cat] || cat;
+
+  // Update "Cast Your Vote" section title
+  const sectionTitle = document.querySelector('#tabVote .section-title');
+  if (sectionTitle) sectionTitle.textContent = 'Cast Your Vote';
+  const sectionSub = document.querySelector('#tabVote .section-sub');
+  if (sectionSub) sectionSub.textContent = `${POLL_CAT_LABELS[cat] || cat} — click a card to read full profile`;
+
+  // Reload candidate list + faceoff for new category
+  await loadCandidatesForCategory(cat);
+  updateFaceoff();
+
+  // Re-render grid with empty votes (real data refreshes via renderDashboard)
+  renderCandidatesGrid(window.userHasVoted || false, {});
+}
+
+// Load candidates from server for a given category and update the CANDIDATES array
+async function loadCandidatesForCategory(cat) {
+  const PALETTE = ['#4361ee','#e63946','#40c27a','#e9c46a','#f4a261','#9b5de5','#f15bb5','#06d6a0','#118ab2','#ef476f'];
+  try {
+    const res  = await fetch(`/api/candidates?category=${cat}`);
+    const data = await res.json();
+    if (data.candidates && data.candidates.length > 0) {
+      // Build a lookup of the original rich MCA defaults (fullBio, vision, track, color)
+      const defaults = {};
+      CANDIDATES_DEFAULT.forEach(c => { defaults[c.id] = c; });
+
+      CANDIDATES = data.candidates.map((c, idx) => {
+        const def = defaults[c.id] || {};
+        return {
+          ...def,                        // carry over fullBio/vision/track/color if same ID
+          ...c,                          // server data wins for name/party/bio/img/category/incumbent
+          id:       c.id,
+          img:      c.img  || def.img  || `https://randomuser.me/api/portraits/${idx%2===0?'men':'women'}/${(c.id%70)+10}.jpg`,
+          fullBio:  def.fullBio  || c.bio  || '—',
+          vision:   def.vision   || '—',
+          track:    def.track    || '—',
+          color:    def.color    || PALETTE[idx % PALETTE.length]
+        };
+      });
+    } else if (cat === 'MCA') {
+      // Safe fallback for MCA when DB hasn't seeded yet
+      CANDIDATES = CANDIDATES_DEFAULT.slice();
+    } else {
+      CANDIDATES = []; // Empty — no candidates added for this category yet
+    }
+  } catch (e) {
+    console.warn(`[loadCandidatesForCategory] Could not load "${cat}":`, e.message);
+    if (cat === 'MCA') CANDIDATES = CANDIDATES_DEFAULT.slice();
+    else CANDIDATES = [];
+  }
 }
 
 // ─── Avatar helper — single source of truth for profile picture ───────────────
@@ -3686,17 +3803,42 @@ function renderAnalyticsTab(){
   const archive=JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]");
   const prevTotal=archive.length?Object.values(archive[archive.length-1].votesByCandidate||{}).reduce((s,v)=>s+(v.total||0),0):0;
   const delta=totalVotes-prevTotal;
-  // AI Prediction
-  const sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
-  const leader=sorted[0], second=sorted[1];
-  const conf=leader.votes+second.votes>0?Math.min(99,Math.round((leader.votes/(leader.votes+second.votes))*100)):50;
-  document.getElementById("aiPredictedWinner").innerText=leader.votes>0?leader.name:"Too early to call";
-  document.getElementById("aiPredictConf").innerText=`${conf}% confidence based on current vote distribution`;
-  document.getElementById("aiConfBar").style.width=`${conf}%`;
+
+  // Category label for the analytics panel title
+  const catLabel = POLL_CAT_LABELS[activePollCategory] || activePollCategory;
+
+  // ── AI Prediction — use live faceoff data (category-aware) ──
+  fetch(`/api/faceoff?category=${activePollCategory}`)
+    .then(r=>r.json())
+    .then(data=>{
+      const ranked=(data.allCandidates||[]).sort((a,b)=>(b.vote_count||0)-(a.vote_count||0));
+      const leader=ranked[0]||{name:'Too early to call',vote_count:0};
+      const second=ranked[1]||{vote_count:0};
+      const totalF=(leader.vote_count||0)+(second.vote_count||0);
+      const conf=totalF>0?Math.min(99,Math.round(((leader.vote_count||0)/totalF)*100)):50;
+      const el=document.getElementById("aiPredictedWinner");
+      if(el) el.innerText=(leader.vote_count||0)>0?leader.name:"Too early to call";
+      const cel=document.getElementById("aiPredictConf");
+      if(cel) cel.innerText=`${conf}% confidence · ${catLabel} · based on cumulative vote distribution`;
+      const bar=document.getElementById("aiConfBar");
+      if(bar) bar.style.width=`${conf}%`;
+    })
+    .catch(()=>{
+      // Fallback to local data
+      if(CANDIDATES.length>0){
+        const sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
+        const leader=sorted[0]||{name:'Too early',votes:0}, second=sorted[1]||{votes:0};
+        const conf=leader.votes+second.votes>0?Math.min(99,Math.round((leader.votes/(leader.votes+second.votes))*100)):50;
+        const el=document.getElementById("aiPredictedWinner"); if(el) el.innerText=leader.votes>0?leader.name:"Too early to call";
+        const cel=document.getElementById("aiPredictConf"); if(cel) cel.innerText=`${conf}% confidence · ${catLabel}`;
+        const bar=document.getElementById("aiConfBar"); if(bar) bar.style.width=`${conf}%`;
+      }
+    });
+
   // KPIs
   const turnoutPct=users.length?Math.round((totalVotes/users.length)*100):0;
   document.getElementById("analyticsKPIGrid").innerHTML=[
-    {icon:"🗳️",val:totalVotes,label:"Votes This Cycle",delta:delta>=0?`▲ +${delta} vs prev`:`▼ ${delta} vs prev`,dc:delta>=0?"delta-up":"delta-down",c:"akpi-g"},
+    {icon:"🗳️",val:totalVotes,label:`${catLabel} Votes`,delta:delta>=0?`▲ +${delta} vs prev`:`▼ ${delta} vs prev`,dc:delta>=0?"delta-up":"delta-down",c:"akpi-g"},
     {icon:"👥",val:users.length,label:"Registered Voters",delta:`${SUBLOCATIONS.length} sublocations`,dc:"",c:"akpi-b"},
     {icon:"📈",val:`${turnoutPct}%`,label:"Turnout Rate",delta:"This cycle",dc:turnoutPct>50?"delta-up":"",c:"akpi-gold"},
     {icon:"📊",val:`${allTime}`,label:"All-Time Votes",delta:"Across all cycles",dc:"",c:"akpi-r"},
