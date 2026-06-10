@@ -2312,6 +2312,8 @@ app.post('/api/period/next', async (req, res) => {
 
     const newPeriod = result.rows[0];
     console.log(`[/api/period/next] New period created: id=${newPeriod.id}, duration=${mins}min, ends=${newPeriod.period_end}`);
+    // Notify all connected SSE clients so their countdowns restart immediately
+    broadcastVoteUpdate('period-rollover', { newPeriodId: newPeriod.id, endsAt: newPeriod.period_end });
     return res.json({ success: true, data: { newPeriod: newPeriod.id, endsAt: newPeriod.period_end } });
   } catch (e) {
     console.error('[/api/period/next] ERROR:', e.message);

@@ -2958,7 +2958,9 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 // Zero duplicate functions. All buttons wired.
 // ═══════════════════════════════════════════════════════════════
 
-const PERIOD_MS = 5 * 60 * 1000;
+// NOTE: Cycle duration is server-authoritative. No PERIOD_MS constant is defined here.
+// The frontend reads window.currentPeriodEnd (set from /api/voting-period) and computes
+// only: diff = endTime - Date.now()  — nothing else.
 const KEYS = { USERS:"ngoliba_users", SESSION:"ngoliba_session", CURRENT_PERIOD:"ngoliba_current_period", PERIOD_ARCHIVE:"ngoliba_period_archive", OTP_STORE:"ngoliba_otp", LOGIN_ATTEMPTS:"login_attempts", VOTER_COUNTER:"ngoliba_voter_counter" };
 
 // ── DB SHIM ─────────────────────────────────────────────────────
@@ -3101,11 +3103,11 @@ const isValidEmail=(e)=>!e||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 const isValidNationalId=(id)=>!id||/^[0-9]{7,8}$/.test(id);
 
 // ═══ VOTING PERIOD ═══
-function getCurrentPeriodStart(){ return new Date(Math.floor(Date.now()/PERIOD_MS)*PERIOD_MS).toISOString(); }
-function getNextPeriodStart(){ return new Date(Date.parse(getCurrentPeriodStart())+PERIOD_MS).toISOString(); }
+// Period timing is owned entirely by the server (/api/voting-period).
+// window.currentPeriodEnd is set from the server response in renderDashboard().
+// No client-side duration calculation is performed here.
 function checkAndResetPeriod(){
-  // This function is no longer needed - server handles periods
-  // Placeholder to prevent errors
+  // Server handles periods — stub kept to prevent call-site errors
   return;
 }
 function getCurrentPeriodAggregated(){
@@ -3372,49 +3374,12 @@ function switchFeatureTab(tabId){
 }
 
 // ═══ DASHBOARD (Vote tab) ═══
+// NOTE: The authoritative renderDashboard is defined in the API integration block below
+// and assigned to window.renderDashboard. This function delegates to it so any call
+// to the bare name `renderDashboard()` stays in sync with the window version.
 async function renderDashboard(){
- if(!currentUser) { document.getElementById("authContainer")?.classList.remove("hidden"); return; }
-  
-  try {
-    // ━━━ 0. LOAD CANDIDATES FOR ACTIVE CATEGORY FIRST ━━━
-    await loadCandidatesForCategory(activePollCategory);
-
-    // ━━━ 1. FETCH RESULTS + VOTING PERIOD IN PARALLEL ━━━
-    const [periodRes, votingPeriodRes, historyRes] = await Promise.all([
-      fetch('/api/polling-results'),
-      fetch('/api/voting-period'),
-      fetch('/api/history?limit=10')
-    ]);
-    const periodData      = await periodRes.json();
-    const votingPeriodData = await votingPeriodRes.json();
-    const historyData     = await historyRes.json();
-    
-    // ━━━ STORE PERIOD ID + END TIME FOR VOTING + TIMER ━━━
-    // Use periodId from polling-results; use periodEnd/hasVoted from voting-period (authoritative)
-    window.currentPeriodId  = periodData.periodId;
-    window.currentPeriodEnd = votingPeriodData?.data?.endsAt ?? periodData.periodEnd;
-
-    // ━━━ 2. CHECK IF USER VOTED — from /api/voting-period (the only endpoint that checks it) ━━━
-    const hasVoted = votingPeriodData?.data?.userHasVoted ?? periodData.hasVoted ?? false;
-    window.userHasVoted = hasVoted;  // ← vote-eligibility source of truth
-
-    // ━━━ 3. RENDER WITH SERVER DATA ━━━
-    updateFaceoff();
-    renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
-    const votedBanner = document.getElementById('alreadyVotedMsg');
-    if (votedBanner) votedBanner.classList.toggle('hidden', !hasVoted);
-    renderVoterRegistry(periodData.totalVotes);
-    renderTurnout(periodData);
-    renderPeriodSummary(periodData);
-    renderHistoricalChart(historyData.periods);
-    
-    const periodEndEl = document.getElementById("currentPeriodEnd");
-    if (periodEndEl && window.currentPeriodEnd)
-      periodEndEl.innerText = new Date(window.currentPeriodEnd).toLocaleTimeString();
-    
-  } catch(error) {
-    console.error('Dashboard render error:', error);
-    showToast("Failed to load dashboard data", "error");
+  if (typeof window.renderDashboard === 'function') {
+    return window.renderDashboard();
   }
 }
 
@@ -5305,19 +5270,20 @@ setTimeout(()=>{
 //checkAndResetPeriod();
 //if(Notification.permission==="default")Notification.requestPermission();
 
-// Auto-check every 5s
-// Removed - server handles periods now
-if(currentUser) {
-  setInterval(()=>{
-    if(typeof updateFaceoff === 'function') updateFaceoff();
-    if(typeof renderVoterRegistry === 'function') renderVoterRegistry();
-    if(typeof updateHeaderBadge === 'function') updateHeaderBadge();
-  }, 5000);
-  
-  setInterval(()=>{
-    if(typeof renderDashboard === 'function') renderDashboard();
-  }, 30000);
-}
+// ── Safety-net polls: run always; each callback checks currentUser at call time ──
+// The 5s interval keeps faceoff and header badge live.
+// The 30s interval is a fallback in case SSE drops and the countdown's own recovery misses.
+setInterval(() => {
+  if (!window.currentUser) return;
+  if (typeof updateFaceoff === 'function') updateFaceoff();
+  if (typeof renderVoterRegistry === 'function') renderVoterRegistry();
+  if (typeof updateHeaderBadge === 'function') updateHeaderBadge();
+}, 5000);
+
+setInterval(() => {
+  if (!window.currentUser) return;
+  if (typeof window.renderDashboard === 'function') window.renderDashboard();
+}, 30000);
 
 // Session restore
 //const _s=loadSession(); SESSIONS NOW SERVERSIDE
@@ -6866,11 +6832,20 @@ window.renderFaceoff = window.updateFaceoff;
         }
       });
 
-      // 'new-period' fires when admin starts a new period
+      // 'new-period' fires when admin manually starts a new period
       sseSource.addEventListener('new-period', async () => {
         console.log('[SSE] new-period — refreshing dashboard');
         if (typeof window.renderDashboard === 'function') await window.renderDashboard();
         // Restart countdown with fresh periodEnd from server (set by renderDashboard above)
+        if (typeof startCountdown === 'function') startCountdown();
+        showToast("🔄 New voting cycle started! You can vote again.", "success");
+      });
+
+      // 'period-rollover' fires when the server auto-rolls over an expired period
+      // (broadcast by the auto-rollover setInterval and /api/webhook in server.js)
+      sseSource.addEventListener('period-rollover', async () => {
+        console.log('[SSE] period-rollover — refreshing dashboard and restarting countdown');
+        if (typeof window.renderDashboard === 'function') await window.renderDashboard();
         if (typeof startCountdown === 'function') startCountdown();
         showToast("🔄 New voting cycle started! You can vote again.", "success");
       });
