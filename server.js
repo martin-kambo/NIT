@@ -523,14 +523,23 @@ async function ensureVotingPeriodsTable() {
       console.log(`\u2705 Active voting period created (id=${nextId}, ends ${endTime.toISOString()})`);
     } else {
       const period = existing.rows[0];
-      const isExpired = new Date(period.period_end) < new Date();
-      if (isExpired) {
-        // Close the expired period and open a fresh one
-        console.log(`\u26a0\ufe0f  Period ${period.id} has expired — closing and creating new one`);
+      const now = new Date();
+      const isExpired = new Date(period.period_end) < now;
+
+      // Detect abnormally long durations (> 60 min is invalid for this system)
+      const MAX_ALLOWED_MS = 60 * 60 * 1000; // 60-minute absolute ceiling
+      const periodLengthMs = new Date(period.period_end) - new Date(period.period_start || now);
+      const isTooLong = periodLengthMs > MAX_ALLOWED_MS;
+
+      if (isExpired || isTooLong) {
+        if (isTooLong && !isExpired) {
+          console.warn(`⚠️  Period ${period.id} has abnormal duration (${Math.round(periodLengthMs / 60000)} min — max 60) — replacing with fresh 5-min period`);
+        } else {
+          console.log(`⚠️  Period ${period.id} has expired — closing and creating new one`);
+        }
         await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
 
-        const now     = new Date();
-        const endTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
+        const endTime  = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
         const maxIdRes = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
         const nextId   = parseInt(maxIdRes.rows[0].maxid) + 1;
 
@@ -539,9 +548,9 @@ async function ensureVotingPeriodsTable() {
            VALUES ($1, $2, $3, true, 0)`,
           [nextId, now, endTime]
         );
-        console.log(`\u2705 Fresh voting period created (id=${nextId})`);
+        console.log(`✅ Fresh voting period created (id=${nextId}, ends ${endTime.toISOString()})`);
       } else {
-        console.log(`\u2705 Active voting period OK (id=${period.id}, ends ${new Date(period.period_end).toISOString()})`);
+        console.log(`✅ Active voting period OK (id=${period.id}, ends ${new Date(period.period_end).toISOString()})`);
       }
     }
 
@@ -2039,10 +2048,14 @@ if (action === 'get_users') {
   }
 }
 
-  // ✅ ADD PERIOD - id has no DEFAULT, must be computed; also deactivate old periods
+  // ✅ ADD PERIOD - uses minutes (1–60), never days; hard cap prevents runaway durations
 if (action === 'add_period') {
-  const { durationDays } = req.body;
-  if (!durationDays) return res.status(400).json({ success: false, error: 'Duration required' });
+  // Accept durationMinutes (preferred) or legacy durationDays field — always treat as minutes.
+  const raw = parseInt(req.body.durationMinutes ?? req.body.durationDays) || 5;
+  const mins = Math.min(Math.max(raw, 1), 60); // clamp: 1 min ≤ duration ≤ 60 min
+  if (raw !== mins) {
+    console.warn(`[add_period] durationMinutes ${raw} clamped to ${mins}`);
+  }
   try {
     // Deactivate any currently active periods first
     await pool.query('UPDATE voting_periods SET is_active = false WHERE is_active = true');
@@ -2050,11 +2063,12 @@ if (action === 'add_period') {
       `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
        VALUES (
          COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
-         NOW(), NOW() + ($1 || ' days')::INTERVAL, true, 0
+         NOW(), NOW() + ($1 || ' minutes')::INTERVAL, true, 0
        )
        RETURNING id, period_start, period_end, is_active, total_votes`,
-      [String(durationDays)]
+      [String(mins)]
     );
+    console.log(`[add_period] New period created: id=${result.rows[0].id}, duration=${mins}min, ends=${result.rows[0].period_end}`);
     return res.json({ success: true, period: result.rows[0] });
   } catch (error) {
     console.error('Error in add_period:', error.message);
@@ -2272,7 +2286,11 @@ app.post('/api/period/next', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
 
   const { durationMinutes } = req.body;
-  const mins = parseInt(durationMinutes) || 5;
+  const raw  = parseInt(durationMinutes) || 5;
+  const mins = Math.min(Math.max(raw, 1), 60); // hard cap: 1 min ≤ duration ≤ 60 min
+  if (raw !== mins) {
+    console.warn(`[/api/period/next] durationMinutes ${raw} clamped to ${mins}`);
+  }
 
   try {
     // Deactivate all currently active periods
@@ -2293,6 +2311,7 @@ app.post('/api/period/next', async (req, res) => {
     );
 
     const newPeriod = result.rows[0];
+    console.log(`[/api/period/next] New period created: id=${newPeriod.id}, duration=${mins}min, ends=${newPeriod.period_end}`);
     return res.json({ success: true, data: { newPeriod: newPeriod.id, endsAt: newPeriod.period_end } });
   } catch (e) {
     console.error('[/api/period/next] ERROR:', e.message);
@@ -2369,6 +2388,51 @@ app.get('/api/voting-period', async (req, res) => {
     console.error('[/api/voting-period] ERROR:', e.message);
     console.error(e.stack);
     return res.status(500).json({ success: false, error: 'Failed to fetch voting period' });
+  }
+});
+
+// ════════════════════════════════════════════════
+// ROUTE: /api/webhook  — called by cron-period-reset.js every minute
+// Checks if the active period has expired and rolls it over if so.
+// Protected by CRON_SECRET header to prevent unauthenticated calls.
+// ════════════════════════════════════════════════
+app.post('/api/webhook', async (req, res) => {
+  const secret = req.headers['x-cron-secret'];
+  if (!secret || secret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  try {
+    const active = await pool.query(
+      `SELECT id, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
+    );
+
+    if (!active.rows.length) {
+      return res.json({ success: true, message: 'No active period' });
+    }
+
+    const period = active.rows[0];
+    if (new Date(period.period_end) > new Date()) {
+      return res.json({ success: true, message: 'Period still active', endsAt: period.period_end });
+    }
+
+    // Period expired — roll over to a fresh 5-minute cycle
+    await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
+    const now     = new Date();
+    const endTime = new Date(now.getTime() + 5 * 60 * 1000);
+    const maxRes  = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
+    const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
+    await pool.query(
+      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+         VALUES ($1, $2, $3, true, 0)`,
+      [nextId, now, endTime]
+    );
+    console.log(`[webhook] Period ${period.id} rolled over → new period ${nextId}, ends ${endTime.toISOString()}`);
+    broadcastVoteUpdate('period-rollover', { newPeriodId: nextId, endsAt: endTime });
+    return res.json({ success: true, completedPeriod: period.id, newPeriod: nextId, endsAt: endTime });
+  } catch (e) {
+    console.error('[webhook] ERROR:', e.message);
+    return res.status(500).json({ success: false, error: e.message });
   }
 });
 
