@@ -3435,6 +3435,18 @@ function renderTurnout(){
 
 function renderCandidatesGrid(disableVote, serverVotes){
   const container=document.getElementById("candidatesGrid"); if(!container) return;
+
+  // ── Empty state: category exists but has no candidates yet ──
+  if(CANDIDATES.length === 0){
+    const catLabel = POLL_CAT_LABELS[activePollCategory] || activePollCategory;
+    container.innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:3rem 1rem;color:var(--mid-gray);">
+      <div style="font-size:2.5rem;margin-bottom:1rem;">🗳️</div>
+      <div style="font-weight:700;font-size:1.05rem;color:var(--text-dark);margin-bottom:0.5rem;">No candidates added yet for ${catLabel}</div>
+      <div style="font-size:0.88rem;line-height:1.6;">Candidates will appear here once they are added by the administrator.</div>
+    </div>`;
+    return;
+  }
+
   const sorted=CANDIDATES.map(c=>({...c,votes:serverVotes?.[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
   
   // ✅ FIX 1: Set innerHTML once instead of appendChild loop (90% faster)
@@ -3595,6 +3607,9 @@ async function updateFaceoff(){
 async function switchPollCategory(cat) {
   activePollCategory = cat;
 
+  // ── DEBUG: confirm category switch triggers a fresh API call ──
+  console.log('[switchPollCategory] Switching to:', cat);
+
   // Update tab button states
   document.querySelectorAll('.poll-cat-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.cat === cat);
@@ -3612,10 +3627,17 @@ async function switchPollCategory(cat) {
 
   // Reload candidate list + faceoff for new category
   await loadCandidatesForCategory(cat);
+  console.log('[switchPollCategory] CANDIDATES loaded:', CANDIDATES.length, 'candidates for', cat);
+
   updateFaceoff();
 
   // Re-render grid with empty votes (real data refreshes via renderDashboard)
   renderCandidatesGrid(window.userHasVoted || false, {});
+
+  // Refresh analytics and leaderboard if those tabs are currently visible
+  const activePane = document.querySelector('.feature-pane.active');
+  if (activePane?.id === 'tabAnalytics')   renderAnalyticsTab();
+  if (activePane?.id === 'tabLeaderboard') renderLeaderboardTab();
 }
 
 // Load candidates from server for a given category and update the CANDIDATES array

@@ -594,10 +594,23 @@ async function loadCandidatesAdmin() {
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mid-gray);padding:2rem;">Loading…</td></tr>';
   try {
-    const res = await fetch(`/api/admin/candidates?category=${adminCurrentCategory}`, {
-      headers: { 'x-admin-password': sessionStorage.getItem('adminPwd') || '' }
+    const url = `/api/admin/candidates?category=${adminCurrentCategory}`;
+    // ── DEBUG: trace auth state for every candidate fetch ──
+    console.log('[Admin Candidates] Category:', adminCurrentCategory);
+    console.log('[Admin Candidates] Request URL:', url);
+    console.log('[Admin Candidates] Token present:', !!adminToken);
+    console.log('[Admin Candidates] Password present:', !!(sessionStorage.getItem('adminPwd')));
+    const res = await fetch(url, {
+      headers: {
+        // PRIMARY: JWT Bearer token — fixes the ADMIN_PASSWORD_HASH vs ADMIN_SECRET mismatch
+        'Authorization': `Bearer ${adminToken || ''}`,
+        // FALLBACK: keep x-admin-password for backward compat with direct API callers
+        'x-admin-password': sessionStorage.getItem('adminPwd') || ''
+      }
     });
+    console.log('[Admin Candidates] Response status:', res.status);
     const data = await res.json();
+    console.log('[Admin Candidates] Response body:', data);
     if (!data.success) { tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red);padding:1.5rem;">${data.error || 'Failed to load'}</td></tr>`; return; }
     const cands = data.candidates;
     if (!cands.length) {
@@ -686,9 +699,18 @@ async function saveCandidateModal() {
   const pwd = sessionStorage.getItem('adminPwd') || '';
 
   try {
+    // ── DEBUG ──
+    console.log('[Admin Save Candidate] Method:', method, 'URL:', url);
+    console.log('[Admin Save Candidate] Token present:', !!adminToken, '| Category:', category);
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json', 'x-admin-password': pwd },
+      headers: {
+        'Content-Type': 'application/json',
+        // PRIMARY: JWT Bearer token
+        'Authorization': `Bearer ${adminToken || ''}`,
+        // FALLBACK: legacy password header
+        'x-admin-password': pwd
+      },
       body
     });
     const data = await res.json();
@@ -716,7 +738,12 @@ function confirmDeleteCandidate(id, name) {
     try {
       const res = await fetch(`/api/admin/candidates/${id}`, {
         method: 'DELETE',
-        headers: { 'x-admin-password': sessionStorage.getItem('adminPwd') || '' }
+        headers: {
+          // PRIMARY: JWT Bearer token
+          'Authorization': `Bearer ${adminToken || ''}`,
+          // FALLBACK: legacy password header
+          'x-admin-password': sessionStorage.getItem('adminPwd') || ''
+        }
       });
       const data = await res.json();
       if (data.success) { showToast('✅ Candidate deleted', 'success'); loadCandidatesAdmin(); }

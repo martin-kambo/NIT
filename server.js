@@ -1876,17 +1876,30 @@ app.delete('/api/notices/:id', async (req, res) => {
 // /api/admin/notices — notice management endpoints
 // ══════════════════════════════════════════════════════
 function checkNoticeAdminAuth(req, res) {
-  const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
-  const provided = req.headers['x-admin-password'];
-  if (!provided || provided !== secret) {
-    res.status(401).json({ success: false, error: 'Unauthorized' });
-    return false;
+  // ── PRIMARY PATH: JWT Bearer token (same credential the admin panel already holds) ──
+  // This fixes the two-headed auth mismatch where ADMIN_PASSWORD_HASH (login) and
+  // ADMIN_SECRET (candidate/notice routes) were independent env vars that could diverge.
+  const authHeader = req.headers['authorization'] || '';
+  if (authHeader.startsWith('Bearer ') && verifyAdminToken(authHeader)) {
+    return true;
   }
-  return true;
+
+  // ── FALLBACK PATH: legacy x-admin-password header (keeps direct API access working) ──
+  const secret   = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+  const provided = req.headers['x-admin-password'];
+  if (provided && provided === secret) {
+    return true;
+  }
+
+  res.status(401).json({ success: false, error: 'Unauthorized' });
+  return false;
 }
 
 app.post('/api/admin/notices/verify', (req, res) => {
-  const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+  // Accept JWT Bearer token (preferred) or legacy x-admin-password
+  const authHeader = req.headers['authorization'] || '';
+  if (authHeader.startsWith('Bearer ') && verifyAdminToken(authHeader)) return res.json({ success: true });
+  const secret   = process.env.ADMIN_SECRET || 'ngoliba2025admin';
   const provided = req.headers['x-admin-password'];
   if (provided && provided === secret) return res.json({ success: true });
   return res.status(401).json({ success: false, error: 'Invalid password' });
