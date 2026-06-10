@@ -1420,7 +1420,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
   .notice-card-img-placeholder { height: 70px; font-size: 1.6rem; }
   .notice-card-body { padding: 0.5rem 0.75rem; }
   .notice-card-title { font-size: 0.8rem; }
-  .notice-card-desc { font-size: 0.72rem; -webkit-line-clamp: 2; }
+  .notice-card-desc { font-size: 0.72rem; -webkit-line-clamp: 2; -webkit-line-clamp: N; line-clamp: N; overflow: hidden;}
   .notice-card-footer {
     flex-wrap: wrap;
     gap: 0.4rem;
@@ -3010,7 +3010,9 @@ const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
 
 // Poll category state — tracks which election position the user is viewing
 let activePollCategory = 'MCA';
+window.activePollCategory = 'MCA';  // expose so Script 2 (separate scope) can read it
 const POLL_CAT_LABELS  = { MCA:'MCA Aspirants', MP:'MP Candidates', Governor:'Governor Candidates', WomenRep:'Women Rep Candidates' };
+window.POLL_CAT_LABELS = POLL_CAT_LABELS; // expose so Script 2's catLabel lookup works
 
 // Global state
 let currentUser = null, faceoffInterval = null, countdownInterval = null;
@@ -3605,7 +3607,8 @@ async function updateFaceoff(){
 
 // ═══ POLL CATEGORY — switch between MCA / MP / Governor / Women Rep ═══
 async function switchPollCategory(cat) {
-  activePollCategory = cat;
+  activePollCategory        = cat;
+  window.activePollCategory = cat;  // keep window in sync so Script 2's timers/SSE read the right category
 
   // ── DEBUG: confirm category switch triggers a fresh API call ──
   console.log('[switchPollCategory] Switching to:', cat);
