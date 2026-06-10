@@ -571,7 +571,7 @@ async function ensureActivePeriod() {
 // CANDIDATES TABLE — multi-category support
 // Preserves all existing MCA candidate IDs (0-6) for vote backward-compat
 // ══════════════════════════════════════════════════════════════════
-const CANDIDATE_CATEGORIES = ['MCA', 'MP', 'Governor', 'WomenRep'];
+const CANDIDATE_CATEGORIES = ['MCA', 'MP', 'Governor', 'WomenRep', 'President', 'Senator'];
 
 async function ensureCandidatesTable() {
   try {

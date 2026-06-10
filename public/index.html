@@ -2306,10 +2306,12 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="poll-category-strip scroll-reveal" id="pollCategoryStrip">
         <div class="poll-cat-label">📊 Position</div>
         <div class="poll-cat-tabs" id="pollCatTabs">
-          <button class="poll-cat-btn active" data-cat="MCA"      onclick="switchPollCategory('MCA')">🏛 MCA</button>
-          <button class="poll-cat-btn"        data-cat="MP"       onclick="switchPollCategory('MP')">🇰🇪 MP</button>
-          <button class="poll-cat-btn"        data-cat="Governor" onclick="switchPollCategory('Governor')">⭐ Governor</button>
-          <button class="poll-cat-btn"        data-cat="WomenRep" onclick="switchPollCategory('WomenRep')">👑 Women Rep</button>
+          <button class="poll-cat-btn active" data-cat="MCA"       onclick="switchPollCategory('MCA')">🏛 MCA</button>
+          <button class="poll-cat-btn"        data-cat="MP"        onclick="switchPollCategory('MP')">🇰🇪 MP</button>
+          <button class="poll-cat-btn"        data-cat="Governor"  onclick="switchPollCategory('Governor')">⭐ Governor</button>
+          <button class="poll-cat-btn"        data-cat="WomenRep"  onclick="switchPollCategory('WomenRep')">👑 Women Rep</button>
+          <button class="poll-cat-btn"        data-cat="President" onclick="switchPollCategory('President')">🏆 President</button>
+          <button class="poll-cat-btn"        data-cat="Senator"   onclick="switchPollCategory('Senator')">🎖 Senator</button>
         </div>
         <div class="poll-category-badge" id="pollCategoryBadge">MCA Aspirants</div>
       </div>
@@ -3013,7 +3015,7 @@ const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
 // Poll category state — tracks which election position the user is viewing
 let activePollCategory = 'MCA';
 window.activePollCategory = 'MCA';  // expose so Script 2 (separate scope) can read it
-const POLL_CAT_LABELS  = { MCA:'MCA Aspirants', MP:'MP Candidates', Governor:'Governor Candidates', WomenRep:'Women Rep Candidates' };
+const POLL_CAT_LABELS  = { MCA:'MCA Aspirants', MP:'MP Candidates', Governor:'Governor Candidates', WomenRep:'Women Rep Candidates', President:'Presidential Candidates', Senator:'Senator Candidates' };
 window.POLL_CAT_LABELS = POLL_CAT_LABELS; // expose so Script 2's catLabel lookup works
 
 // Global state
