@@ -3009,11 +3009,8 @@ let CANDIDATES = CANDIDATES_DEFAULT.slice();
 const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
 
 // Poll category state — tracks which election position the user is viewing
-// SINGLE SOURCE OF TRUTH: always read/write window.activePollCategory everywhere.
 let activePollCategory = 'MCA';
-window.activePollCategory = 'MCA';   // ← expose on window so every override & timer sees the same value
 const POLL_CAT_LABELS  = { MCA:'MCA Aspirants', MP:'MP Candidates', Governor:'Governor Candidates', WomenRep:'Women Rep Candidates' };
-window.POLL_CAT_LABELS = POLL_CAT_LABELS; // ← also expose for overrides that reference window.POLL_CAT_LABELS
 
 // Global state
 let currentUser = null, faceoffInterval = null, countdownInterval = null;
@@ -3340,7 +3337,7 @@ function enterDashboard(){
   showPane("dashboardContent");
   renderDashboard();
   showWelcomePopup();
-  faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff(window.activePollCategory);},3000);
+  faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();},3000);
   startCountdown();
   updateHeaderAvatar();  // paint avatar immediately on login
   showToast(`Welcome back, ${currentUser.firstName}! 👋`,"success");
@@ -3367,7 +3364,7 @@ function switchFeatureTab(tabId){
     // Refresh candidates + faceoff for the active category whenever Vote tab is opened
     loadCandidatesForCategory(activePollCategory).then(() => {
       renderCandidatesGrid(window.userHasVoted || false, {});
-      updateFaceoff(window.activePollCategory);
+      updateFaceoff();
     });
   }
 }
@@ -3400,7 +3397,7 @@ async function renderDashboard(){
     window.userHasVoted = hasVoted;  // ← vote-eligibility source of truth
 
     // ━━━ 3. RENDER WITH SERVER DATA ━━━
-    updateFaceoff(window.activePollCategory);
+    updateFaceoff();
     renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
     const votedBanner = document.getElementById('alreadyVotedMsg');
     if (votedBanner) votedBanner.classList.toggle('hidden', !hasVoted);
@@ -3608,12 +3605,10 @@ async function updateFaceoff(){
 
 // ═══ POLL CATEGORY — switch between MCA / MP / Governor / Women Rep ═══
 async function switchPollCategory(cat) {
-  activePollCategory        = cat;   // keep local var in sync
-  window.activePollCategory = cat;   // FIX: keep window (single source of truth) in sync
+  activePollCategory = cat;
 
   // ── DEBUG: confirm category switch triggers a fresh API call ──
   console.log('[switchPollCategory] Switching to:', cat);
-  console.log('[switchPollCategory] window.activePollCategory =', window.activePollCategory);
 
   // Update tab button states
   document.querySelectorAll('.poll-cat-btn').forEach(btn => {
@@ -3647,7 +3642,10 @@ async function switchPollCategory(cat) {
   await loadCandidatesForCategory(cat);
   console.log('[switchPollCategory] CANDIDATES loaded:', CANDIDATES.length, 'candidates for', cat);
 
-  updateFaceoff(window.activePollCategory);
+  updateFaceoff();
+
+  // Re-render grid with empty votes (real data refreshes via renderDashboard)
+  renderCandidatesGrid(window.userHasVoted || false, {});
 
   // Refresh analytics and leaderboard if those tabs are currently visible
   const activePane = document.querySelector('.feature-pane.active');
@@ -5307,14 +5305,13 @@ setTimeout(()=>{
 // Auto-check every 5s
 // Removed - server handles periods now
 if(currentUser) {
-  // FIX: store handle so logout can clear it; pass window.activePollCategory so category is always respected
-  window._autoRefreshInterval = setInterval(()=>{
-    if(typeof updateFaceoff === 'function') updateFaceoff(window.activePollCategory);
+  setInterval(()=>{
+    if(typeof updateFaceoff === 'function') updateFaceoff();
     if(typeof renderVoterRegistry === 'function') renderVoterRegistry();
     if(typeof updateHeaderBadge === 'function') updateHeaderBadge();
   }, 5000);
   
-  window._dashboardRefreshInterval = setInterval(()=>{
+  setInterval(()=>{
     if(typeof renderDashboard === 'function') renderDashboard();
   }, 30000);
 }
@@ -6322,11 +6319,8 @@ window.renderNotifBell = function(){
   // Notifications - optional
 };
 
-// NOTE: window.updateFaceoff is defined properly further below (search "Override updateFaceoff").
-// This early stub is intentionally a no-op placeholder — it will be overridden by the
-// category-aware final version. DO NOT put real logic here.
-window.updateFaceoff = async function(cat){
-  // Placeholder — overridden later. Called before override is ready; silently skip.
+window.updateFaceoff = async function(){
+  if(typeof renderFaceoff === 'function') await renderFaceoff();
 };
 
 window.renderFaceoff = async function(){
@@ -6395,8 +6389,7 @@ window.renderDashboard = async function(){
 
     // Render supporting sections
     if(typeof renderTurnout === 'function') await renderTurnout();
-    // FIX: use updateFaceoff (category-aware) instead of renderFaceoff (/api/stats, no category)
-    if(typeof window.updateFaceoff === 'function') await window.updateFaceoff(window.activePollCategory);
+    if(typeof renderFaceoff === 'function') await renderFaceoff();
     if(typeof renderVoterRegistry === 'function') await renderVoterRegistry();
     if(typeof renderLeaderboard === 'function') await renderLeaderboard();
     if(typeof renderPeriodSummary === 'function') renderPeriodSummary(periodData);
@@ -6432,7 +6425,7 @@ window.enterDashboard = function(){
   
   if(typeof faceoffInterval !== 'undefined' && faceoffInterval) clearInterval(faceoffInterval);
   faceoffInterval = setInterval(() => {
-    if (typeof updateFaceoff === 'function') updateFaceoff(window.activePollCategory);
+    if (typeof updateFaceoff === 'function') updateFaceoff();
   }, 3000);
   
   if (typeof startCountdown === 'function') startCountdown();
@@ -6749,16 +6742,12 @@ window.loadVoteHistory = async function () {
 };
 
 // ── 3. Override updateFaceoff — category-aware, replaces all previous stubs. ──
-// SINGLE SOURCE OF TRUTH FIX:
-//   • Accepts an optional `cat` argument so callers can pass the category explicitly.
-//   • Falls back to window.activePollCategory (kept in sync by switchPollCategory).
-//   • Only uses 'MCA' as the hard default on the very first page load before any
-//     category has been chosen — never overrides an explicit user selection.
-window.updateFaceoff = async function (cat) {
-  // Prefer: explicit arg → window.activePollCategory → first-load default 'MCA'
-  cat = cat || window.activePollCategory || 'MCA';
-  // Keep window in sync (belt-and-suspenders)
-  window.activePollCategory = cat;
+// ROOT-CAUSE FIX: the previous version called fetch('/api/faceoff') with no
+// ?category= parameter, so the server always defaulted to MCA regardless of
+// which tab was active.  Now we always pass window.activePollCategory.
+window.updateFaceoff = async function () {
+  // activePollCategory is defined at the top of the main script; fall back to 'MCA'
+  const cat      = window.activePollCategory || 'MCA';
   const catLabel = (window.POLL_CAT_LABELS && window.POLL_CAT_LABELS[cat]) || cat;
 
   console.log('[updateFaceoff] Fetching face-off for category:', cat);
@@ -6867,8 +6856,7 @@ window.renderFaceoff = window.updateFaceoff;
           const payload = JSON.parse(e.data);
           console.log('[SSE] vote-received:', payload);
           // Refresh faceoff widget and full dashboard (updates hasVoted, vote counts, banner)
-          // FIX: pass window.activePollCategory so the active tab is preserved
-          await window.updateFaceoff(window.activePollCategory);
+          await window.updateFaceoff();
           if (typeof window.renderDashboard === 'function') await window.renderDashboard();
         } catch (err) {
           console.warn('[SSE] vote-received parse error:', err);
@@ -6917,7 +6905,7 @@ window.renderFaceoff = window.updateFaceoff;
     }
     // Initial render of live standings
     if (typeof window.updateFaceoff === 'function') {
-      window.updateFaceoff(window.activePollCategory);
+      window.updateFaceoff();
     }
   };
 })();
