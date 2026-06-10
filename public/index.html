@@ -3625,6 +3625,19 @@ async function switchPollCategory(cat) {
   const sectionSub = document.querySelector('#tabVote .section-sub');
   if (sectionSub) sectionSub.textContent = `${POLL_CAT_LABELS[cat] || cat} — click a card to read full profile`;
 
+  // ── Immediately reset face-off UI so stale data from the previous category
+  //    is never visible during the async fetch for the new category ──
+  const catLabel = POLL_CAT_LABELS[cat] || cat;
+  ['foLeftName','foRightName'].forEach(id => { const el = document.getElementById(id); if(el) el.innerText = '—'; });
+  ['foLeftParty','foRightParty'].forEach(id => { const el = document.getElementById(id); if(el) el.innerText = '—'; });
+  ['foLeftVotes','foRightVotes','foTotalVotes'].forEach(id => { const el = document.getElementById(id); if(el) el.innerText = '0'; });
+  ['foLeftPct','foRightPct'].forEach(id => { const el = document.getElementById(id); if(el) el.innerText = '0%'; });
+  const foFill = document.getElementById('foProgressFill'); if(foFill) foFill.style.width = '0%';
+  const foLI = document.getElementById('foLeftImg');  if(foLI)  { foLI.src  = ''; foLI.alt  = ''; }
+  const foRI = document.getElementById('foRightImg'); if(foRI)  { foRI.src  = ''; foRI.alt  = ''; }
+  const foChip = document.getElementById('foWinnerChip');
+  if(foChip) foChip.innerHTML = `⏳ Loading ${catLabel}…`;
+
   // Reload candidate list + faceoff for new category
   await loadCandidatesForCategory(cat);
   console.log('[switchPollCategory] CANDIDATES loaded:', CANDIDATES.length, 'candidates for', cat);
@@ -6728,72 +6741,91 @@ window.loadVoteHistory = async function () {
   }
 };
 
-// ── 3. Override updateFaceoff — use /api/faceoff. Replaces the previous stub/override. ──
+// ── 3. Override updateFaceoff — category-aware, replaces all previous stubs. ──
+// ROOT-CAUSE FIX: the previous version called fetch('/api/faceoff') with no
+// ?category= parameter, so the server always defaulted to MCA regardless of
+// which tab was active.  Now we always pass window.activePollCategory.
 window.updateFaceoff = async function () {
+  // activePollCategory is defined at the top of the main script; fall back to 'MCA'
+  const cat      = window.activePollCategory || 'MCA';
+  const catLabel = (window.POLL_CAT_LABELS && window.POLL_CAT_LABELS[cat]) || cat;
+
+  console.log('[updateFaceoff] Fetching face-off for category:', cat);
+
   try {
-    const res  = await fetch('/api/faceoff');
+    // ← THE FIX: pass the active category so the server filters correctly
+    const res  = await fetch('/api/faceoff?category=' + encodeURIComponent(cat));
     const data = await res.json();
     if (!data.success) return;
 
     const top2       = data.candidates || [];
     const totalVotes = data.totalVotes || 0;
 
-    if (top2.length >= 2) {
-      const right = top2[0]; // leader on right (matches existing HTML intent)
-      const left  = top2[1];
-
-      const setEl = (id, val) => {
-        const el = document.getElementById(id);
-        if (el && el.innerText !== String(val)) {
-          el.innerText = val;
-          el.classList.add('vote-flash');
-          setTimeout(() => el.classList.remove('vote-flash'), 400);
-        }
-      };
-
-      const foLI = document.getElementById('foLeftImg');
-      if (foLI) foLI.src = left.img || '';
-      document.getElementById('foLeftName')?.innerText !== undefined &&
-        (document.getElementById('foLeftName').innerText = left.name || '—');
-      document.getElementById('foLeftParty')?.innerText !== undefined &&
-        (document.getElementById('foLeftParty').innerText = left.party || '—');
-      setEl('foLeftVotes', left.vote_count || 0);
-
-      const foRI = document.getElementById('foRightImg');
-      if (foRI) foRI.src = right.img || '';
-      document.getElementById('foRightName')?.innerText !== undefined &&
-        (document.getElementById('foRightName').innerText = right.name || '—');
-      document.getElementById('foRightParty')?.innerText !== undefined &&
-        (document.getElementById('foRightParty').innerText = right.party || '—');
-      setEl('foRightVotes', right.vote_count || 0);
-
-      const lv = left.vote_count  || 0;
-      const rv = right.vote_count || 0;
-      const tv = lv + rv;
-      setEl('foTotalVotes', totalVotes);
-
-      const lp = tv > 0 ? Math.round((lv / tv) * 100) : 0;
-      const rp = tv > 0 ? Math.round((rv / tv) * 100) : 0;
-      const lpEl = document.getElementById('foLeftPct');
-      const rpEl = document.getElementById('foRightPct');
-      if (lpEl) lpEl.innerText = lp + '%';
-      if (rpEl) rpEl.innerText = rp + '%';
-
-      const progressFill = document.getElementById('foProgressFill');
-      if (progressFill) {
-        progressFill.style.width = `${Math.min(100, Math.floor((totalVotes / 540) * 100))}%`;
-      }
-
-      const winnerChip = document.getElementById('foWinnerChip');
-      if (winnerChip) {
-        winnerChip.innerHTML = rv >= 270 ? '🏆 WINNER DECLARED!' : '⏳ Race in progress';
-      }
+    // ── Empty-state: category has fewer than 2 candidates ──
+    if (top2.length < 2) {
+      // Zero/clear all metrics so no stale data from another category bleeds through
+      ['foLeftVotes','foRightVotes','foTotalVotes'].forEach(id => {
+        const el = document.getElementById(id); if(el) el.innerText = '0';
+      });
+      ['foLeftName','foRightName','foLeftParty','foRightParty'].forEach(id => {
+        const el = document.getElementById(id); if(el) el.innerText = '—';
+      });
+      const foLI = document.getElementById('foLeftImg');  if(foLI)  { foLI.src  = ''; foLI.alt  = ''; }
+      const foRI = document.getElementById('foRightImg'); if(foRI)  { foRI.src  = ''; foRI.alt  = ''; }
+      const pf   = document.getElementById('foProgressFill'); if(pf) pf.style.width = '0%';
+      const lp   = document.getElementById('foLeftPct');  if(lp)  lp.innerText  = '0%';
+      const rp   = document.getElementById('foRightPct'); if(rp)  rp.innerText  = '0%';
+      const chip = document.getElementById('foWinnerChip');
+      if (chip) chip.innerHTML =
+        `⚠️ Not enough candidates for Face-Off in <strong>${catLabel}</strong>`;
+      return;
     }
 
-    // Faceoff widget updated; live standings panel removed
+    // ── Normal path: 2+ candidates ──
+    const right = top2[0]; // leader on right (matches existing HTML intent)
+    const left  = top2[1];
+
+    const setEl = (id, val) => {
+      const el = document.getElementById(id);
+      if (el && el.innerText !== String(val)) {
+        el.innerText = val;
+        el.classList.add('vote-flash');
+        setTimeout(() => el.classList.remove('vote-flash'), 400);
+      }
+    };
+
+    const foLI = document.getElementById('foLeftImg');
+    if (foLI) { foLI.src = left.img || ''; foLI.alt = left.name || ''; }
+    document.getElementById('foLeftName')  && (document.getElementById('foLeftName').innerText  = left.name  || '—');
+    document.getElementById('foLeftParty') && (document.getElementById('foLeftParty').innerText = left.party || '—');
+    setEl('foLeftVotes', left.vote_count || 0);
+
+    const foRI = document.getElementById('foRightImg');
+    if (foRI) { foRI.src = right.img || ''; foRI.alt = right.name || ''; }
+    document.getElementById('foRightName')  && (document.getElementById('foRightName').innerText  = right.name  || '—');
+    document.getElementById('foRightParty') && (document.getElementById('foRightParty').innerText = right.party || '—');
+    setEl('foRightVotes', right.vote_count || 0);
+
+    const lv = left.vote_count  || 0;
+    const rv = right.vote_count || 0;
+    const tv = lv + rv;
+    setEl('foTotalVotes', totalVotes);
+
+    const lp = tv > 0 ? Math.round((lv / tv) * 100) : 0;
+    const rp = tv > 0 ? Math.round((rv / tv) * 100) : 0;
+    const lpEl = document.getElementById('foLeftPct');  if(lpEl) lpEl.innerText = lp + '%';
+    const rpEl = document.getElementById('foRightPct'); if(rpEl) rpEl.innerText = rp + '%';
+
+    const progressFill = document.getElementById('foProgressFill');
+    if (progressFill) progressFill.style.width =
+      `${Math.min(100, Math.floor((totalVotes / 540) * 100))}%`;
+
+    const winnerChip = document.getElementById('foWinnerChip');
+    if (winnerChip) winnerChip.innerHTML =
+      rv >= 270 ? '🏆 WINNER DECLARED!' : '⏳ Race in progress';
 
   } catch (e) {
-    console.error('updateFaceoff error:', e);
+    console.error('[updateFaceoff] error:', e);
   }
 };
 
