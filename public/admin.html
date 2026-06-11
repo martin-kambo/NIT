@@ -284,11 +284,11 @@ tr:hover td { background: var(--light-gray); }
             <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--mid-gray);margin-bottom:0.5rem;">Filter by Position</div>
             <div class="cat-selector" id="adminCatSelector">
               <button class="cat-btn active" data-cat="MCA"       onclick="selectAdminCategory('MCA')">🏛 MCA</button>
-              <button class="cat-btn"        data-cat="MP"        onclick="selectAdminCategory('MP')">🇰🇪 MP</button>
-              <button class="cat-btn"        data-cat="Governor"  onclick="selectAdminCategory('Governor')">⭐ Governor</button>
               <button class="cat-btn"        data-cat="WomenRep"  onclick="selectAdminCategory('WomenRep')">👑 Women Rep</button>
-              <button class="cat-btn"        data-cat="President" onclick="selectAdminCategory('President')">🏆 President</button>
+              <button class="cat-btn"        data-cat="MP"        onclick="selectAdminCategory('MP')">🇰🇪 MP</button>
               <button class="cat-btn"        data-cat="Senator"   onclick="selectAdminCategory('Senator')">🎖 Senator</button>
+              <button class="cat-btn"        data-cat="Governor"  onclick="selectAdminCategory('Governor')">⭐ Governor</button>
+              <button class="cat-btn"        data-cat="President" onclick="selectAdminCategory('President')">🏆 President</button>
             </div>
           </div>
           <button class="btn-sm btn-green" onclick="openAddCandidateModal()"><i class="fas fa-plus"></i> Add Candidate</button>
@@ -327,11 +327,11 @@ tr:hover td { background: var(--light-gray); }
       <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--mid-gray);margin-bottom:0.4rem;">Position / Category</div>
       <div class="cat-selector" id="modalCatSelector">
         <button class="cat-btn active" data-cat="MCA"       onclick="setModalCategory('MCA')">🏛 MCA</button>
-        <button class="cat-btn"        data-cat="MP"        onclick="setModalCategory('MP')">🇰🇪 MP</button>
-        <button class="cat-btn"        data-cat="Governor"  onclick="setModalCategory('Governor')">⭐ Governor</button>
         <button class="cat-btn"        data-cat="WomenRep"  onclick="setModalCategory('WomenRep')">👑 Women Rep</button>
-        <button class="cat-btn"        data-cat="President" onclick="setModalCategory('President')">🏆 President</button>
+        <button class="cat-btn"        data-cat="MP"        onclick="setModalCategory('MP')">🇰🇪 MP</button>
         <button class="cat-btn"        data-cat="Senator"   onclick="setModalCategory('Senator')">🎖 Senator</button>
+        <button class="cat-btn"        data-cat="Governor"  onclick="setModalCategory('Governor')">⭐ Governor</button>
+        <button class="cat-btn"        data-cat="President" onclick="setModalCategory('President')">🏆 President</button>
       </div>
     </div>
     <div class="cand-form-grid">
@@ -579,7 +579,7 @@ function showError(el, msg) { el.textContent = msg; el.classList.add('show'); }
 
 // ── CANDIDATE MANAGEMENT ──
 const ADMIN_PASSWORD = () => sessionStorage.getItem('adminToken') ? null : null; // token used via header
-const CAT_LABELS = { MCA: 'MCA Aspirants', MP: 'MP Candidates', Governor: 'Governor Candidates', WomenRep: 'Women Rep Candidates', President: 'Presidential Candidates', Senator: 'Senator Candidates' };
+const CAT_LABELS = { MCA: 'MCA Aspirants', WomenRep: 'Women Rep Candidates', MP: 'MP Candidates', Senator: 'Senator Candidates', Governor: 'Governor Candidates', President: 'Presidential Candidates' };
 let adminCurrentCategory = 'MCA';
 
 function selectAdminCategory(cat) {
