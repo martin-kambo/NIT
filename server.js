@@ -102,10 +102,11 @@ async function initDB() {
         user_id UUID,
         candidate_id INT,
         period_id INT,
+        category VARCHAR(50) DEFAULT 'MCA',
         sublocation VARCHAR(100),
         ip_hash VARCHAR(16),
         timestamp BIGINT,
-        UNIQUE (user_id, period_id)
+        UNIQUE (user_id, period_id, category)
       );
 
       CREATE TABLE IF NOT EXISTS period_archives (
@@ -471,16 +472,21 @@ async function ensureVotingPeriodsTable() {
         user_id      UUID,
         candidate_id INT,
         period_id    INT,
+        category     VARCHAR(50) DEFAULT 'MCA',
         sublocation  VARCHAR(100),
         ip_hash      VARCHAR(32),
         timestamp    BIGINT
       )
     `);
+    // Add category column to existing deployments that don't have it yet
+    try { await pool.query(`ALTER TABLE votes ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'MCA'`); } catch(_){}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_candidate ON votes (candidate_id)`); } catch(_){}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_user_period ON votes (user_id, period_id)`); } catch(_){}
     try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_period ON votes (period_id)`); } catch(_){}
-    // Enforce one-vote-per-user-per-period at the DB level (safety net against races)
-    try { await pool.query(`ALTER TABLE votes ADD CONSTRAINT votes_user_period_unique UNIQUE (user_id, period_id)`); } catch(_){}
+    // Drop old one-vote-per-period constraint (too broad) and replace with per-category constraint
+    try { await pool.query(`ALTER TABLE votes DROP CONSTRAINT IF EXISTS votes_user_period_unique`); } catch(_){}
+    // Enforce one-vote-per-user-per-period-per-category at the DB level (safety net against races)
+    try { await pool.query(`ALTER TABLE votes ADD CONSTRAINT votes_user_period_category_unique UNIQUE (user_id, period_id, category)`); } catch(_){}
 
     // 4. Also ensure period_archives table exists
     await pool.query(`
@@ -571,7 +577,7 @@ async function ensureActivePeriod() {
 // CANDIDATES TABLE — multi-category support
 // Preserves all existing MCA candidate IDs (0-6) for vote backward-compat
 // ══════════════════════════════════════════════════════════════════
-const CANDIDATE_CATEGORIES = ['MCA', 'WomenRep', 'MP', 'Senator', 'Governor', 'President'];
+const CANDIDATE_CATEGORIES = ['MCA', 'MP', 'Governor', 'WomenRep'];
 
 async function ensureCandidatesTable() {
   try {
@@ -1071,12 +1077,22 @@ app.post('/api/vote', async (req, res) => {
     if (new Date(period.period_end) <= new Date())
       return res.status(400).json({ error: 'Voting period has ended' });
 
+    // Resolve the candidate's category from the DB (fall back to 'MCA' for legacy in-memory candidates)
+    const CANDS_FALLBACK_CAT = { 0:'MCA',1:'MCA',2:'MCA',3:'MCA',4:'MCA',5:'MCA',6:'MCA' };
+    let voteCategory = 'MCA';
+    try {
+      const candRes = await pool.query('SELECT category FROM candidates WHERE id = $1', [candidateId]);
+      if (candRes.rows.length > 0) voteCategory = candRes.rows[0].category || 'MCA';
+      else voteCategory = CANDS_FALLBACK_CAT[candidateId] || 'MCA';
+    } catch(_) { voteCategory = CANDS_FALLBACK_CAT[candidateId] || 'MCA'; }
+
+    // Eligibility check: one vote per user per period PER CATEGORY
     const voteCheck = await pool.query(
-      'SELECT id FROM votes WHERE user_id = $1 AND period_id = $2',
-      [session.userId, periodId]
+      'SELECT id FROM votes WHERE user_id = $1 AND period_id = $2 AND category = $3',
+      [session.userId, periodId, voteCategory]
     );
     if (voteCheck.rows.length > 0)
-      return res.status(409).json({ error: 'Already voted this period', alreadyVoted: true });
+      return res.status(409).json({ error: `Already voted for ${voteCategory} this period`, alreadyVoted: true, category: voteCategory });
 
     const userResult = await pool.query(
       'SELECT sublocation FROM users WHERE id = $1',
@@ -1088,16 +1104,16 @@ app.post('/api/vote', async (req, res) => {
     const ipHash = crypto.createHash('sha256').update(rawIp).digest('hex').slice(0, 16);
 
     const insertResult = await pool.query(
-      `INSERT INTO votes (user_id, candidate_id, period_id, sublocation, ip_hash, timestamp)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (user_id, period_id) DO NOTHING
+      `INSERT INTO votes (user_id, candidate_id, period_id, category, sublocation, ip_hash, timestamp)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (user_id, period_id, category) DO NOTHING
        RETURNING id`,
-      [session.userId, candidateId, periodId, user?.sublocation || null, ipHash, Date.now()]
+      [session.userId, candidateId, periodId, voteCategory, user?.sublocation || null, ipHash, Date.now()]
     );
 
     // If no row was inserted, a concurrent request already recorded a vote (race condition)
     if (insertResult.rowCount === 0) {
-      return res.status(409).json({ error: 'Already voted this period', alreadyVoted: true });
+      return res.status(409).json({ error: `Already voted for ${voteCategory} this period`, alreadyVoted: true, category: voteCategory });
     }
 
     await pool.query(
@@ -1142,7 +1158,8 @@ app.post('/api/vote', async (req, res) => {
       totalVotes: voterCount,
       votesByCandidate,
       candidateId,
-      periodId
+      periodId,
+      category: voteCategory
     });
   } catch (e) {
     console.error('/api/vote error:', e);
@@ -1176,15 +1193,19 @@ app.get('/api/polling-results', async (req, res) => {
       [period.id]
     );
 
-    // Check if the authenticated user has voted this period
+    // Check which categories the authenticated user has voted in this period
     let hasVoted = false;
+    let votedCategories = {};
     const session = verifySession(req.headers.cookie || '');
     if (session && session.userId) {
       const voteCheck = await pool.query(
-        'SELECT 1 FROM votes WHERE user_id = $1 AND period_id = $2 LIMIT 1',
+        'SELECT category FROM votes WHERE user_id = $1 AND period_id = $2',
         [session.userId, period.id]
       );
-      hasVoted = voteCheck.rows.length > 0;
+      if (voteCheck.rows.length > 0) {
+        hasVoted = true; // backward-compat: true if voted in ANY category
+        voteCheck.rows.forEach(r => { votedCategories[r.category] = true; });
+      }
     }
 
     // Build structure with sublocations and total
@@ -1211,6 +1232,7 @@ app.get('/api/polling-results', async (req, res) => {
         isActive: period.is_active,
         totalVotes: parseInt(period.total_votes),
         hasVoted,
+        votedCategories,
         votesByCandidate: votesByCandidate,
         votesByUser: []
       });
@@ -2361,15 +2383,19 @@ app.get('/api/voting-period', async (req, res) => {
     const secondsRemaining = Math.max(0, Math.floor((endsAt - now) / 1000));
     const endsInMs         = Math.max(0, endsAt - now);
 
-    // 3. Check if authenticated user has voted this cycle
+    // 3. Check which categories the authenticated user has voted in this cycle
     let userHasVoted = false;
+    let votedCategories = {};
     const session = verifySession(req.headers.cookie || '');
     if (session && session.userId) {
       const voteCheck = await pool.query(
-        `SELECT 1 FROM votes WHERE user_id = $1 AND period_id = $2 LIMIT 1`,
+        `SELECT category FROM votes WHERE user_id = $1 AND period_id = $2`,
         [session.userId, period.id]
       );
-      userHasVoted = voteCheck.rows.length > 0;
+      if (voteCheck.rows.length > 0) {
+        userHasVoted = true; // backward-compat: true if voted in ANY category
+        voteCheck.rows.forEach(r => { votedCategories[r.category] = true; });
+      }
     }
 
     return res.json({
@@ -2382,7 +2408,8 @@ app.get('/api/voting-period', async (req, res) => {
         secondsRemaining,
         totalVotes:       parseInt(period.total_votes) || 0,
         isActive:         true,
-        userHasVoted
+        userHasVoted,
+        votedCategories
       }
     });
 

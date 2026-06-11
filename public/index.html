@@ -2306,12 +2306,10 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="poll-category-strip scroll-reveal" id="pollCategoryStrip">
         <div class="poll-cat-label">📊 Position</div>
         <div class="poll-cat-tabs" id="pollCatTabs">
-          <button class="poll-cat-btn active" data-cat="MCA"       onclick="switchPollCategory('MCA')">🏛 MCA</button>
-          <button class="poll-cat-btn"        data-cat="MP"        onclick="switchPollCategory('MP')">🇰🇪 MP</button>
-          <button class="poll-cat-btn"        data-cat="Governor"  onclick="switchPollCategory('Governor')">⭐ Governor</button>
-          <button class="poll-cat-btn"        data-cat="WomenRep"  onclick="switchPollCategory('WomenRep')">👑 Women Rep</button>
-          <button class="poll-cat-btn"        data-cat="President" onclick="switchPollCategory('President')">🏆 President</button>
-          <button class="poll-cat-btn"        data-cat="Senator"   onclick="switchPollCategory('Senator')">🎖 Senator</button>
+          <button class="poll-cat-btn active" data-cat="MCA"      onclick="switchPollCategory('MCA')">🏛 MCA</button>
+          <button class="poll-cat-btn"        data-cat="MP"       onclick="switchPollCategory('MP')">🇰🇪 MP</button>
+          <button class="poll-cat-btn"        data-cat="Governor" onclick="switchPollCategory('Governor')">⭐ Governor</button>
+          <button class="poll-cat-btn"        data-cat="WomenRep" onclick="switchPollCategory('WomenRep')">👑 Women Rep</button>
         </div>
         <div class="poll-category-badge" id="pollCategoryBadge">MCA Aspirants</div>
       </div>
@@ -2370,7 +2368,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="turnout-grid scroll-reveal" id="turnoutGrid"></div>
 
       <!-- Already voted -->
-      <div class="voted-banner hidden" id="alreadyVotedMsg">✅ You have already voted in this cycle. Please wait for the next voting period.</div>
+      <div class="voted-banner hidden" id="alreadyVotedMsg">✅ You have already voted in this category this cycle. Switch to another category to continue voting.</div>
 
       <!-- Candidates -->
       <div class="section-header scroll-reveal-left">
@@ -3015,7 +3013,7 @@ const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
 // Poll category state — tracks which election position the user is viewing
 let activePollCategory = 'MCA';
 window.activePollCategory = 'MCA';  // expose so Script 2 (separate scope) can read it
-const POLL_CAT_LABELS  = { MCA:'MCA Aspirants', WomenRep:'Women Rep Candidates', MP:'MP Candidates', Senator:'Senator Candidates',Governor:'Governor Candidates', President:'Presidential Candidates',  };
+const POLL_CAT_LABELS  = { MCA:'MCA Aspirants', MP:'MP Candidates', Governor:'Governor Candidates', WomenRep:'Women Rep Candidates' };
 window.POLL_CAT_LABELS = POLL_CAT_LABELS; // expose so Script 2's catLabel lookup works
 
 // Global state
@@ -3158,8 +3156,13 @@ async function submitVote(candidateId) {
     
     // ━━━ 4. HANDLE ERRORS ━━━
     if(response.status === 409 || data.alreadyVoted) {
-      showToast(data.error || "You have already voted in this cycle. Please wait for the next voting period.", "warning");
-      // refresh cards to show locked state
+      showToast(data.error || "You have already voted in this category this cycle.", "warning");
+      // Mark this category as voted in the local state
+      if(data.category) {
+        if(!window.votedCategories) window.votedCategories = {};
+        window.votedCategories[data.category] = true;
+      }
+      // refresh cards to show locked state for this category only
       await renderDashboard();
       return false;
     }
@@ -3405,6 +3408,12 @@ function renderTurnout(){
 function renderCandidatesGrid(disableVote, serverVotes){
   const container=document.getElementById("candidatesGrid"); if(!container) return;
 
+  // Per-category voted state: if a map was passed, check the active category only.
+  // Falls back to the legacy boolean for backward compatibility.
+  const categoryVoted = (window.votedCategories && typeof window.votedCategories === 'object')
+    ? !!(window.votedCategories[activePollCategory])
+    : !!disableVote;
+
   // ── Empty state: category exists but has no candidates yet ──
   if(CANDIDATES.length === 0){
     const catLabel = POLL_CAT_LABELS[activePollCategory] || activePollCategory;
@@ -3432,7 +3441,7 @@ function renderCandidatesGrid(disableVote, serverVotes){
         <div class="card-name">${cand.name}</div>
         <div class="card-party">${cand.party}</div>
         <div class="card-bio">${cand.bio}</div>
-        ${disableVote?'<div class="card-voted">✅ Voted this cycle</div>':`<button class="card-vote-btn ripple-wrap vote-btn" data-id="${cand.id}"><i class="fas fa-vote-yea"></i> Cast Vote (KES 10)</button>`}
+        ${categoryVoted?'<div class="card-voted">✅ Voted this cycle</div>':`<button class="card-vote-btn ripple-wrap vote-btn" data-id="${cand.id}"><i class="fas fa-vote-yea"></i> Cast Vote (KES 10)</button>`}
       </div>
     </div>`;
   }).join("");
@@ -3614,8 +3623,13 @@ async function switchPollCategory(cat) {
 
   updateFaceoff();
 
-  // Re-render grid with empty votes (real data refreshes via renderDashboard)
-  renderCandidatesGrid(window.userHasVoted || false, {});
+  // Re-render grid — check voted state for the newly selected category only
+  const switchCatVoted = !!(window.votedCategories && window.votedCategories[cat]);
+  renderCandidatesGrid(switchCatVoted, {});
+
+  // Update the banner for the newly selected category
+  const switchBanner = document.getElementById('alreadyVotedMsg');
+  if (switchBanner) switchBanner.classList.toggle('hidden', !switchCatVoted);
 
   // Refresh analytics and leaderboard if those tabs are currently visible
   const activePane = document.querySelector('.feature-pane.active');
@@ -3724,11 +3738,12 @@ function animatePinDots(count){document.querySelectorAll(".mpesa-pin-dot").forEa
 function showVoteConfirm(cid,btn){ openMpesaModal(cid,btn); }
 
 function openMpesaModal(cid,btn){
-  // ── CYCLE GUARD: block payment if user already voted this cycle ──
-  if(window.userHasVoted){
-    showToast("✋ You have already voted in this cycle. Please wait for the next voting period.","warning");
-    const banner=document.getElementById("alreadyVotedMsg");
-    if(banner) banner.classList.remove("hidden");
+  // ── CYCLE GUARD: block payment if user already voted in this category this cycle ──
+  const currentCategoryVoted = (window.votedCategories && typeof window.votedCategories === 'object')
+    ? !!(window.votedCategories[activePollCategory])
+    : !!(window.userHasVoted);
+  if(currentCategoryVoted){
+    showToast(`✋ You have already voted for ${POLL_CAT_LABELS[activePollCategory]||activePollCategory} this cycle. Switch to another category or wait for the next period.`,"warning");
     return;
   }
   const numericCid = typeof cid === 'string' ? parseInt(cid, 10) : cid;
@@ -3786,7 +3801,12 @@ async function simulateMpesaSuccess(){
       }).then(r=>r.json()).catch(()=>({success:false}));
       const ok=voteRes.success!==false;
       if(ok){
-        window.userHasVoted = true;  // ← lock out further votes for this cycle
+        // Mark only this category as voted — other categories remain open
+        if(!window.votedCategories) window.votedCategories = {};
+        const votedCat = voteRes.category || activePollCategory;
+        window.votedCategories[votedCat] = true;
+        // Keep userHasVoted in sync (true if any category voted — for backward compat)
+        window.userHasVoted = true;
         if(mpesaPendingVote.button){mpesaPendingVote.button.innerHTML='<i class="fas fa-check-circle"></i> Voted!';mpesaPendingVote.button.disabled=true;}
         renderDashboard();
         const cn=CANDIDATES.find(c=>c.id===mpesaPendingVote.candidateId);
@@ -6351,12 +6371,21 @@ window.renderDashboard = async function(){
     window.currentPeriodEnd = votingPeriodData?.data?.endsAt ?? periodData.periodEnd;
 
     const hasVoted = votingPeriodData?.data?.userHasVoted ?? periodData.hasVoted ?? false;
-    window.userHasVoted = hasVoted;  // ← vote-eligibility source of truth
+    window.userHasVoted = hasVoted;  // ← backward-compat: true if voted in ANY category
 
-    // Render candidates grid — THIS is what was missing
+    // Per-category voted map — merge from both endpoints (voting-period is authoritative)
+    const votedCats = votingPeriodData?.data?.votedCategories ?? periodData.votedCategories ?? {};
+    window.votedCategories = votedCats;
+
+    // Render candidates grid — pass votedCategories so each category locks independently
     if(typeof renderCandidatesGrid === 'function') renderCandidatesGrid(hasVoted, periodData.votesByCandidate);
+
+    // Banner: show only when current active category is already voted
     const votedBanner = document.getElementById('alreadyVotedMsg');
-    if (votedBanner) votedBanner.classList.toggle('hidden', !hasVoted);
+    if (votedBanner) {
+      const currentCatVoted = !!(window.votedCategories && window.votedCategories[activePollCategory]);
+      votedBanner.classList.toggle('hidden', !currentCatVoted);
+    }
 
     // Render supporting sections
     if(typeof renderTurnout === 'function') await renderTurnout();
