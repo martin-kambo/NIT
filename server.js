@@ -2866,6 +2866,58 @@ app.use(votingRouter);
 // ── PHASE 3: Mount analytics router ──
 app.use(analyticsRouter);
 
+// ── AI Q&A PROXY ──
+// Proxies requests to Anthropic so the API key never reaches the browser.
+// Requires ANTHROPIC_API_KEY in environment variables.
+app.post('/api/ai-ask', async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    console.error('[AI Q&A] ANTHROPIC_API_KEY environment variable is not set.');
+    return res.status(503).json({ error: 'AI service is not configured. Please set ANTHROPIC_API_KEY on the server.' });
+  }
+
+  const { system, message } = req.body;
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'Missing or empty message.' });
+  }
+
+  try {
+    const anthropicRes = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 300,
+        system: system || '',
+        messages: [{ role: 'user', content: message.trim() }]
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        timeout: 20000
+      }
+    );
+
+    const text = anthropicRes.data?.content?.[0]?.text;
+    if (!text) {
+      console.error('[AI Q&A] Unexpected Anthropic response shape:', JSON.stringify(anthropicRes.data));
+      return res.status(502).json({ error: 'Unexpected response from AI provider.' });
+    }
+
+    return res.json({ reply: text });
+  } catch (err) {
+    const status = err.response?.status;
+    const detail = err.response?.data?.error?.message || err.message;
+    console.error(`[AI Q&A] Anthropic API error (HTTP ${status || 'network'}):`, detail);
+
+    if (status === 401) return res.status(502).json({ error: 'AI provider authentication failed. Check ANTHROPIC_API_KEY.' });
+    if (status === 429) return res.status(502).json({ error: 'AI provider rate limit reached. Please try again shortly.' });
+    return res.status(502).json({ error: 'AI provider request failed. Please try again.' });
+  }
+});
+
 // ── PHASE 2: Frontend page routes ──
 app.get('/voting', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'voting.html'));
