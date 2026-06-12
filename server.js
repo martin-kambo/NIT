@@ -1603,102 +1603,261 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-// GET /api/forum - List forum posts
+// ════════════════════════════════════════════════════════════════════
+// FORUM — Startup migration: add category column if missing
+// ════════════════════════════════════════════════════════════════════
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS category VARCHAR(30) DEFAULT 'general'`);
+    await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_posts_category ON forum_posts(category)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_posts_created ON forum_posts(created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_replies_post ON forum_replies(post_id)`);
+    console.log('✅ Forum schema ready');
+  } catch (e) {
+    console.warn('⚠️  Forum schema migration (non-fatal):', e.message);
+  }
+})();
+
+// Allowed forum categories — extend this array to add new ones
+const FORUM_CATEGORIES = ['general', 'water', 'roads', 'health', 'youth'];
+
+// Helper: map post row → API shape
+function formatPost(p) {
+  return {
+    id: p.id,
+    author: p.author_name || 'Anonymous',
+    authorPhone: p.author_phone || null,
+    text: p.content,
+    title: p.title,
+    category: p.category || 'general',
+    likes: parseInt(p.like_count) || 0,
+    reply_count: parseInt(p.reply_count) || 0,
+    created_at: p.created_at,
+    last_activity_at: p.last_activity_at
+  };
+}
+
+// Helper: map reply row → API shape
+function formatReply(r) {
+  return {
+    id: r.id,
+    postId: r.post_id,
+    author: r.author_name || 'Anonymous',
+    text: r.content,
+    likes: parseInt(r.like_count) || 0,
+    created_at: r.created_at
+  };
+}
+
+// ────────────────────────────────────────────────────────────────
+// GET /api/forum  — list posts, optional ?category= filter
+// ────────────────────────────────────────────────────────────────
 app.get('/api/forum', async (req, res) => {
   try {
-    const posts = await pool.query('SELECT * FROM forum_posts ORDER BY last_activity_at DESC LIMIT 50');
-    res.json({
-      success: true,
-      posts: posts.rows.map(p => ({
-        id: p.id,
-        author: p.author_name || 'Anonymous',
-        text: p.content,
-        title: p.title,
-        likes: p.like_count || 0,
-        reply_count: p.reply_count || 0,
-        created_at: p.created_at
-      }))
-    });
+    const cat = req.query.category;
+    const validCat = cat && FORUM_CATEGORIES.includes(cat) ? cat : null;
+
+    const result = validCat
+      ? await pool.query(
+          `SELECT * FROM forum_posts
+            WHERE COALESCE(is_deleted, false) = false
+              AND COALESCE(is_hidden,  false) = false
+              AND category = $1
+            ORDER BY last_activity_at DESC LIMIT 60`,
+          [validCat]
+        )
+      : await pool.query(
+          `SELECT * FROM forum_posts
+            WHERE COALESCE(is_deleted, false) = false
+              AND COALESCE(is_hidden,  false) = false
+            ORDER BY last_activity_at DESC LIMIT 60`
+        );
+
+    res.json({ success: true, posts: result.rows.map(formatPost) });
   } catch (error) {
-    console.error('/api/forum error:', error);
+    console.error('GET /api/forum error:', error.message);
     res.status(500).json({ success: false, error: 'Failed to get forum posts' });
   }
 });
 
-// POST /api/forum - Create forum post / list / like
+// ────────────────────────────────────────────────────────────────
+// POST /api/forum  — create post | like post | list posts (legacy)
+// ────────────────────────────────────────────────────────────────
 app.post('/api/forum', async (req, res) => {
-  const { action, text, title, postId } = req.body;
+  const { action, text, title, postId, category } = req.body;
 
+  // ── create_post ──────────────────────────────────────────────
   if (action === 'create_post') {
-    try {
-      const session = verifySession(req.headers.cookie || '');
-      if (!session) return res.status(401).json({ error: 'Unauthorized' });
+    const session = verifySession(req.headers.cookie || '');
+    if (!session) return res.status(401).json({ success: false, error: 'Login required to post' });
 
-      const user = await pool.query('SELECT id, first_name, surname FROM users WHERE phone = $1', [session.phone]);
-      if (!user.rows.length) return res.status(404).json({ error: 'User not found' });
-      const author = `${user.rows[0].first_name} ${user.rows[0].surname}`;
+    const trimmed = (text || '').trim();
+    if (!trimmed || trimmed.length < 3)
+      return res.status(400).json({ success: false, error: 'Post must be at least 3 characters' });
+    if (trimmed.length > 2000)
+      return res.status(400).json({ success: false, error: 'Post cannot exceed 2000 characters' });
+
+    const safeCategory = FORUM_CATEGORIES.includes(category) ? category : 'general';
+    // Sanitise: strip raw HTML tags to prevent XSS (stored as plain text, escaped on render)
+    const safeText = trimmed.replace(/<[^>]*>/g, '');
+
+    try {
+      const user = await pool.query(
+        'SELECT id, first_name, surname, profile_photo FROM users WHERE id = $1',
+        [session.userId]
+      );
+      if (!user.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+      const u = user.rows[0];
+      const author = `${u.first_name} ${u.surname}`.trim() || 'Anonymous';
+      const autoTitle = title?.trim() || safeText.slice(0, 80);
 
       const post = await pool.query(
-        `INSERT INTO forum_posts (title, content, author_id, author_name, author_phone, last_activity_at)
-         VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
-        [title || text?.slice(0, 80) || 'Post', text, user.rows[0].id, author, session.phone]
+        `INSERT INTO forum_posts
+           (title, content, author_id, author_name, author_phone, category, last_activity_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         RETURNING *`,
+        [autoTitle, safeText, u.id, author, session.phone, safeCategory]
       );
 
-      res.json({ success: true, post: post.rows[0] });
+      res.json({ success: true, post: formatPost(post.rows[0]) });
     } catch (error) {
-      console.error('/api/forum create error:', error);
+      console.error('POST /api/forum create_post error:', error.message);
       res.status(500).json({ success: false, error: 'Failed to create post' });
     }
-  }
 
-  else if (action === 'list_posts') {
+  // ── like_post ────────────────────────────────────────────────
+  } else if (action === 'like_post') {
+    const session = verifySession(req.headers.cookie || '');
+    if (!session) return res.status(401).json({ success: false, error: 'Login required to like' });
+    if (!postId) return res.status(400).json({ success: false, error: 'postId required' });
+
     try {
-      const posts = await pool.query('SELECT * FROM forum_posts ORDER BY last_activity_at DESC LIMIT 50');
-      res.json({
-        success: true,
-        posts: posts.rows.map(p => ({
-          id: p.id,
-          author: p.author_name || 'Anonymous',
-          text: p.content,
-          title: p.title,
-          likes: p.like_count || 0,
-          reply_count: p.reply_count || 0,
-          created_at: p.created_at
-        }))
-      });
-    } catch (error) {
-      console.error('/api/forum list error:', error);
-      res.status(500).json({ success: false, error: 'Failed to get forum posts' });
-    }
-  }
-
-  else if (action === 'like_post') {
-    try {
-      const session = verifySession(req.headers.cookie || '');
-      if (!session) return res.status(401).json({ error: 'Unauthorized' });
-
-      const userRes = await pool.query('SELECT id FROM users WHERE phone = $1', [session.phone]);
-      if (!userRes.rows.length) return res.status(404).json({ error: 'User not found' });
+      const userRes = await pool.query('SELECT id FROM users WHERE id = $1', [session.userId]);
+      if (!userRes.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
       const userId = userRes.rows[0].id;
 
-      // Insert like — ignore if already liked (PRIMARY KEY constraint)
-      await pool.query(
-        'INSERT INTO post_likes (post_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [postId, userId]
+      // Toggle: insert or delete
+      const existing = await pool.query(
+        'SELECT 1 FROM post_likes WHERE post_id = $1 AND user_id = $2', [postId, userId]
       );
-      // Sync like_count from actual rows
+      if (existing.rows.length) {
+        await pool.query('DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2', [postId, userId]);
+      } else {
+        await pool.query('INSERT INTO post_likes (post_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [postId, userId]);
+      }
+      // Sync count
       await pool.query(
         'UPDATE forum_posts SET like_count = (SELECT COUNT(*) FROM post_likes WHERE post_id = $1) WHERE id = $1',
         [postId]
       );
-      res.json({ success: true });
+      const updated = await pool.query('SELECT like_count FROM forum_posts WHERE id = $1', [postId]);
+      res.json({ success: true, likes: parseInt(updated.rows[0]?.like_count) || 0, liked: !existing.rows.length });
     } catch (error) {
+      console.error('POST /api/forum like_post error:', error.message);
       res.status(500).json({ success: false, error: 'Failed to like post' });
     }
-  }
 
-  else {
+  // ── list_posts (legacy POST action — keep for backward compat) ──
+  } else if (action === 'list_posts') {
+    try {
+      const cat = req.body.category;
+      const validCat = cat && FORUM_CATEGORIES.includes(cat) ? cat : null;
+      const result = validCat
+        ? await pool.query(
+            `SELECT * FROM forum_posts WHERE COALESCE(is_deleted,false)=false AND COALESCE(is_hidden,false)=false AND category=$1 ORDER BY last_activity_at DESC LIMIT 60`,
+            [validCat]
+          )
+        : await pool.query(
+            `SELECT * FROM forum_posts WHERE COALESCE(is_deleted,false)=false AND COALESCE(is_hidden,false)=false ORDER BY last_activity_at DESC LIMIT 60`
+          );
+      res.json({ success: true, posts: result.rows.map(formatPost) });
+    } catch (error) {
+      console.error('POST /api/forum list_posts error:', error.message);
+      res.status(500).json({ success: false, error: 'Failed to list posts' });
+    }
+
+  } else {
     res.status(400).json({ success: false, error: 'Unknown action' });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// GET /api/forum/replies/:postId  — list replies for a post
+// ────────────────────────────────────────────────────────────────
+app.get('/api/forum/replies/:postId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM forum_replies
+        WHERE post_id = $1
+          AND COALESCE(is_deleted, false) = false
+          AND COALESCE(is_hidden,  false) = false
+        ORDER BY created_at ASC`,
+      [req.params.postId]
+    );
+    res.json({ success: true, replies: result.rows.map(formatReply) });
+  } catch (error) {
+    console.error('GET /api/forum/replies error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to get replies' });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// POST /api/forum/replies  — add a reply to a post
+// ────────────────────────────────────────────────────────────────
+app.post('/api/forum/replies', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ success: false, error: 'Login required to reply' });
+
+  const { postId, text } = req.body;
+  if (!postId) return res.status(400).json({ success: false, error: 'postId required' });
+
+  const trimmed = (text || '').trim();
+  if (!trimmed || trimmed.length < 1)
+    return res.status(400).json({ success: false, error: 'Reply cannot be empty' });
+  if (trimmed.length > 1000)
+    return res.status(400).json({ success: false, error: 'Reply cannot exceed 1000 characters' });
+
+  const safeText = trimmed.replace(/<[^>]*>/g, '');
+
+  try {
+    // Verify post exists and is not deleted/hidden
+    const postCheck = await pool.query(
+      `SELECT id FROM forum_posts WHERE id = $1 AND COALESCE(is_deleted,false)=false AND COALESCE(is_hidden,false)=false`,
+      [postId]
+    );
+    if (!postCheck.rows.length)
+      return res.status(404).json({ success: false, error: 'Post not found' });
+
+    const user = await pool.query(
+      'SELECT id, first_name, surname FROM users WHERE id = $1', [session.userId]
+    );
+    if (!user.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+    const u = user.rows[0];
+    const author = `${u.first_name} ${u.surname}`.trim() || 'Anonymous';
+
+    const reply = await pool.query(
+      `INSERT INTO forum_replies (post_id, content, author_id, author_name, author_phone)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [postId, safeText, u.id, author, session.phone]
+    );
+
+    // Update reply_count and last_activity_at on the parent post
+    await pool.query(
+      `UPDATE forum_posts
+         SET reply_count = (SELECT COUNT(*) FROM forum_replies WHERE post_id = $1 AND COALESCE(is_deleted,false)=false),
+             last_activity_at = NOW()
+       WHERE id = $1`,
+      [postId]
+    );
+
+    res.json({ success: true, reply: formatReply(reply.rows[0]) });
+  } catch (error) {
+    console.error('POST /api/forum/replies error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to post reply' });
   }
 });
 

@@ -3980,132 +3980,285 @@ const SEED_POSTS=[
   {id:"p4",author:"Sarah N.",authorImg:"https://randomuser.me/api/portraits/women/22.jpg",text:"The Magogoni water pump has been broken for 3 months. Women are walking 5km for water daily. This is unacceptable.",tag:"water",likes:31,timestamp:Date.now()-86400000,replies:[]},
 ];
 
-function renderForumTab(){
-  // Seed posts if empty
-  if(DB.getForumPosts().length===0) DB.saveForumPosts(SEED_POSTS);
-  forumPosts=DB.getForumPosts();
-  // Set compose avatar
-  const compAvatar=document.getElementById("forumComposeAvatar");
-  if(compAvatar) compAvatar.src=currentUser.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=40&bold=true&name=${encodeURIComponent(currentUser.firstName+"+"+currentUser.surname)}`;
-  // ✅ FIX 7: Use debounced render function
-  debouncedRenderForumPosts();
-  initScrollReveal();
-}
+// ══════════════════════════════════════════════════════════════
+// FORUM — API-backed implementation (single authoritative source)
+// All reads/writes go to /api/forum and /api/forum/replies.
+// localStorage is NOT used for forum data.
+// ══════════════════════════════════════════════════════════════
 
-// ✅ FIX 7: Debounce utility function - prevents rapid re-renders
-function debounce(func, delay){
-  let timeoutId;
-  return function(...args){
-    clearTimeout(timeoutId);
-    timeoutId=setTimeout(()=>func.apply(this,args),delay);
-  };
-}
+const forumAPI = (() => {
+  // ── Internal state ──────────────────────────────────────────
+  let _posts = [];               // cached posts for current filter
+  let _openReplies = {};         // { postId: reply[] } when expanded
+  let _likedPosts = new Set();   // optimistic like tracking (session only)
+  let _pollTimer = null;         // polling interval handle
 
-// ✅ FIX 7: Debounced version of renderForumPosts (300ms delay)
-const debouncedRenderForumPosts=debounce(renderForumPosts,300);
+  // ── Avatar helper ────────────────────────────────────────────
+  function avatar(name) {
+    return `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=38&bold=true&name=${encodeURIComponent(name||'User')}`;
+  }
 
-function renderForumPosts(){
-  const filtered=activeForumFilter==="all"?forumPosts:forumPosts.filter(p=>p.tag===activeForumFilter);
-  const likedPosts=JSON.parse(localStorage.getItem(`${DB_NS}:liked:${currentUser.phone}`)||"[]");
-  
-  // ✅ FIX 3 & 4: Pre-calculate avatars and times BEFORE rendering (not per item in template)
-  const postsWithMeta=filtered.map(post=>({
-    ...post,
-    avatarUrl: post.authorImg || getAvatarUrl(post.author),
-    timeDisplay: timeAgo(post.timestamp),
-    repliesHtml: (post.replies||[]).length>0 ? `<div class="forum-replies">${post.replies.map(r=>`<div class="forum-reply"><img class="forum-reply-avatar" src="${r.img || getAvatarUrl(r.author)}" alt="${r.author}" loading="lazy"><div class="forum-reply-bubble"><div class="forum-reply-author">${r.author}</div><div class="forum-reply-text">${r.text}</div></div></div>`).join("")}</div>` : ""
-  }));
-  
-  // ✅ FIX 6: Simplify template - don't nest maps, use pre-calculated HTML
-  document.getElementById("forumPosts").innerHTML=postsWithMeta.map(post=>`
-    <div class="forum-post" id="post-${post.id}">
+  // ── Tag label helper ─────────────────────────────────────────
+  const TAG_LABELS = { water:'💧 Water', roads:'🛣️ Roads', health:'🏥 Health', youth:'🎓 Youth', general:'💬 General' };
+  function tagLabel(t) { return TAG_LABELS[t] || '💬 General'; }
+
+  // ── Time helper ──────────────────────────────────────────────
+  function ago(ts) {
+    const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s/60)}m ago`;
+    if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+    return `${Math.floor(s/86400)}d ago`;
+  }
+
+  // ── Escape HTML ──────────────────────────────────────────────
+  function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  // ── Render a single post card ─────────────────────────────────
+  function postHTML(post) {
+    const replies = _openReplies[post.id];
+    const replySection = replies != null ? `
+      <div class="forum-replies">
+        ${replies.length === 0
+          ? '<div style="font-size:0.8rem;color:var(--mid-gray);padding:0.5rem 0;">No replies yet.</div>'
+          : replies.map(r => `
+            <div class="forum-reply">
+              <img class="forum-reply-avatar" src="${avatar(r.author)}" alt="${esc(r.author)}" loading="lazy">
+              <div class="forum-reply-bubble">
+                <div class="forum-reply-author">${esc(r.author)}</div>
+                <div class="forum-reply-text">${esc(r.text)}</div>
+              </div>
+            </div>`).join('')}
+        <div class="forum-reply-input-wrap" style="display:flex;">
+          <input type="text" class="forum-reply-input" id="replyInput-${esc(post.id)}" placeholder="Write a reply…" maxlength="280">
+          <button class="forum-reply-send" data-post="${esc(post.id)}" data-action="sendReply"><i class="fas fa-paper-plane"></i></button>
+        </div>
+      </div>` : '';
+
+    const liked = _likedPosts.has(post.id);
+    return `
+    <div class="forum-post" id="post-${esc(post.id)}">
       <div class="forum-post-header">
-        <img class="forum-post-avatar" src="${post.avatarUrl}" alt="${post.author}" loading="lazy">
-        <div class="forum-post-meta"><div class="forum-post-author">${post.author}</div><div class="forum-post-time">${post.timeDisplay}</div></div>
-        <span class="forum-post-tag tag-${post.tag}">${{water:"💧 Water",roads:"🛣️ Roads",health:"🏥 Health",youth:"🎓 Youth",general:"💬 General"}[post.tag]||"General"}</span>
+        <img class="forum-post-avatar" src="${avatar(post.author)}" alt="${esc(post.author)}" loading="lazy">
+        <div class="forum-post-meta">
+          <div class="forum-post-author">${esc(post.author)}</div>
+          <div class="forum-post-time">${ago(post.created_at)}</div>
+        </div>
+        <span class="forum-post-tag tag-${esc(post.category)}">${tagLabel(post.category)}</span>
       </div>
-      <div class="forum-post-body">${post.text}</div>
+      <div class="forum-post-body">${esc(post.text)}</div>
       <div class="forum-post-actions">
-        <button class="forum-action-btn ${likedPosts.includes(post.id)?"liked":""}" data-post="${post.id}" data-action="like"><i class="fas fa-heart"></i> ${post.likes}</button>
-        <button class="forum-action-btn" data-post="${post.id}" data-action="reply"><i class="fas fa-reply"></i> Reply</button>
-        <span style="font-size:0.75rem;color:var(--mid-gray);margin-left:auto;">${post.replies?.length||0} replies</span>
+        <button class="forum-action-btn ${liked?'liked':''}" data-post="${esc(post.id)}" data-action="like">
+          <i class="fas fa-heart"></i> <span class="like-count">${post.likes}</span>
+        </button>
+        <button class="forum-action-btn" data-post="${esc(post.id)}" data-action="reply">
+          <i class="fas fa-reply"></i> ${post.reply_count} ${post.reply_count===1?'reply':'replies'}
+        </button>
       </div>
-      ${post.repliesHtml}
-      <div class="forum-reply-input-wrap" id="replyWrap-${post.id}" style="display:none;">
-        <input type="text" class="forum-reply-input" id="replyInput-${post.id}" placeholder="Write a reply…" maxlength="280">
-        <button class="forum-reply-send" data-post="${post.id}" data-action="sendReply"><i class="fas fa-paper-plane"></i></button>
-      </div>
-    </div>`).join("")||`<div style="text-align:center;padding:3rem;color:var(--mid-gray);">No posts yet. Start the conversation!</div>`;
-
-  // ✅ FIX 2: Use event delegation on parent instead of binding each button individually
-  const forumPostsContainer=document.getElementById("forumPosts");
-  forumPostsContainer.removeEventListener("click", forumPostClickHandler);
-  forumPostsContainer.addEventListener("click", forumPostClickHandler);
-}
-
-// ✅ Event delegation handler for forum posts
-function forumPostClickHandler(e){
-  const actionBtn=e.target.closest(".forum-action-btn");
-  if(actionBtn){
-    handleForumAction(actionBtn.dataset.post, actionBtn.dataset.action, actionBtn);
-    return;
+      ${replySection}
+    </div>`;
   }
-  const sendBtn=e.target.closest(".forum-reply-send");
-  if(sendBtn){
-    handleForumAction(sendBtn.dataset.post, "sendReply", sendBtn);
-  }
-}
 
-// ✅ FIX 3: Cache avatar URLs to avoid regenerating them
-const avatarCache={};
-function getAvatarUrl(name){
-  if(!avatarCache[name]){
-    avatarCache[name]=`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=38&bold=true&name=${encodeURIComponent(name)}`;
+  // ── Render all posts into #forumPosts ────────────────────────
+  function render() {
+    const container = document.getElementById('forumPosts');
+    if (!container) return;
+    const filtered = activeForumFilter === 'all'
+      ? _posts
+      : _posts.filter(p => p.category === activeForumFilter);
+    if (filtered.length === 0) {
+      container.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--mid-gray);">No posts yet. Start the conversation!</div>`;
+    } else {
+      container.innerHTML = filtered.map(postHTML).join('');
+    }
+    // Event delegation for all post actions
+    container.onclick = handleClick;
   }
-  return avatarCache[name];
-}
 
-async function getForumPosts() {
-  const res = await fetch('/api/forum');
-  const data = await res.json();
-  return data.posts;
-}
-function handleForumAction(postId,action,btn){
-  if(action==="like"){
-    let liked=JSON.parse(localStorage.getItem(`${DB_NS}:liked:${currentUser.phone}`)||"[]");
-    const posts=DB.getForumPosts(); const idx=posts.findIndex(p=>p.id===postId);
-    if(idx===-1) return;
-    if(liked.includes(postId)){posts[idx].likes=Math.max(0,(posts[idx].likes||0)-1);liked=liked.filter(id=>id!==postId);}
-    else{posts[idx].likes=(posts[idx].likes||0)+1;liked.push(postId);}
-    DB.saveForumPosts(posts); localStorage.setItem(`${DB_NS}:liked:${currentUser.phone}`,JSON.stringify(liked));
-    forumPosts=posts; renderForumPosts();
-  } else if(action==="reply"){
-    const wrap=document.getElementById(`replyWrap-${postId}`);
-    if(wrap){wrap.style.display=wrap.style.display==="none"?"flex":"none";if(wrap.style.display!=="none")document.getElementById(`replyInput-${postId}`)?.focus();}
-  } else if(action==="sendReply"){
-    const input=document.getElementById(`replyInput-${postId}`); if(!input) return;
-    const text=input.value.trim(); if(!text){showToast("Reply cannot be empty","error");return;}
-    const posts=DB.getForumPosts(); const idx=posts.findIndex(p=>p.id===postId);
-    if(idx===-1) return;
-    if(!posts[idx].replies) posts[idx].replies=[];
-    posts[idx].replies.push({author:`${currentUser.firstName} ${currentUser.surname}`,img:currentUser.profilePhoto||null,text,timestamp:Date.now()});
-    DB.saveForumPosts(posts); forumPosts=posts;
-    // Badge: forum post
-    const meta=DB.getVoterMeta(currentUser.phone); meta.forumPosts=(meta.forumPosts||0)+1; DB.saveVoterMeta(currentUser.phone,meta);
-    renderForumPosts(); showToast("Reply posted!","success");
+  // ── Handle clicks inside the post list ──────────────────────
+  function handleClick(e) {
+    const actionBtn = e.target.closest('.forum-action-btn');
+    if (actionBtn) {
+      const postId = actionBtn.dataset.post;
+      const action = actionBtn.dataset.action;
+      if (action === 'like') likePost(postId, actionBtn);
+      if (action === 'reply') toggleReply(postId);
+      return;
+    }
+    const sendBtn = e.target.closest('.forum-reply-send');
+    if (sendBtn) submitReply(sendBtn.dataset.post);
   }
-}
 
-function handleForumPost(){
-  const text=document.getElementById("forumPostText").value.trim();
-  if(!text||text.length<5){showToast("Post must be at least 5 characters","error");return;}
-  const posts=DB.getForumPosts();
-  posts.unshift({id:"p"+Date.now(),author:`${currentUser.firstName} ${currentUser.surname}`,authorImg:currentUser.profilePhoto||null,text,tag:activeForumTag,likes:0,timestamp:Date.now(),replies:[]});
-  DB.saveForumPosts(posts); forumPosts=posts;
-  document.getElementById("forumPostText").value="";
-  const meta=DB.getVoterMeta(currentUser.phone); meta.forumPosts=(meta.forumPosts||0)+1; DB.saveVoterMeta(currentUser.phone,meta);
-  renderForumPosts(); showToast("✅ Post published!","success");
-}
+  // ── Load (or reload) posts from backend ─────────────────────
+  async function loadPosts() {
+    // Update compose avatar
+    const compAvatar = document.getElementById('forumComposeAvatar');
+    if (compAvatar && currentUser) {
+      compAvatar.src = currentUser.profilePhoto ||
+        `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=40&bold=true&name=${encodeURIComponent((currentUser.firstName||'')+' '+(currentUser.surname||''))}`;
+    }
+
+    try {
+      const cat = activeForumFilter === 'all' ? '' : `?category=${activeForumFilter}`;
+      const res = await fetch(`/api/forum${cat}`);
+      const data = await res.json();
+      if (data.success) {
+        _posts = data.posts || [];
+        render();
+      }
+    } catch (err) {
+      console.error('Forum loadPosts error:', err);
+    }
+  }
+
+  // ── Submit a new post ────────────────────────────────────────
+  async function submitPost() {
+    if (!currentUser) { showToast('Please log in to post', 'warning'); return; }
+    const textarea = document.getElementById('forumPostText');
+    const text = (textarea?.value || '').trim();
+    if (!text || text.length < 3) { showToast('Post must be at least 3 characters', 'error'); return; }
+
+    const btn = document.getElementById('forumPostBtn');
+    if (btn) btn.disabled = true;
+
+    try {
+      const res = await fetch('/api/forum', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create_post', text, category: activeForumTag })
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (textarea) textarea.value = '';
+        // Update badge/meta
+        try {
+          const meta = DB.getVoterMeta(currentUser.phone);
+          meta.forumPosts = (meta.forumPosts || 0) + 1;
+          DB.saveVoterMeta(currentUser.phone, meta);
+        } catch(_) {}
+        showToast('✅ Post published!', 'success');
+        await loadPosts();
+      } else {
+        showToast(data.error || 'Failed to post', 'error');
+      }
+    } catch (err) {
+      console.error('submitPost error:', err);
+      showToast('Network error. Try again.', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // ── Like / unlike a post ─────────────────────────────────────
+  async function likePost(postId, btn) {
+    if (!currentUser) { showToast('Please log in to like posts', 'warning'); return; }
+    // Optimistic UI toggle
+    const wasLiked = _likedPosts.has(postId);
+    if (wasLiked) { _likedPosts.delete(postId); } else { _likedPosts.add(postId); }
+    btn?.classList.toggle('liked', !wasLiked);
+    const countEl = btn?.querySelector('.like-count');
+    const post = _posts.find(p => p.id === postId);
+    if (countEl && post) {
+      post.likes = wasLiked ? Math.max(0, post.likes - 1) : post.likes + 1;
+      countEl.textContent = post.likes;
+    }
+
+    try {
+      const res = await fetch('/api/forum', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'like_post', postId })
+      });
+      const data = await res.json();
+      if (data.success && post) {
+        post.likes = data.likes;
+        if (countEl) countEl.textContent = data.likes;
+      }
+    } catch (err) {
+      console.error('likePost error:', err);
+    }
+  }
+
+  // ── Toggle reply section open/closed ─────────────────────────
+  async function toggleReply(postId) {
+    if (_openReplies[postId] != null) {
+      // Close
+      delete _openReplies[postId];
+      render();
+      return;
+    }
+    // Open: fetch replies
+    try {
+      const res = await fetch(`/api/forum/replies/${postId}`);
+      const data = await res.json();
+      _openReplies[postId] = data.success ? (data.replies || []) : [];
+      render();
+      // Focus reply input
+      setTimeout(() => document.getElementById(`replyInput-${postId}`)?.focus(), 50);
+    } catch (err) {
+      console.error('toggleReply error:', err);
+      _openReplies[postId] = [];
+      render();
+    }
+  }
+
+  // ── Submit a reply ───────────────────────────────────────────
+  async function submitReply(postId) {
+    if (!currentUser) { showToast('Please log in to reply', 'warning'); return; }
+    const input = document.getElementById(`replyInput-${postId}`);
+    const text = (input?.value || '').trim();
+    if (!text) { showToast('Reply cannot be empty', 'error'); return; }
+
+    try {
+      const res = await fetch('/api/forum/replies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId, text })
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Append to local state and re-render
+        if (_openReplies[postId]) _openReplies[postId].push(data.reply);
+        const post = _posts.find(p => p.id === postId);
+        if (post) post.reply_count = (post.reply_count || 0) + 1;
+        // Update badge/meta
+        try {
+          const meta = DB.getVoterMeta(currentUser.phone);
+          meta.forumPosts = (meta.forumPosts || 0) + 1;
+          DB.saveVoterMeta(currentUser.phone, meta);
+        } catch(_) {}
+        render();
+        showToast('Reply posted!', 'success');
+      } else {
+        showToast(data.error || 'Failed to reply', 'error');
+      }
+    } catch (err) {
+      console.error('submitReply error:', err);
+      showToast('Network error. Try again.', 'error');
+    }
+  }
+
+  // ── Poll for new posts every 30 seconds ──────────────────────
+  function startPolling() {
+    if (_pollTimer) return;
+    _pollTimer = setInterval(loadPosts, 30000);
+  }
+  function stopPolling() {
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  }
+
+  // ── Public API ───────────────────────────────────────────────
+  return { loadPosts, submitPost, startPolling, stopPolling };
+})();
+
+// Override renderForumTab globally — called by the tab switcher
+window.renderForumTab = async function() {
+  await forumAPI.loadPosts();
+  forumAPI.startPolling();
+};
+
+// Ensure polling stops if forum tab is not active
+// (polled lightly on tab switch via renderForumTab above)
 
 // ═══ PROMISE TRACKER ═══
 // ═══ NOTICEBOARD ═══
@@ -5166,11 +5319,11 @@ document.getElementById("closeMpesaModal").onclick=closeMpesaAndDone;
 document.getElementById("mpesaCancelStep1").onclick=closeMpesaAndDone;
 document.getElementById("mpesaBackToStep1").onclick=()=>{if(mpesaCountdownTimer)clearInterval(mpesaCountdownTimer);setMpesaStep(1);};
 document.getElementById("mpesaPhone").addEventListener("keydown",e=>{if(e.key==="Enter")handleMpesaSend();});
-// Forum
-document.getElementById("forumPostBtn").onclick=handleForumPost;
-document.getElementById("forumPostText").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.ctrlKey)handleForumPost();});
+// Forum — wired to API-backed handlers (see forumAPI block below)
+document.getElementById("forumPostBtn").onclick=forumAPI.submitPost;
+document.getElementById("forumPostText").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.ctrlKey)forumAPI.submitPost();});
 document.querySelectorAll(".forum-tag-btn").forEach(btn=>btn.addEventListener("click",()=>{activeForumTag=btn.dataset.tag;document.querySelectorAll(".forum-tag-btn").forEach(b=>b.classList.toggle("selected",b.dataset.tag===activeForumTag));}));
-document.querySelectorAll(".forum-filter").forEach(btn=>btn.addEventListener("click",()=>{activeForumFilter=btn.dataset.filter;document.querySelectorAll(".forum-filter").forEach(b=>b.classList.toggle("active",b.dataset.filter===activeForumFilter));renderForumPosts();}));
+document.querySelectorAll(".forum-filter").forEach(btn=>btn.addEventListener("click",()=>{activeForumFilter=btn.dataset.filter;document.querySelectorAll(".forum-filter").forEach(b=>b.classList.toggle("active",b.dataset.filter===activeForumFilter));forumAPI.loadPosts();}));
 // Analytics chart tabs
 document.querySelectorAll(".chart-tab").forEach(btn=>btn.addEventListener("click",()=>{document.querySelectorAll(".chart-tab").forEach(b=>b.classList.toggle("active",b.dataset.chart===btn.dataset.chart));renderAnalyticsChart(btn.dataset.chart);}));
 // AI
@@ -5440,74 +5593,7 @@ async function renderVoterRegistry(){
   }
 }
 
-// 7. FORUM
-async function renderForumTab(){
-  try {
-    const data = await apiCall('/api/forum', { action: 'list_posts' });
-    if (!data.success) return;
-    
-    const container = document.getElementById("forumPostsContainer");
-    if (!container) return;
-    
-    const posts = data.posts || [];
-    if (posts.length === 0) { container.innerHTML = '<div class="forum-empty">No posts yet</div>'; return; }
-    
-    container.innerHTML = posts
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .map(post => `
-        <div class="forum-post" data-post-id="${post.id}">
-          <div class="forum-post-header">
-            <img class="forum-post-avatar" src="https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=38&bold=true&name=${encodeURIComponent(post.author || 'User')}" alt="">
-            <div class="forum-post-info">
-              <div class="forum-post-author">${post.author || 'Anonymous'}</div>
-              <div class="forum-post-time">${new Date(post.created_at).toLocaleString()}</div>
-            </div>
-          </div>
-          <div class="forum-post-content">${(post.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-          <div class="forum-post-footer">
-            <span class="forum-tag">#${post.tag || 'general'}</span>
-            <button class="forum-like-btn" onclick="likePost('${post.id}')">❤️ ${post.likes || 0}</button>
-          </div>
-        </div>
-      `)
-      .join("");
-  } catch (error) {
-    console.error('Forum error:', error);
-  }
-}
-
-async function postToForum(){
-  if (!currentUser) { if(typeof showError === 'function') showError("Login first"); return; }
-  
-  const text = document.getElementById("forumInput").value.trim();
-  const tag = document.getElementById("forumTag").value;
-  
-  if (!text) { if(typeof showError === 'function') showError("Write something"); return; }
-  
-  try {
-    const data = await apiCall('/api/forum', { action: 'create_post', text, tag });
-    if (!data.success) { if(typeof showError === 'function') showError(data.error); return; }
-    
-    document.getElementById("forumInput").value = '';
-    document.getElementById("forumTag").value = 'general';
-    if(typeof showToast === 'function') showToast('✅ Posted', 'success');
-    await renderForumTab();
-  } catch (error) {
-    console.error('Post error:', error);
-  }
-}
-
-async function likePost(postId){
-  if (!currentUser) { if(typeof showError === 'function') showError("Login first"); return; }
-  
-  try {
-    const data = await apiCall('/api/forum', { action: 'like_post', postId });
-    if (!data.success) { if(typeof showError === 'function') showError(data.error); return; }
-    await renderForumTab();
-  } catch (error) {
-    console.error('Like error:', error);
-  }
-}
+// 7. FORUM — handled by forumAPI namespace defined above
 
 // enterDashboard is defined below in the final patch block
 
@@ -5586,65 +5672,7 @@ window.renderLeaderboardTab = async function(){
   }
 };
 
-// FIX: renderForumTab (Line 3073)
-window.renderForumTab = async function(){
-  try {
-    const data = await apiCall('/api/forum', { action: 'list_posts' });
-    
-    if (!data.success) {
-      console.error('Failed to fetch forum posts');
-      return;
-    }
-    
-    const forumPosts = data.posts || [];
-    
-    // Set compose avatar
-    const compAvatar = document.getElementById("forumComposeAvatar");
-    if (compAvatar) {
-      compAvatar.src = currentUser?.profilePhoto || `https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=40&bold=true&name=${encodeURIComponent((currentUser?.firstName || '') + '+' + (currentUser?.surname || ''))}`;
-    }
-    
-    // Render posts
-    const container = document.getElementById("forumPostsContainer");
-    if (!container) return;
-    
-    if (forumPosts.length === 0) {
-      container.innerHTML = '<div class="forum-empty">No posts yet. Start a conversation!</div>';
-      return;
-    }
-    
-    container.innerHTML = forumPosts
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .map(post => `
-        <div class="forum-post" data-post-id="${post.id}">
-          <div class="forum-post-header">
-            <img class="forum-post-avatar" src="https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=38&bold=true&name=${encodeURIComponent(post.author || 'User')}" alt="">
-            <div class="forum-post-info">
-              <div class="forum-post-author">${post.author || 'Anonymous'}</div>
-              <div class="forum-post-time">${new Date(post.created_at).toLocaleString()}</div>
-            </div>
-          </div>
-          <div class="forum-post-content">${(post.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-          <div class="forum-post-footer">
-            <span class="forum-tag">#${post.tag || 'general'}</span>
-            <button class="forum-like-btn" onclick="likePost('${post.id}')">❤️ <span class="like-count">${post.likes || 0}</span></button>
-          </div>
-        </div>
-      `)
-      .join("");
-    
-    if (typeof initScrollReveal === 'function') initScrollReveal();
-  } catch (error) {
-    console.error('Forum tab error:', error);
-  }
-};
-
-// FIX: renderForumPosts (if exists)
-window.renderForumPosts = function(){
-  if (typeof renderForumTab === 'function') {
-    renderForumTab();
-  }
-};
+// renderForumTab and renderForumPosts — handled by forumAPI namespace defined above
 
 console.log('✅ FINAL FIX: Leaderboard & Forum ready!');
 
@@ -6093,109 +6121,7 @@ window.renderLeaderboard = async function(){
   }
 };
 
-// Fix renderForumTab (line 3148)
-window.renderForumTab = async function(){
-  try {
-    const data = await fetch('/api/forum', { 
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'list_posts' })
-    }).then(r => r.json());
-    
-    if (!data.success) return;
-    
-    const container = document.getElementById("forumPostsContainer");
-    if (!container) return;
-    
-    const posts = data.posts || [];
-    if (posts.length === 0) {
-      container.innerHTML = '<div class="forum-empty">No posts yet. Start a conversation!</div>';
-      return;
-    }
-    
-    container.innerHTML = posts
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .map(post => `
-        <div class="forum-post" data-post-id="${post.id}">
-          <div class="forum-post-header">
-            <img class="forum-post-avatar" src="https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=38&bold=true&name=${encodeURIComponent(post.author || 'User')}" alt="">
-            <div class="forum-post-info">
-              <div class="forum-post-author">${post.author || 'Anonymous'}</div>
-              <div class="forum-post-time">${new Date(post.created_at).toLocaleString()}</div>
-            </div>
-          </div>
-          <div class="forum-post-content">${(post.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-          <div class="forum-post-footer">
-            <span class="forum-tag">#${post.tag || 'general'}</span>
-            <button class="forum-like-btn" onclick="likePost('${post.id}')">❤️ <span class="like-count">${post.likes || 0}</span></button>
-          </div>
-        </div>
-      `).join("");
-  } catch (error) {
-    console.error('Forum error:', error);
-  }
-};
-
-// Fix likePost (line 3197)
-window.likePost = async function(postId){
-  if (!currentUser) { 
-    if(typeof showToast === 'function') showToast("Login first", "warning");
-    return; 
-  }
-  
-  try {
-    const data = await fetch('/api/forum', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'like_post', postId })
-    }).then(r => r.json());
-    
-    if (!data.success) {
-      if(typeof showToast === 'function') showToast(data.error || 'Like failed', 'warning');
-      return;
-    }
-    
-    await renderForumTab();
-  } catch (error) {
-    console.error('Like error:', error);
-  }
-};
-
-// Fix postToForum (line 3223)
-window.postToForum = async function(){
-  if (!currentUser) {
-    if(typeof showToast === 'function') showToast("Login first", "warning");
-    return;
-  }
-  
-  const text = document.getElementById("forumInput").value.trim();
-  const tag = document.getElementById("forumTag").value;
-  
-  if (!text) {
-    if(typeof showToast === 'function') showToast("Write something", "warning");
-    return;
-  }
-  
-  try {
-    const data = await fetch('/api/forum', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'create_post', text, tag })
-    }).then(r => r.json());
-    
-    if (!data.success) {
-      if(typeof showToast === 'function') showToast(data.error || 'Post failed', 'warning');
-      return;
-    }
-    
-    document.getElementById("forumInput").value = '';
-    document.getElementById("forumTag").value = 'general';
-    if(typeof showToast === 'function') showToast('✅ Posted!', 'success');
-    await renderForumTab();
-  } catch (error) {
-    console.error('Post error:', error);
-  }
-};
+// Fix renderForumTab / likePost / postToForum — handled by forumAPI namespace defined above
 
 // 2. DISABLE FUNCTIONS THAT HEAVILY RELY ON DB (Non-essential)
 
