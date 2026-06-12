@@ -372,6 +372,22 @@ async function ensureNoticesTable() {
     }
     console.log('✅ notices table ready');
 
+    // ── FORUM SCHEMA MIGRATION ──
+    // Runs here so it is guaranteed to complete before the server accepts requests.
+    try {
+      await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS category  VARCHAR(30)  DEFAULT 'general'`);
+      await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS is_hidden  BOOLEAN      DEFAULT false`);
+      await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN      DEFAULT false`);
+      await pool.query(`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS is_hidden  BOOLEAN    DEFAULT false`);
+      await pool.query(`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN    DEFAULT false`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_posts_category ON forum_posts(category)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_posts_created  ON forum_posts(created_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_replies_post   ON forum_replies(post_id)`);
+      console.log('✅ Forum schema ready');
+    } catch (forumMigErr) {
+      console.warn('⚠️  Forum schema migration (non-fatal):', forumMigErr.message);
+    }
+
     // ── AVATAR COLUMN MIGRATION ──
     // profile_photo may be BYTEA (original schema) or TEXT (already migrated).
     // Query the actual column type first — never call convert_from on TEXT.
@@ -1602,25 +1618,6 @@ app.get('/api/stats', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-// ════════════════════════════════════════════════════════════════════
-// FORUM — Startup migration: add category column if missing
-// ════════════════════════════════════════════════════════════════════
-(async () => {
-  try {
-    await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS category VARCHAR(30) DEFAULT 'general'`);
-    await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_posts_category ON forum_posts(category)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_posts_created ON forum_posts(created_at DESC)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_replies_post ON forum_replies(post_id)`);
-    console.log('✅ Forum schema ready');
-  } catch (e) {
-    console.warn('⚠️  Forum schema migration (non-fatal):', e.message);
-  }
-})();
 
 // Allowed forum categories — extend this array to add new ones
 const FORUM_CATEGORIES = ['general', 'water', 'roads', 'health', 'youth'];
