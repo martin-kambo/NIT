@@ -341,6 +341,15 @@ async function ensureNoticesTable() {
       ALTER TABLE ad_requests
         ALTER COLUMN id SET DEFAULT gen_random_uuid()
     `);
+    // Same fix for forum tables (uuid-ossp extension not available on this deployment)
+    await pool.query(`
+      ALTER TABLE forum_posts
+        ALTER COLUMN id SET DEFAULT gen_random_uuid()
+    `);
+    await pool.query(`
+      ALTER TABLE forum_replies
+        ALTER COLUMN id SET DEFAULT gen_random_uuid()
+    `);
     // Migrations for existing deployments
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS fee INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS submitted_by_phone VARCHAR(20)`);
@@ -1769,7 +1778,7 @@ app.post('/api/forum', async (req, res) => {
 
       res.json({ success: true, post: formatPost(post.rows[0]) });
     } catch (error) {
-      console.error('POST /api/forum create_post error:', error.message);
+      console.error('POST /api/forum create_post error:', error.message, error.stack);
       res.status(500).json({ success: false, error: 'Failed to create post' });
     }
 
