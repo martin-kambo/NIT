@@ -438,7 +438,7 @@ app.use((req, res, next) => {
 });
 
 
-// Initialize on startup
+// Initialize on startup — server only starts listening AFTER all migrations complete
 (async () => {
   const connected = await testDBConnection();
   if (connected) {
@@ -450,6 +450,53 @@ app.use((req, res, next) => {
   } else {
     console.warn('⚠️  Continuing without database. Some features may not work.');
   }
+
+  // ── Start listening ONLY after all migrations are done ──
+  const server = app.listen(PORT, () => {
+    console.log(`✅ Ngoliba InfoTrack server running on port ${PORT}`);
+    console.log(`📚 Database: PostgreSQL (check connection above)`);
+    console.log(`🔐 Session Secret: ${process.env.SESSION_SECRET ? '✓ Configured' : '✗ Missing'}`);
+    console.log(`📱 M-Pesa: ${process.env.MPESA_CONSUMER_KEY ? '✓ Configured' : '✗ Not configured'}`);
+    console.log(`\n🌐 Access the app at: http://localhost:${PORT}`);
+  });
+
+  // ── Auto-rollover: check every 30s for expired periods and start a fresh 5-min cycle ──
+  const PERIOD_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+  setInterval(async () => {
+    try {
+      const res = await pool.query(
+        `SELECT id, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
+      );
+      if (res.rows.length === 0) return;
+      const period = res.rows[0];
+      if (new Date(period.period_end) > new Date()) return;
+
+      console.log(`[auto-rollover] Period ${period.id} expired — rolling over`);
+      await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
+      const now     = new Date();
+      const endTime = new Date(now.getTime() + PERIOD_DURATION_MS);
+      const maxRes  = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
+      const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
+      await pool.query(
+        `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+           VALUES ($1, $2, $3, true, 0)`,
+        [nextId, now, endTime]
+      );
+      console.log(`[auto-rollover] New period ${nextId} started, ends ${endTime.toISOString()}`);
+      broadcastVoteUpdate('period-rollover', { newPeriodId: nextId, endsAt: endTime });
+    } catch (e) {
+      console.error('[auto-rollover] ERROR:', e.message);
+    }
+  }, 30_000);
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully...');
+    server.close(() => {
+      pool.end();
+      process.exit(0);
+    });
+  });
 })();
 
 // ── Ensure voting_periods table exists with correct schema ──
@@ -2646,49 +2693,5 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`✅ Ngoliba InfoTrack server running on port ${PORT}`);
-  console.log(`📚 Database: PostgreSQL (check connection above)`);
-  console.log(`🔐 Session Secret: ${process.env.SESSION_SECRET ? '✓ Configured' : '✗ Missing'}`);
-  console.log(`📱 M-Pesa: ${process.env.MPESA_CONSUMER_KEY ? '✓ Configured' : '✗ Not configured'}`);
-  console.log(`\n🌐 Access the app at: http://localhost:${PORT}`);
-});
-
-// ── Auto-rollover: check every 30s for expired periods and start a fresh 5-min cycle ──
-const PERIOD_DURATION_MS = 5 * 60 * 1000; // 5 minutes
-setInterval(async () => {
-  try {
-    const res = await pool.query(
-      `SELECT id, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
-    );
-    if (res.rows.length === 0) return; // no active period; startup init will handle it
-    const period = res.rows[0];
-    if (new Date(period.period_end) > new Date()) return; // still running
-
-    // Period has expired — close it and start a fresh one
-    console.log(`[auto-rollover] Period ${period.id} expired — rolling over`);
-    await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
-    const now     = new Date();
-    const endTime = new Date(now.getTime() + PERIOD_DURATION_MS);
-    const maxRes  = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
-    const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
-    await pool.query(
-      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-         VALUES ($1, $2, $3, true, 0)`,
-      [nextId, now, endTime]
-    );
-    console.log(`[auto-rollover] New period ${nextId} started, ends ${endTime.toISOString()}`);
-    broadcastVoteUpdate('period-rollover', { newPeriodId: nextId, endsAt: endTime });
-  } catch (e) {
-    console.error('[auto-rollover] ERROR:', e.message);
-  }
-}, 30_000);
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully...');
-  server.close(() => {
-    pool.end();
-    process.exit(0);
-  });
-});
+// server.listen, auto-rollover setInterval, and SIGTERM handler
+// are all started inside the startup IIFE above, after migrations complete.
