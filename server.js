@@ -568,6 +568,10 @@ async function ensureVotingPeriodsTable() {
         archived_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    // 4a. Idempotent analytics columns on period_archives (required by analytics router)
+    try { await pool.query(`ALTER TABLE period_archives ADD COLUMN IF NOT EXISTS winner_id    INT`);           } catch(_){}
+    try { await pool.query(`ALTER TABLE period_archives ADD COLUMN IF NOT EXISTS winner_votes INT DEFAULT 0`); } catch(_){}
+    try { await pool.query(`ALTER TABLE period_archives ADD COLUMN IF NOT EXISTS total_votes  INT DEFAULT 0`); } catch(_){}
 
     // 5. Index for fast active-period look-ups
     try {
@@ -1671,6 +1675,142 @@ app.get('/api/stats', async (req, res) => {
     });
   } catch (error) {
     console.error('/api/stats error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GET /api/analytics/dashboard — all data needed by the Analytics tab
+// Returns: votesThisCycle, registeredVoters, turnoutRate, allTimeVotes,
+//          per-sublocation heatmap, real hourly distribution, AI prediction
+// ════════════════════════════════════════════════════════════════════════════
+app.get('/api/analytics/dashboard', async (req, res) => {
+  try {
+    const KNOWN_SUBLOCATIONS = ['Ngoliba', 'Gatiiguru', 'Kilimambogo', 'Magogoni'];
+
+    // 1. Registered voters
+    const votersRes = await pool.query('SELECT COUNT(*) AS count FROM users');
+    const registeredVoters = parseInt(votersRes.rows[0].count || 0);
+
+    // 2. Active period
+    const periodRes = await pool.query(
+      'SELECT id, period_start, period_end, total_votes FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
+    );
+    const period   = periodRes.rows[0] || null;
+    const periodId = period ? period.id : null;
+
+    // 3. Votes this cycle — live count from votes table (authoritative)
+    let votesThisCycle = 0;
+    if (periodId !== null) {
+      const cycleRes = await pool.query(
+        'SELECT COUNT(*) AS count FROM votes WHERE period_id = $1', [periodId]
+      );
+      votesThisCycle = parseInt(cycleRes.rows[0].count || 0);
+    }
+
+    // 4. All-time total votes across every period
+    const allTimeRes = await pool.query(
+      'SELECT COALESCE(SUM(total_votes), 0) AS total FROM voting_periods'
+    );
+    const allTimeVotes = parseInt(allTimeRes.rows[0].total || 0);
+
+    // 5. Turnout rate for this cycle
+    const turnoutRate = registeredVoters > 0
+      ? parseFloat(((votesThisCycle / registeredVoters) * 100).toFixed(1))
+      : 0;
+
+    // 6. Registered voters per sublocation
+    const subVotersRes = await pool.query(
+      `SELECT COALESCE(sublocation, 'Unknown') AS sub, COUNT(*) AS cnt FROM users GROUP BY sublocation`
+    );
+    const votersBySubLocation = {};
+    subVotersRes.rows.forEach(r => { votersBySubLocation[r.sub] = parseInt(r.cnt); });
+
+    // 7. Votes per sublocation in current period
+    const subVotesRes = periodId !== null
+      ? await pool.query(
+          `SELECT COALESCE(sublocation, 'Unknown') AS sub, COUNT(*) AS cnt
+           FROM votes WHERE period_id = $1 GROUP BY sublocation`, [periodId]
+        )
+      : { rows: [] };
+    const votesBySubLocation = {};
+    subVotesRes.rows.forEach(r => { votesBySubLocation[r.sub] = parseInt(r.cnt); });
+
+    // 8. Heatmap — per-sublocation accuracy
+    const heatmap = KNOWN_SUBLOCATIONS.map(sub => {
+      const registered = votersBySubLocation[sub] || 0;
+      const votes      = votesBySubLocation[sub]  || 0;
+      const pct        = registered > 0 ? parseFloat(((votes / registered) * 100).toFixed(1)) : 0;
+      return { sublocation: sub, votes, registered, pct };
+    });
+
+    // 9. Hourly vote distribution — real data from votes.timestamp (EAT = UTC+3)
+    //    Shows votes cast in the last 24 hours, bucketed by local hour
+    let hourlyVotes = [];
+    try {
+      const hourlyRes = await pool.query(
+        `SELECT
+           EXTRACT(HOUR FROM (to_timestamp(timestamp::bigint / 1000) + INTERVAL '3 hours')) AS hr,
+           COUNT(*) AS cnt
+         FROM votes
+         WHERE timestamp::bigint >= (EXTRACT(EPOCH FROM (NOW() - INTERVAL '24 hours')) * 1000)
+         GROUP BY hr
+         ORDER BY hr`
+      );
+      const hrMap = {};
+      hourlyRes.rows.forEach(r => { hrMap[parseInt(r.hr)] = parseInt(r.cnt); });
+      // 13 slots: 6 AM → 6 PM (Nairobi business hours)
+      hourlyVotes = Array.from({ length: 13 }, (_, i) => {
+        const h = i + 6;
+        return { hour: h, votes: hrMap[h] || 0 };
+      });
+    } catch (hourlyErr) {
+      console.warn('[analytics/dashboard] hourly query failed (non-fatal):', hourlyErr.message);
+      hourlyVotes = Array.from({ length: 13 }, (_, i) => ({ hour: i + 6, votes: 0 }));
+    }
+
+    // 10. AI Prediction — leading candidate by cumulative all-category votes
+    let prediction = { leader: null, confidence: 50 };
+    try {
+      const allVotesRes = await pool.query(
+        `SELECT v.candidate_id, COUNT(*) AS cnt, c.name
+         FROM votes v
+         JOIN candidates c ON c.id = v.candidate_id
+         WHERE c.category = 'MCA'
+         GROUP BY v.candidate_id, c.name
+         ORDER BY cnt DESC
+         LIMIT 2`
+      );
+      if (allVotesRes.rows.length > 0) {
+        const top    = allVotesRes.rows[0];
+        const second = allVotesRes.rows[1];
+        const total  = parseInt(top.cnt) + (second ? parseInt(second.cnt) : 0);
+        prediction = {
+          leader:     top.name,
+          confidence: total > 0 ? Math.min(99, Math.round((parseInt(top.cnt) / total) * 100)) : 50
+        };
+      }
+    } catch (predErr) {
+      console.warn('[analytics/dashboard] prediction query failed (non-fatal):', predErr.message);
+    }
+
+    res.json({
+      success:          true,
+      votesThisCycle,
+      registeredVoters,
+      turnoutRate,
+      allTimeVotes,
+      currentPeriodId:  periodId,
+      periodStart:      period?.period_start || null,
+      periodEnd:        period?.period_end   || null,
+      heatmap,
+      hourlyVotes,
+      prediction,
+      votersBySubLocation
+    });
+
+  } catch (error) {
+    console.error('/api/analytics/dashboard error:', error.message, error.stack);
     res.status(500).json({ success: false, error: error.message });
   }
 });

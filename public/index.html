@@ -6484,117 +6484,119 @@ window.showWelcomePopup = async function(){
   }
 };
 
-// FIX: renderAnalyticsTab (Line 3045)
-window.renderAnalyticsTab = async function(){
+// ── renderAnalyticsTab: uses /api/analytics/dashboard for accurate per-sublocation data ──
+window.renderAnalyticsTab = async function () {
   try {
-    const data = await apiCall('/api/stats');
-    if (!data.success) {
-      console.error('Failed to get analytics');
+    // Single call that returns every metric the Analytics tab needs
+    let data = null;
+    try {
+      const res = await fetch('/api/analytics/dashboard', { credentials: 'include' });
+      data = await res.json();
+    } catch (fetchErr) {
+      console.warn('[Analytics] fetch /api/analytics/dashboard failed:', fetchErr);
+    }
+
+    // ── Empty-state fallback ──
+    if (!data || !data.success) {
+      console.warn('[Analytics] endpoint unavailable — showing zero state');
+      const kpiGrid = document.getElementById('analyticsKPIGrid');
+      if (kpiGrid) kpiGrid.innerHTML = [
+        { icon: '🗳️', val: 0,    label: 'Votes This Cycle',  delta: 'Current period', dc: '',          c: 'akpi-g'    },
+        { icon: '👥', val: 0,    label: 'Registered Voters', delta: '4 sublocations', dc: '',          c: 'akpi-b'    },
+        { icon: '📈', val: '0%', label: 'Turnout Rate',      delta: 'This cycle',     dc: '',          c: 'akpi-gold' },
+        { icon: '📊', val: 0,    label: 'Period Votes',      delta: 'All cycles',     dc: '',          c: 'akpi-r'    }
+      ].map(k =>
+        `<div class="analytics-kpi ${k.c}">` +
+          `<div class="analytics-kpi-icon">${k.icon}</div>` +
+          `<div class="analytics-kpi-val">${k.val}</div>` +
+          `<div class="analytics-kpi-label">${k.label}</div>` +
+          `<div class="analytics-kpi-delta ${k.dc}">${k.delta}</div>` +
+        `</div>`
+      ).join('');
+      if (typeof renderAnalyticsChart === 'function') renderAnalyticsChart('votes');
+      if (typeof initScrollReveal     === 'function') initScrollReveal();
       return;
     }
-    
+
+    // ── AI Prediction ──
+    const elWinner = document.getElementById('aiPredictedWinner');
+    const elConf   = document.getElementById('aiPredictConf');
+    const elBar    = document.getElementById('aiConfBar');
+    const predLeader = data.prediction && data.prediction.leader ? data.prediction.leader : null;
+    const predConf   = (data.prediction && typeof data.prediction.confidence === 'number')
+                         ? data.prediction.confidence : 50;
+    if (elWinner) elWinner.innerText = predLeader || 'Too early to call';
+    if (elConf)   elConf.innerText   = `${predConf}% confidence based on current vote distribution`;
+    if (elBar)    elBar.style.width  = `${predConf}%`;
+
+    // ── KPIs ──
+    const votesThisCycle  = data.votesThisCycle    || 0;
     const registeredVoters = data.registeredVoters || 0;
-    const votesByCandidate = data.currentPeriod?.votesByCandidate || {};
-    const totalVotes = Object.values(votesByCandidate).reduce((a, b) => a + (b || 0), 0);
-    
-    // AI Prediction
-    const sorted = CANDIDATES
-      .map(c => ({ ...c, votes: votesByCandidate[c.id] || 0 }))
-      .sort((a, b) => b.votes - a.votes);
-    
-    const leader = sorted[0];
-    const second = sorted[1];
-    const conf = leader && second && leader.votes + second.votes > 0
-      ? Math.min(99, Math.round((leader.votes / (leader.votes + second.votes)) * 100))
-      : 50;
-    
-    const aiWinner = document.getElementById("aiPredictedWinner");
-    if (aiWinner) aiWinner.innerText = leader?.votes > 0 ? leader.name : "Too early to call";
-    
-    const aiConf = document.getElementById("aiPredictConf");
-    if (aiConf) aiConf.innerText = `${conf}% confidence based on current vote distribution`;
-    
-    const confBar = document.getElementById("aiConfBar");
-    if (confBar) confBar.style.width = `${conf}%`;
-    
-    // KPIs
-    const turnoutPct = registeredVoters > 0 ? Math.round((totalVotes / registeredVoters) * 100) : 0;
-    
-    const kpiGrid = document.getElementById("analyticsKPIGrid");
+    const turnoutRate      = data.turnoutRate       || 0;
+    const allTimeVotes     = data.allTimeVotes      || 0;
+    const numSublocations  = (typeof SUBLOCATIONS !== 'undefined' && SUBLOCATIONS)
+                               ? SUBLOCATIONS.length : 4;
+
+    const kpiGrid = document.getElementById('analyticsKPIGrid');
     if (kpiGrid) {
       kpiGrid.innerHTML = [
-        {
-          icon: "🗳️",
-          val: totalVotes,
-          label: "Votes This Cycle",
-          delta: "Current period",
-          dc: "",
-          c: "akpi-g"
-        },
-        {
-          icon: "👥",
-          val: registeredVoters,
-          label: "Registered Voters",
-          delta: `${SUBLOCATIONS?.length || 4} sublocations`,
-          dc: "",
-          c: "akpi-b"
-        },
-        {
-          icon: "📈",
-          val: `${turnoutPct}%`,
-          label: "Turnout Rate",
-          delta: "This cycle",
-          dc: turnoutPct > 50 ? "delta-up" : "",
-          c: "akpi-gold"
-        },
-        {
-          icon: "📊",
-          val: totalVotes,
-          label: "Period Votes",
-          delta: "So far",
-          dc: "",
-          c: "akpi-r"
-        }
-      ]
-        .map(k => `<div class="analytics-kpi ${k.c}"><div class="analytics-kpi-icon">${k.icon}</div><div class="analytics-kpi-val">${k.val}</div><div class="analytics-kpi-label">${k.label}</div><div class="analytics-kpi-delta ${k.dc}">${k.delta}</div></div>`)
-        .join("");
+        { icon: '🗳️', val: votesThisCycle,               label: 'Votes This Cycle',  delta: 'Current period',              dc: '',                          c: 'akpi-g'    },
+        { icon: '👥', val: registeredVoters,              label: 'Registered Voters', delta: `${numSublocations} sublocations`, dc: '',                       c: 'akpi-b'    },
+        { icon: '📈', val: `${turnoutRate}%`,             label: 'Turnout Rate',      delta: 'This cycle',                  dc: turnoutRate > 50 ? 'delta-up' : '', c: 'akpi-gold' },
+        { icon: '📊', val: allTimeVotes,                  label: 'Period Votes',      delta: 'All cycles',                  dc: '',                          c: 'akpi-r'    }
+      ].map(k =>
+        `<div class="analytics-kpi ${k.c}">` +
+          `<div class="analytics-kpi-icon">${k.icon}</div>` +
+          `<div class="analytics-kpi-val">${k.val}</div>` +
+          `<div class="analytics-kpi-label">${k.label}</div>` +
+          `<div class="analytics-kpi-delta ${k.dc}">${k.delta}</div>` +
+        `</div>`
+      ).join('');
     }
-    
-    // Heatmap by sublocation
-    const heatmapGrid = document.getElementById("heatmapGrid");
-    if (heatmapGrid && SUBLOCATIONS) {
-      heatmapGrid.innerHTML = SUBLOCATIONS
-        .map(sub => {
-          const votersInSub = data.votersBySubLocation?.[sub] || 1;
-          const pct = Math.round((totalVotes / (registeredVoters || 1)) * 100);
-          const intensity = Math.min(1, pct / 100);
-          const bg = `rgba(45,106,79,${0.08 + intensity * 0.85})`;
-          const textColor = intensity > 0.5 ? "white" : "var(--forest)";
-          return `<div class="heatmap-cell" style="background:${bg};color:${textColor};"><div class="heatmap-label" style="color:${textColor}">${sub}</div><div class="heatmap-pct">${pct}%</div><div class="heatmap-sub">${votersInSub}</div><div class="velocity-bar"><div class="velocity-fill" style="width:${pct}%"></div></div></div>`;
-        })
-        .join("");
+
+    // ── Sublocation Heatmap — per-sublocation votes & turnout ──
+    const heatmapGrid = document.getElementById('heatmapGrid');
+    if (heatmapGrid && Array.isArray(data.heatmap)) {
+      heatmapGrid.innerHTML = data.heatmap.map(item => {
+        const sub        = item.sublocation || '';
+        const votes      = item.votes      || 0;
+        const registered = item.registered || 0;
+        const pct        = item.pct        || 0;
+        const intensity  = Math.min(1, pct / 100);
+        const bg         = `rgba(45,106,79,${(0.08 + intensity * 0.85).toFixed(2)})`;
+        const textColor  = intensity > 0.5 ? 'white' : 'var(--forest)';
+        return (
+          `<div class="heatmap-cell" style="background:${bg};color:${textColor};">` +
+            `<div class="heatmap-label" style="color:${textColor}">${sub}</div>` +
+            `<div class="heatmap-pct">${pct}%</div>` +
+            `<div class="heatmap-sub">${votes}/${registered}</div>` +
+            `<div class="velocity-bar"><div class="velocity-fill" style="width:${pct}%"></div></div>` +
+          `</div>`
+        );
+      }).join('');
     }
-    
-    // Time heatmap (simulated)
-    const timeHeatmap = document.getElementById("timeHeatmap");
+
+    // ── Voting Activity By Hour — real data from DB, no random values ──
+    const timeHeatmap = document.getElementById('timeHeatmap');
     if (timeHeatmap) {
-      const hours = Array.from({ length: 12 }, (_, i) => ({
-        h: i * 2,
-        v: Math.floor(Math.random() * Math.max(1, totalVotes / 3))
-      }));
-      const maxH = Math.max(...hours.map(x => x.v), 1);
-      timeHeatmap.innerHTML = hours
-        .map(h => {
-          const intensity = h.v / maxH;
-          return `<div class="time-cell" style="background:rgba(45,106,79,${0.08 + intensity * 0.85});" title="${h.h}:00 — ${h.v} votes"></div>`;
-        })
-        .join("");
+      const hourly    = Array.isArray(data.hourlyVotes) && data.hourlyVotes.length > 0
+                          ? data.hourlyVotes
+                          : Array.from({ length: 13 }, (_, i) => ({ hour: i + 6, votes: 0 }));
+      const maxVotes  = Math.max(...hourly.map(h => h.votes), 1);
+      timeHeatmap.innerHTML = hourly.map(h => {
+        const intensity = h.votes / maxVotes;
+        const bg        = `rgba(45,106,79,${(0.08 + intensity * 0.85).toFixed(2)})`;
+        const hr        = h.hour;
+        const label     = `${hr > 12 ? hr - 12 : (hr === 0 ? 12 : hr)}${hr >= 12 ? 'PM' : 'AM'}`;
+        return `<div class="time-cell" style="background:${bg};" title="${label} — ${h.votes} vote${h.votes !== 1 ? 's' : ''}"></div>`;
+      }).join('');
     }
-    
-    if (typeof renderAnalyticsChart === 'function') renderAnalyticsChart("votes");
-    if (typeof initScrollReveal === 'function') initScrollReveal();
+
+    if (typeof renderAnalyticsChart === 'function') renderAnalyticsChart('votes');
+    if (typeof initScrollReveal     === 'function') initScrollReveal();
+
   } catch (error) {
-    console.error('Analytics tab error:', error);
+    console.error('[Analytics] renderAnalyticsTab error:', error);
   }
 };
 
