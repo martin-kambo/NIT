@@ -1541,35 +1541,7 @@ app.get('/api/my-votes', async (req, res) => {
     return res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
-// ════════════════════════════════════════════════
-// ROUTE: /api/debug/db  (admin-only, logs DB state)
-// GET /api/debug/db?secret=YOUR_SESSION_SECRET
-// ════════════════════════════════════════════════
-app.get('/api/debug/db', async (req, res) => {
-  // Only accessible with the SESSION_SECRET as query param (not for production — remove when done)
-  if (req.query.secret !== process.env.SESSION_SECRET) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  try {
-    const tables = await pool.query(
-      `SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name`
-    );
-    const periods = await pool.query(
-      `SELECT id, period_start, period_end, is_active, total_votes FROM voting_periods ORDER BY id DESC LIMIT 5`
-    );
-    const voteCount = await pool.query(`SELECT COUNT(*) AS c FROM votes`);
-    const userCount = await pool.query(`SELECT COUNT(*) AS c FROM users`);
-    res.json({
-      tables:    tables.rows.map(r => r.table_name),
-      periods:   periods.rows,
-      voteCount: parseInt(voteCount.rows[0].c),
-      userCount: parseInt(userCount.rows[0].c),
-      now:       new Date().toISOString()
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message, stack: e.stack });
-  }
-});
+
 
 // ══════════════════════════════════════════════════════════════════════
 // ADMIN CANDIDATE MANAGEMENT — Multi-category support
@@ -2264,7 +2236,8 @@ app.get('/api/notices', async (req, res) => {
 app.post('/api/notices', async (req, res) => {
   try {
     const { title, content, category, priority, days, adminSecret } = req.body;
-    const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+    const secret = process.env.ADMIN_SECRET;
+    if (!secret) return res.status(503).json({ success: false, error: 'Admin service not configured.' });
     if (adminSecret !== secret) {
       return res.status(403).json({ success: false, error: 'Unauthorized' });
     }
@@ -2288,7 +2261,8 @@ app.post('/api/notices', async (req, res) => {
 app.delete('/api/notices/:id', async (req, res) => {
   try {
     const { adminSecret } = req.body;
-    const secret = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+    const secret = process.env.ADMIN_SECRET;
+    if (!secret) return res.status(503).json({ success: false, error: 'Admin service not configured.' });
     if (adminSecret !== secret) {
       return res.status(403).json({ success: false, error: 'Unauthorized' });
     }
@@ -2311,7 +2285,12 @@ function checkNoticeAdminAuth(req, res) {
   }
 
   // ── FALLBACK PATH: legacy x-admin-password header (keeps direct API access working) ──
-  const secret   = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+  const secret   = process.env.ADMIN_SECRET;
+  if (!secret) {
+    console.error('[checkNoticeAdminAuth] ADMIN_SECRET environment variable is not set.');
+    res.status(503).json({ success: false, error: 'Admin service not configured.' });
+    return false;
+  }
   const provided = req.headers['x-admin-password'];
   if (provided && provided === secret) {
     return true;
@@ -2325,7 +2304,8 @@ app.post('/api/admin/notices/verify', (req, res) => {
   // Accept JWT Bearer token (preferred) or legacy x-admin-password
   const authHeader = req.headers['authorization'] || '';
   if (authHeader.startsWith('Bearer ') && verifyAdminToken(authHeader)) return res.json({ success: true });
-  const secret   = process.env.ADMIN_SECRET || 'ngoliba2025admin';
+  const secret   = process.env.ADMIN_SECRET;
+  if (!secret) return res.status(503).json({ success: false, error: 'Admin service not configured.' });
   const provided = req.headers['x-admin-password'];
   if (provided && provided === secret) return res.json({ success: true });
   return res.status(401).json({ success: false, error: 'Invalid password' });
@@ -2394,18 +2374,9 @@ app.post('/api/admin', async (req, res) => {
     const adminHash = process.env.ADMIN_PASSWORD_HASH;
     const inputHash = crypto.createHash('sha256').update(password).digest('hex').toUpperCase();
 
-    console.log('[DEBUG] admin_login attempt');
-    console.log('  - Password received (length):', password?.length || 'undefined');
-    console.log('  - Input hash:', inputHash);
-    console.log('  - Stored hash:', adminHash);
-    console.log('  - Stored hash (uppercase):', adminHash?.toUpperCase());
-    console.log('  - Hashes match:', inputHash === adminHash?.toUpperCase());
-
     if (!adminHash || inputHash !== adminHash.toUpperCase()) {
-      console.log('[DEBUG] Login FAILED - hash mismatch or missing env var');
       return res.status(401).json({ success: false, error: 'Invalid password' });
     }
-    console.log('[DEBUG] Login SUCCESS - generating token');
 
     const payload = { role: 'admin', exp: Date.now() + 8 * 60 * 60 * 1000 };
     const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64');
@@ -2528,14 +2499,7 @@ return res.status(400).json({ success: false, error: 'Unknown action' });
 });
 
 // Add this right before the app.listen() line (around line 980):
-app.get('/api/debug/check-env', (req, res) => {
-  res.json({
-    ADMIN_PASSWORD_HASH: process.env.ADMIN_PASSWORD_HASH ? 'SET (length: ' + process.env.ADMIN_PASSWORD_HASH.length + ')' : 'NOT SET',
-    SESSION_SECRET: process.env.SESSION_SECRET ? 'SET' : 'NOT SET',
-    DATABASE_URL: process.env.DATABASE_URL ? 'SET' : 'NOT SET',
-    NODE_ENV: process.env.NODE_ENV
-  });
-});
+
 
 // ══════════════════════════════════════════════════════
 // AD REQUESTS — public submission + admin management
@@ -2865,58 +2829,6 @@ app.use(votingRouter);
 
 // ── PHASE 3: Mount analytics router ──
 app.use(analyticsRouter);
-
-// ── AI Q&A PROXY ──
-// Proxies requests to Anthropic so the API key never reaches the browser.
-// Requires ANTHROPIC_API_KEY in environment variables.
-app.post('/api/ai-ask', async (req, res) => {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.error('[AI Q&A] ANTHROPIC_API_KEY environment variable is not set.');
-    return res.status(503).json({ error: 'AI service is not configured. Please set ANTHROPIC_API_KEY on the server.' });
-  }
-
-  const { system, message } = req.body;
-  if (!message || typeof message !== 'string' || !message.trim()) {
-    return res.status(400).json({ error: 'Missing or empty message.' });
-  }
-
-  try {
-    const anthropicRes = await axios.post(
-      'https://api.anthropic.com/v1/messages',
-      {
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 300,
-        system: system || '',
-        messages: [{ role: 'user', content: message.trim() }]
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01'
-        },
-        timeout: 20000
-      }
-    );
-
-    const text = anthropicRes.data?.content?.[0]?.text;
-    if (!text) {
-      console.error('[AI Q&A] Unexpected Anthropic response shape:', JSON.stringify(anthropicRes.data));
-      return res.status(502).json({ error: 'Unexpected response from AI provider.' });
-    }
-
-    return res.json({ reply: text });
-  } catch (err) {
-    const status = err.response?.status;
-    const detail = err.response?.data?.error?.message || err.message;
-    console.error(`[AI Q&A] Anthropic API error (HTTP ${status || 'network'}):`, detail);
-
-    if (status === 401) return res.status(502).json({ error: 'AI provider authentication failed. Check ANTHROPIC_API_KEY.' });
-    if (status === 429) return res.status(502).json({ error: 'AI provider rate limit reached. Please try again shortly.' });
-    return res.status(502).json({ error: 'AI provider request failed. Please try again.' });
-  }
-});
 
 // ── PHASE 2: Frontend page routes ──
 app.get('/voting', (req, res) => {
