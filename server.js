@@ -725,11 +725,26 @@ async function ensureCandidatesTable() {
 }
 
 // ── Middleware ──
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGIN || 'http://localhost:10000')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+if (!process.env.ALLOWED_ORIGIN) {
+  console.warn('[CORS] ALLOWED_ORIGIN env var not set — restricting to localhost only. Set it to your Render URL in production.');
+}
+
 app.use(cors({
-  origin: true,
+  origin: (incomingOrigin, callback) => {
+    // Allow server-to-server requests (no Origin header, e.g. curl, Render health checks)
+    if (!incomingOrigin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(incomingOrigin)) return callback(null, true);
+    console.warn(`[CORS] Blocked request from unlisted origin: ${incomingOrigin}`);
+    callback(new Error(`CORS: origin ${incomingOrigin} is not allowed`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Password']
 }));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1036,7 +1051,18 @@ app.post('/api/auth', async (req, res) => {
   }
 
   // LOGOUT
-  if (action === 'logout') {
+  // CHECK-PHONE: used by forgot-password flow to confirm phone is registered
+  if (action === 'check-phone') {
+    if (!phone) return res.status(400).json({ exists: false });
+    try {
+      const result = await pool.query('SELECT id FROM users WHERE phone = $1', [phone]);
+      return res.json({ exists: result.rows.length > 0 });
+    } catch (e) {
+      return res.status(500).json({ exists: false });
+    }
+  }
+
+    if (action === 'logout') {
     res.setHeader('Set-Cookie', 'session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');
     return res.json({ success: true });
   }
@@ -1111,39 +1137,99 @@ app.post('/api/profile', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════
-// ROUTE: /api/reset-password  — OTP-less reset (server validates phone exists)
+// ROUTE: /api/reset-password
 // ════════════════════════════════════════════════
+// action='request' — generate a 6-digit OTP, store it server-side in the otps
+//   table, and return it in the response (DEV/DEMO mode — replace the return
+//   value with an Africa's Talking SMS call when ready for production).
+// action='confirm' — verify the OTP from the DB before allowing the password
+//   change. Rate-limited to 5 attempts per OTP to prevent brute-force.
 app.post('/api/reset-password', async (req, res) => {
   const { action, phone } = req.body;
-  // action='request': validate phone exists → in production send SMS; here just confirm
+
+  if (!phone || typeof phone !== 'string' || !phone.trim())
+    return res.status(400).json({ success: false, error: 'Phone number required' });
+
+  // ── REQUEST: generate & store OTP ──────────────────────────────────────
   if (action === 'request') {
     try {
-      const result = await pool.query('SELECT id FROM users WHERE phone = $1', [phone]);
-      if (!result.rows.length) return res.status(404).json({ success: false, error: 'Phone not registered' });
-      // In production: generate OTP, save to DB, send via Africa's Talking SMS
-      // For now: return success so frontend can show code entry
-      return res.json({ success: true });
+      const userResult = await pool.query('SELECT id FROM users WHERE phone = $1', [phone]);
+      if (!userResult.rows.length)
+        return res.status(404).json({ success: false, error: 'Phone not registered' });
+
+      const code    = Math.floor(100000 + Math.random() * 900000).toString();
+      const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Upsert into the otps table (reset attempts on each new request)
+      await pool.query(
+        `INSERT INTO otps (phone, code, expires_at, attempts)
+         VALUES ($1, $2, $3, 0)
+         ON CONFLICT (phone) DO UPDATE
+           SET code = $2, expires_at = $3, attempts = 0`,
+        [phone, code, expires]
+      );
+
+      // ── DEV/DEMO: return OTP in response ──────────────────────────────
+      // TODO: replace with Africa's Talking SMS call and remove 'otp' from
+      // the response before going to production.
+      console.log(`[reset-password] OTP for ${phone}: ${code} (demo mode)`);
+      return res.json({ success: true, otp: code, note: 'DEMO MODE — OTP returned in response. Wire SMS before production.' });
+
     } catch (e) {
+      console.error('[reset-password] request error:', e.message);
       return res.status(500).json({ success: false, error: 'Server error' });
     }
   }
-  // action='confirm': apply new password
+
+  // ── CONFIRM: verify OTP then reset password ─────────────────────────────
   if (action === 'confirm') {
-    const { password } = req.body;
-    if (!phone || !password || password.length < 6)
-      return res.status(400).json({ success: false, error: 'Phone and password (min 6 chars) required' });
+    const { code, password } = req.body;
+    if (!code || !password || password.length < 6)
+      return res.status(400).json({ success: false, error: 'Code and password (min 6 chars) required' });
+
     try {
-      const result = await pool.query('SELECT id FROM users WHERE phone = $1', [phone]);
-      if (!result.rows.length) return res.status(404).json({ success: false, error: 'Phone not registered' });
-      const salt = crypto.randomBytes(16).toString('hex');
+      const otpResult = await pool.query(
+        'SELECT code, expires_at, attempts FROM otps WHERE phone = $1', [phone]
+      );
+
+      if (!otpResult.rows.length)
+        return res.status(400).json({ success: false, error: 'No OTP requested for this number' });
+
+      const row = otpResult.rows[0];
+
+      // Hard-limit attempts to prevent brute-force
+      if (row.attempts >= 5) {
+        await pool.query('DELETE FROM otps WHERE phone = $1', [phone]);
+        return res.status(429).json({ success: false, error: 'Too many attempts. Request a new OTP.' });
+      }
+
+      // Increment attempt counter before checking (prevents enumeration on timing)
+      await pool.query('UPDATE otps SET attempts = attempts + 1 WHERE phone = $1', [phone]);
+
+      if (new Date() > new Date(row.expires_at))
+        return res.status(400).json({ success: false, error: 'OTP has expired. Request a new one.' });
+
+      if (row.code !== code.trim())
+        return res.status(400).json({ success: false, error: 'Incorrect OTP' });
+
+      // OTP valid — reset password
+      const salt         = crypto.randomBytes(16).toString('hex');
       const passwordHash = hashPassword(password, salt);
-      await pool.query('UPDATE users SET password_hash=$1, salt=$2, updated_at=NOW() WHERE phone=$3',
-        [passwordHash, salt, phone]);
+      await pool.query(
+        'UPDATE users SET password_hash=$1, salt=$2, updated_at=NOW() WHERE phone=$3',
+        [passwordHash, salt, phone]
+      );
+
+      // Consume the OTP so it cannot be reused
+      await pool.query('DELETE FROM otps WHERE phone = $1', [phone]);
+
       return res.json({ success: true });
     } catch (e) {
+      console.error('[reset-password] confirm error:', e.message);
       return res.status(500).json({ success: false, error: 'Server error' });
     }
   }
+
   return res.status(400).json({ success: false, error: 'Invalid action' });
 });
 

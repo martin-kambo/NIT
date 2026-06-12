@@ -5000,24 +5000,18 @@ async function handleAIAsk(){
   responseEl.innerHTML='<div class="ai-typing"><span></span><span></span><span></span></div>';
   document.getElementById("aiAskBtn").disabled=true;
 
-  // Call the secure server-side AI proxy (keeps API key off the browser)
+  // Call the real Anthropic API
   try{
     const agg=getCurrentPeriodAggregated();
     const votesSummary=CANDIDATES.map(c=>`${c.name} (${c.party}): ${agg[c.id]?.total||0} votes`).join(", ");
     const users=DB.getUsers();
     const context=`You are the AI analyst for Ngoliba InfoTrack, a ward-level opinion poll platform in Ngoliba Ward, Kiambu County, Kenya. The poll tracks 7 MCA candidates. Current cycle vote totals: ${votesSummary}. Total registered voters: ${users.length}. Sublocations: Ngoliba, Gatiiguru, Kilimambogo, Magogoni. Top ward issues from community: Water Access (43%), Roads (28%), Health (19%), Youth (10%). Answer the user's question concisely and insightfully in 2-4 sentences. Be specific to Ngoliba Ward context.`;
-    const res=await fetch("/api/ai-ask",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:context,message:input})});
+    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,system:context,messages:[{role:"user",content:input}]})});
     const data=await res.json();
-    if(!res.ok){
-      // Server reported a problem (config error, rate limit, etc.) — log it and use local fallback
-      console.warn("[AI Q&A] Server error:",data.error||res.status);
-      responseEl.innerHTML=generateLocalAIResponse(input);
-    } else {
-      responseEl.innerHTML=data.reply||generateLocalAIResponse(input);
-    }
+    const reply=data.content?.[0]?.text||"I could not generate a response. Please try again.";
+    responseEl.innerHTML=reply;
   }catch(e){
-    // Network failure — fall back gracefully
-    console.warn("[AI Q&A] Network error:",e.message);
+    // Fallback to local AI
     responseEl.innerHTML=generateLocalAIResponse(input);
   }
   document.getElementById("aiAskBtn").disabled=false;
@@ -5208,35 +5202,32 @@ function exportUserData(){
 // ═══ OTP ═══
 async function sendOtp(){
   const phone=document.getElementById("otpPhone").value.trim();
-  // DB.findUser() does not exist — validate phone via server
-  try {
-    const check = await fetch('/api/auth', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ action: 'check-phone', phone })
-    }).then(r=>r.json()).catch(()=>({exists:false}));
-    if (!check.exists) { showToast("Phone not registered","error"); return; }
-  } catch(e) { showToast("Could not verify phone","error"); return; }
-  const otp=Math.floor(100000+Math.random()*900000).toString();
-  otpDataStore={phone,otp,expiry:Date.now()+600000};localStorage.setItem(KEYS.OTP_STORE,JSON.stringify(otpDataStore));
-  alert(`[DEMO] Your OTP is: ${otp}`);showToast("OTP sent!","success");
-  document.getElementById("otpStep1").classList.remove("active");document.getElementById("otpStep2").classList.add("active");
-  let secs=60;if(otpTimer)clearInterval(otpTimer);
-  otpTimer=setInterval(()=>{secs--;document.getElementById("resendTimer").innerText=secs;if(secs<=0){clearInterval(otpTimer);document.getElementById("resendOtpBtn").disabled=false;}},1000);
+  if(!phone){showToast("Enter your phone number","error");return;}
+  try{
+    // Step 1: confirm phone is registered
+    const check=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'check-phone',phone})}).then(r=>r.json()).catch(()=>({exists:false}));
+    if(!check.exists){showToast("Phone not registered","error");return;}
+    // Step 2: request OTP — server generates and stores it
+    const req=await fetch('/api/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'request',phone})}).then(r=>r.json());
+    if(!req.success){showToast(req.error||"Could not send OTP","error");return;}
+    // DEV/DEMO: OTP is returned in the response. Remove alert() when SMS is wired.
+    if(req.otp){alert(`[DEMO] Your OTP is: ${req.otp}`);}
+    otpDataStore={phone};// store phone only — code lives on the server
+    showToast("OTP sent!","success");
+    document.getElementById("otpStep1").classList.remove("active");document.getElementById("otpStep2").classList.add("active");
+    let secs=60;if(otpTimer)clearInterval(otpTimer);
+    otpTimer=setInterval(()=>{secs--;document.getElementById("resendTimer").innerText=secs;if(secs<=0){clearInterval(otpTimer);document.getElementById("resendOtpBtn").disabled=false;}},1000);
+  }catch(e){showToast("Network error — please try again","error");}
 }
 async function resetPasswordConfirm(){
   const phone=document.getElementById("otpPhone").value.trim(),code=document.getElementById("otpCode").value.trim(),pwd=document.getElementById("newPassword").value;
-  const stored=JSON.parse(localStorage.getItem(KEYS.OTP_STORE)||"{}");
-  if(!stored||stored.phone!==phone||stored.otp!==code||Date.now()>stored.expiry){showToast("Invalid or expired OTP","error");return;}
+  if(!code){showToast("Enter the OTP code","error");return;}
   if(pwd.length<6){showToast("Min 6 characters","error");return;}
-  // DB.findUser / DB.upsertUser do not exist — reset password via server API
-  try {
-    const res = await fetch('/api/auth', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ action: 'reset-password', phone, password: pwd })
-    }).then(r=>r.json());
-    if (!res.success) { showToast(res.error || "Reset failed","error"); return; }
-  } catch(e) { showToast("Network error — please try again","error"); return; }
-  localStorage.removeItem(KEYS.OTP_STORE);
+  try{
+    // Server verifies the OTP and resets the password in one step
+    const res=await fetch('/api/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'confirm',phone,code,password:pwd})}).then(r=>r.json());
+    if(!res.success){showToast(res.error||"Reset failed","error");return;}
+  }catch(e){showToast("Network error — please try again","error");return;}
   showToast("🔐 Password reset! Please login.","success");closeModal("otpModal");
   document.getElementById("otpStep1").classList.add("active");document.getElementById("otpStep2").classList.remove("active");
 }
