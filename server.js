@@ -7,6 +7,8 @@ const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { Pool } = require('pg');
 const axios = require('axios');
 // notices routes are defined inline — no separate router file needed
@@ -731,6 +733,47 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ── Candidate Photo Upload (Multer) ──
+const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads', 'candidates');
+// Ensure upload directory exists at startup (no crash if already present)
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const candidateStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const unique = `cand_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+    cb(null, unique);
+  }
+});
+
+const ALLOWED_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+
+const candidateUpload = multer({
+  storage: candidateStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIME.has(file.mimetype)) cb(null, true);
+    else cb(new Error('Only JPG, JPEG, PNG, and WEBP images are allowed'));
+  }
+});
+
+// POST /api/admin/candidates/upload-photo — upload a candidate photo, return its public path
+app.post('/api/admin/candidates/upload-photo', (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  candidateUpload.single('photo')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ success: false, error: 'Image must be smaller than 5 MB' });
+      return res.status(400).json({ success: false, error: err.message });
+    }
+    if (err) return res.status(400).json({ success: false, error: err.message });
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
+    // Return a public URL path that works with express.static
+    const publicPath = `/uploads/candidates/${req.file.filename}`;
+    return res.json({ success: true, url: publicPath });
+  });
+});
 
 // ── Shared Utilities ──
 function hashPassword(password, salt) {

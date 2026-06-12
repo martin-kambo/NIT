@@ -351,13 +351,25 @@ tr:hover td { background: var(--light-gray); }
         <label style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--mid-gray);display:block;margin-bottom:0.3rem;">Bio (short description)</label>
         <textarea id="candBio" rows="2" placeholder="e.g. Teacher &amp; community organizer." style="width:100%;padding:0.7rem 0.9rem;border:1.5px solid #e5e7eb;border-radius:0.6rem;font-size:0.875rem;font-family:'Outfit',sans-serif;outline:none;resize:vertical;"></textarea>
       </div>
-      <div class="full field" style="display:flex;align-items:center;gap:0.75rem;">
-        <div style="flex:1;">
-          <label style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--mid-gray);display:block;margin-bottom:0.3rem;">Photo URL</label>
-          <input type="url" id="candImg" placeholder="https://randomuser.me/api/portraits/…" style="width:100%;padding:0.7rem 0.9rem;border:1.5px solid #e5e7eb;border-radius:0.6rem;font-size:0.875rem;font-family:'Outfit',sans-serif;outline:none;" oninput="previewCandImg(this.value)">
-        </div>
-        <div style="flex-shrink:0;margin-top:1.4rem;">
+      <div class="full field">
+        <label style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--mid-gray);display:block;margin-bottom:0.5rem;">Candidate Photo</label>
+        <!-- Hidden field keeps the current/uploaded img URL that gets sent to the API -->
+        <input type="hidden" id="candImg">
+        <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+          <!-- File picker trigger -->
+          <label id="candPhotoLabel" style="display:inline-flex;align-items:center;gap:0.45rem;padding:0.6rem 1rem;border:1.5px dashed #d1d5db;border-radius:0.6rem;cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--forest-light);background:rgba(45,106,79,0.04);transition:all 0.2s;">
+            <i class="fas fa-upload"></i> Upload Photo
+            <input type="file" id="candPhotoFile" accept=".jpg,.jpeg,.png,.webp" style="display:none;" onchange="handleCandPhotoUpload(this)">
+          </label>
+          <!-- Upload status message -->
+          <span id="candPhotoStatus" style="font-size:0.8rem;color:var(--mid-gray);"></span>
+          <!-- Live preview -->
           <img id="candImgPreview" class="candidate-img-preview" src="" alt="Preview">
+        </div>
+        <!-- Current photo hint shown when editing -->
+        <div id="candCurrentPhotoWrap" style="display:none;margin-top:0.5rem;font-size:0.78rem;color:var(--mid-gray);">
+          Current photo: <span id="candCurrentPhotoName" style="font-family:'JetBrains Mono',monospace;"></span>
+          <button type="button" onclick="clearCandPhoto()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:0.78rem;margin-left:0.4rem;">Remove</button>
         </div>
       </div>
     </div>
@@ -646,6 +658,10 @@ function openAddCandidateModal() {
   document.getElementById('candParty').value = '';
   document.getElementById('candBio').value = '';
   document.getElementById('candImg').value = '';
+  document.getElementById('candPhotoFile').value = '';
+  document.getElementById('candPhotoStatus').textContent = '';
+  document.getElementById('candCurrentPhotoWrap').style.display = 'none';
+  document.getElementById('candCurrentPhotoName').textContent = '';
   document.getElementById('candIncumbent').checked = false;
   document.getElementById('candImgPreview').classList.remove('show');
   document.getElementById('candModalError').style.display = 'none';
@@ -661,9 +677,24 @@ function openEditCandidateModal(c) {
   document.getElementById('candParty').value = c.party || '';
   document.getElementById('candBio').value = c.bio || '';
   document.getElementById('candImg').value = c.img || '';
+  document.getElementById('candPhotoFile').value = '';
+  document.getElementById('candPhotoStatus').textContent = '';
   document.getElementById('candIncumbent').checked = !!c.incumbent;
   document.getElementById('candModalError').style.display = 'none';
-  previewCandImg(c.img);
+
+  // Show existing photo if present
+  if (c.img) {
+    previewCandImg(c.img);
+    document.getElementById('candCurrentPhotoWrap').style.display = 'block';
+    // Show just the filename portion of the path (or 'existing photo' for external URLs)
+    const parts = c.img.split('/');
+    document.getElementById('candCurrentPhotoName').textContent = parts[parts.length - 1] || c.img;
+  } else {
+    previewCandImg('');
+    document.getElementById('candCurrentPhotoWrap').style.display = 'none';
+    document.getElementById('candCurrentPhotoName').textContent = '';
+  }
+
   setModalCategory(c.category || 'MCA');
   document.getElementById('candidateModal').classList.add('open');
 }
@@ -680,8 +711,79 @@ function setModalCategory(cat) {
 
 function previewCandImg(url) {
   const img = document.getElementById('candImgPreview');
-  if (url && url.startsWith('http')) { img.src = url; img.classList.add('show'); }
-  else { img.classList.remove('show'); }
+  if (url && (url.startsWith('http') || url.startsWith('/'))) {
+    img.src = url; img.classList.add('show');
+  } else { img.classList.remove('show'); img.src = ''; }
+}
+
+async function handleCandPhotoUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('candPhotoStatus');
+  const errEl = document.getElementById('candModalError');
+  errEl.style.display = 'none';
+
+  // Client-side type check
+  const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  if (!allowed.includes(file.type)) {
+    errEl.textContent = 'Only JPG, PNG, and WEBP images are allowed.';
+    errEl.style.display = 'block';
+    input.value = '';
+    return;
+  }
+
+  // Client-side size check (5 MB)
+  if (file.size > 5 * 1024 * 1024) {
+    errEl.textContent = 'Image must be smaller than 5 MB.';
+    errEl.style.display = 'block';
+    input.value = '';
+    return;
+  }
+
+  statusEl.textContent = 'Uploading…';
+  statusEl.style.color = 'var(--mid-gray)';
+
+  const formData = new FormData();
+  formData.append('photo', file);
+  const pwd = sessionStorage.getItem('adminPwd') || '';
+
+  try {
+    const res = await fetch('/api/admin/candidates/upload-photo', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${adminToken || ''}`,
+        'x-admin-password': pwd
+      },
+      body: formData
+    });
+    const data = await res.json();
+    if (!data.success) {
+      statusEl.textContent = 'Upload failed: ' + (data.error || 'Unknown error');
+      statusEl.style.color = 'var(--red)';
+      return;
+    }
+    // Store the URL in the hidden field and show preview
+    document.getElementById('candImg').value = data.url;
+    previewCandImg(data.url);
+    statusEl.textContent = '✓ Photo uploaded';
+    statusEl.style.color = 'var(--forest-light)';
+    // Show current photo row
+    document.getElementById('candCurrentPhotoWrap').style.display = 'block';
+    document.getElementById('candCurrentPhotoName').textContent = file.name;
+  } catch (err) {
+    statusEl.textContent = 'Upload error: ' + err.message;
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
+function clearCandPhoto() {
+  document.getElementById('candImg').value = '';
+  document.getElementById('candPhotoFile').value = '';
+  document.getElementById('candPhotoStatus').textContent = 'Photo removed';
+  document.getElementById('candPhotoStatus').style.color = 'var(--mid-gray)';
+  document.getElementById('candCurrentPhotoWrap').style.display = 'none';
+  document.getElementById('candCurrentPhotoName').textContent = '';
+  previewCandImg('');
 }
 
 async function saveCandidateModal() {
