@@ -891,51 +891,211 @@ select.field-input option { background: #1a2535; color: white; }
 .section-sub { font-size: 0.85rem; color: var(--mid-gray); margin-top: 0.15rem; }
 .section-action { font-size: 0.8rem; color: var(--forest-light); font-weight: 600; cursor: none; background: none; border: none; text-decoration: underline; font-family: 'Outfit', sans-serif; }
 
-/* CANDIDATES GRID */
-.candidates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.85rem; margin-bottom: 2rem; }
-.candidate-card {
-  background: white; border-radius: var(--radius-xl); overflow: hidden;
-  box-shadow: var(--shadow-card); border: 1px solid rgba(0,0,0,0.04);
-  transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s;
-  display: flex; flex-direction: column; cursor: none;
-  opacity: 0; transform: translateY(30px);
-  animation: card-reveal 0.5s forwards;
+/* ═══ CANDIDATES GRID — compact redesign ═══ */
+.candidates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 2rem;
 }
-.candidate-card:hover { transform: translateY(-8px) scale(1.01); box-shadow: 0 24px 60px -12px rgba(0,0,0,0.2); }
+
+/* Card shell */
+.candidate-card {
+  background: white;
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 2px 12px -2px rgba(0,0,0,0.10);
+  border: 1.5px solid rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+  cursor: none;
+  opacity: 0;
+  transform: translateY(16px);
+  animation: card-reveal 0.4s forwards;
+  transition: transform 0.25s cubic-bezier(0.2,0.8,0.2,1), box-shadow 0.25s, border-color 0.25s;
+}
+.candidate-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px -8px rgba(13,40,24,0.18);
+  border-color: rgba(45,106,79,0.2);
+}
 @keyframes card-reveal { to { opacity: 1; transform: translateY(0); } }
-.card-img-wrap { position: relative; height: 110px; background: var(--light-gray); overflow: hidden; }
-.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; object-position: top; transition: transform 0.5s; }
-.candidate-card:hover .card-img-wrap img { transform: scale(1.08); }
+
+/* Photo area — square crop, small avatar circle */
+.card-img-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: 1rem 1rem 0;
+  background: linear-gradient(160deg, #f0f7f3 0%, #e8f4ec 100%);
+}
+.card-img-wrap img {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: top;
+  border: 3px solid white;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  transition: transform 0.35s cubic-bezier(0.2,0.8,0.2,1);
+  display: block;
+}
+.candidate-card:hover .card-img-wrap img { transform: scale(1.06); }
+
+/* Rank badge — sits top-left corner of the photo zone */
 .card-rank-badge {
-  position: absolute; top: 0.75rem; left: 0.75rem;
-  width: 28px; height: 28px; border-radius: 50%; border: 2px solid white;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 0.75rem; font-weight: 800; font-family: 'Syne', sans-serif;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 800;
+  font-family: 'Syne', sans-serif;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  line-height: 1;
 }
 .rank-1 { background: var(--gold); color: var(--forest); }
 .rank-2 { background: #9ca3af; color: white; }
 .rank-3 { background: #cd7f32; color: white; }
-.rank-other { background: rgba(0,0,0,0.5); color: white; }
+.rank-other { background: rgba(0,0,0,0.45); color: white; }
+
+/* Live vote count — small pill below the photo */
 .card-votes-chip {
-  position: absolute; bottom: 0.75rem; right: 0.75rem;
-  background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
-  color: white; font-size: 0.7rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;
-  padding: 0.25rem 0.6rem; border-radius: 50px; border: 1px solid rgba(255,255,255,0.1);
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--forest);
+  color: white;
+  font-size: 0.6rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 0.18rem 0.55rem;
+  border-radius: 50px;
+  border: 2px solid white;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+  letter-spacing: 0.02em;
 }
-.card-body { padding: 0.65rem 0.85rem; flex: 1; display: flex; flex-direction: column; }
-.card-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.8rem; color: var(--text-dark); margin-bottom: 0.1rem; }
-.card-party { font-size: 0.65rem; color: var(--mid-gray); margin-bottom: 0.4rem; }
-.card-bio { font-size: 0.72rem; color: var(--text-mid); line-height: 1.45; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Card body */
+.card-body {
+  padding: 1rem 0.75rem 0.75rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.card-name {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--text-dark);
+  margin-bottom: 0.15rem;
+  line-height: 1.3;
+  /* clamp to 2 lines max — prevents long names blowing the layout */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card-party {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--forest-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.3rem;
+}
+.card-bio {
+  font-size: 0.7rem;
+  color: var(--mid-gray);
+  line-height: 1.4;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 0.6rem;
+}
+
+/* Vote button — full-width, prominent but not oversized */
 .card-vote-btn {
-  display: flex; align-items: center; justify-content: center; gap: 0.4rem;
-  width: 100%; margin-top: 0.6rem; padding: 0.45rem;
-  background: var(--forest); color: white; border: none; border-radius: var(--radius-md);
-  font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 0.82rem;
-  cursor: none; transition: all 0.2s; letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  background: linear-gradient(135deg, var(--forest), var(--forest-light));
+  color: white;
+  border: none;
+  border-radius: 0.6rem;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  font-size: 0.75rem;
+  cursor: none;
+  transition: all 0.2s;
+  letter-spacing: 0.03em;
+  box-shadow: 0 2px 8px rgba(13,40,24,0.25);
 }
-.card-vote-btn:hover { background: var(--forest-light); transform: scale(1.02); }
-.card-voted { width: 100%; margin-top: 0.9rem; padding: 0.65rem; background: var(--light-gray); border-radius: var(--radius-md); text-align: center; font-size: 0.8rem; color: var(--mid-gray); font-weight: 600; }
+.card-vote-btn:hover {
+  background: linear-gradient(135deg, var(--forest-light), var(--emerald));
+  box-shadow: 0 4px 14px rgba(64,194,122,0.35);
+  transform: translateY(-1px);
+}
+.card-vote-btn i { font-size: 0.7rem; }
+
+/* Voted state — muted green pill */
+.card-voted {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  background: rgba(64,194,122,0.10);
+  border: 1px solid rgba(64,194,122,0.25);
+  border-radius: 0.6rem;
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--forest-light);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Incumbent badge */
+.incumbent-badge { position: absolute; top: 0.6rem; right: 0.6rem; }
+.incumbent-badge .tag { font-size: 0.55rem; padding: 0.15rem 0.45rem; }
+
+/* ── Responsive tweaks ── */
+/* Phones: 2-column grid, slightly narrower cards */
+@media (max-width: 480px) {
+  .candidates-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+  }
+  .card-img-wrap img { width: 68px; height: 68px; }
+  .card-name { font-size: 0.75rem; }
+  .card-vote-btn { font-size: 0.72rem; padding: 0.45rem 0.5rem; }
+}
+/* Tablets: comfortable 3-col */
+@media (min-width: 481px) and (max-width: 900px) {
+  .candidates-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+/* Wide desktop: up to 5 col so even large candidate lists stay scannable */
+@media (min-width: 1100px) {
+  .candidates-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+}
 
 /* ALREADY VOTED MSG */
 .voted-banner {
@@ -3432,18 +3592,21 @@ function renderCandidatesGrid(disableVote, serverVotes){
   // ✅ FIX 1: Set innerHTML once instead of appendChild loop (90% faster)
   container.innerHTML=sorted.map((cand,idx)=>{
     const rankClass=idx===0?"rank-1":idx===1?"rank-2":idx===2?"rank-3":"rank-other";
-    return `<div class="candidate-card" data-id="${cand.id}" style="animation-delay:${idx*0.07}s">
+    const avatarFallback=`https://ui-avatars.com/api/?name=${encodeURIComponent(cand.name)}&background=2d6a4f&color=fff&size=80&bold=true`;
+    return `<div class="candidate-card" data-id="${cand.id}" style="animation-delay:${idx*0.06}s">
       <div class="card-img-wrap">
-        <img src="${cand.img}" alt="${cand.name}" loading="lazy">
+        <img src="${cand.img||avatarFallback}" alt="${cand.name}" loading="lazy" onerror="this.src='${avatarFallback}'">
         <div class="card-rank-badge ${rankClass}">${idx+1}</div>
-        ${cand.incumbent?'<div class="incumbent-badge"><span class="tag tag-gold">Incumbent</span></div>':''}
+        ${cand.incumbent?'<div class="incumbent-badge"><span class="tag tag-gold">★</span></div>':''}
         <div class="card-votes-chip">${cand.votes} votes</div>
       </div>
       <div class="card-body">
         <div class="card-name">${cand.name}</div>
-        <div class="card-party">${cand.party}</div>
-        <div class="card-bio">${cand.bio}</div>
-        ${categoryVoted?'<div class="card-voted">✅ Voted this cycle</div>':`<button class="card-vote-btn ripple-wrap vote-btn" data-id="${cand.id}"><i class="fas fa-vote-yea"></i> Cast Vote (KES 10)</button>`}
+        <div class="card-party">${cand.party||'Independent'}</div>
+        <div class="card-bio">${cand.bio||''}</div>
+        ${categoryVoted
+          ? '<div class="card-voted">✅ Voted</div>'
+          : `<button class="card-vote-btn ripple-wrap vote-btn" data-id="${cand.id}"><i class="fas fa-vote-yea"></i> Vote</button>`}
       </div>
     </div>`;
   }).join("");
@@ -5754,7 +5917,7 @@ console.log("%c\n╔════════════════════
 .ux-pulse{animation:uxPulse .7s ease-out;}
 
 /* ── Card 3D tilts ── */
-.candidate-card,.lb-row,.badge-card,.forum-post{transition:transform .25s cubic-bezier(.2,.8,.2,1),box-shadow .25s;will-change:transform;}
+.candidate-card.ux-tilt,.badge-card,.lb-row,.forum-post{transition:transform .25s cubic-bezier(.2,.8,.2,1),box-shadow .25s;will-change:transform;}
 .candidate-card.ux-tilt,.badge-card.ux-tilt{transition:transform .08s linear;}
 
 /* ── Forgot-password modal polish ── */
