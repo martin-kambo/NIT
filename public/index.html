@@ -289,103 +289,156 @@ body::before {
 .voter-stat-num { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; color: var(--emerald); }
 .voter-stat-label { font-size: 0.65rem; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.08em; }
 
-/* ═══ FACE-OFF ═══ */
+/* ═══ FACE-OFF — COMPACT REDESIGN ═══ */
 .faceoff-section {
   background: var(--charcoal);
   position: relative; overflow: hidden;
   margin: 1rem 0;
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-deep);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
 }
 .faceoff-bg {
   position: absolute; inset: 0;
-  background: radial-gradient(ellipse 60% 100% at 25% 50%, rgba(67,97,238,0.15) 0%, transparent 60%),
-              radial-gradient(ellipse 60% 100% at 75% 50%, rgba(230,57,70,0.15) 0%, transparent 60%);
+  background: radial-gradient(ellipse 60% 120% at 20% 50%, rgba(67,97,238,0.13) 0%, transparent 55%),
+              radial-gradient(ellipse 60% 120% at 80% 50%, rgba(230,57,70,0.13) 0%, transparent 55%);
 }
 .faceoff-grid-lines {
   position: absolute; inset: 0;
-  background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
   background-size: 40px 40px;
 }
-.faceoff-inner { position: relative; z-index: 2; display: flex; min-height: 260px; flex-wrap: wrap; }
+/* ── Compact candidates row ── */
+.faceoff-inner {
+  position: relative; z-index: 2;
+  display: flex; flex-wrap: wrap; align-items: stretch;
+}
 .fo-candidate {
-  flex: 1; min-width: 200px; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; padding: 1.25rem 1.5rem;
+  flex: 1; min-width: 160px;
+  display: flex; flex-direction: row;
+  align-items: center;
+  padding: 0.8rem 1rem;
+  gap: 0.65rem;
   position: relative;
 }
-.fo-left { background: linear-gradient(135deg, rgba(67,97,238,0.12), transparent); }
+.fo-left  { background: linear-gradient(135deg, rgba(67,97,238,0.12), transparent); }
 .fo-right { background: linear-gradient(225deg, rgba(230,57,70,0.12), transparent); }
+/* ── VS divider ── */
 .fo-vs-divider {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 0.75rem 0; position: relative; z-index: 3;
+  padding: 0.5rem 0; width: 36px; flex-shrink: 0; position: relative; z-index: 3;
 }
 .fo-vs-line {
-  flex: 1; width: 2px;
-  background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.2), transparent);
+  flex: 1; width: 1px;
+  background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.14), transparent);
 }
 .fo-vs-badge {
-  width: 42px; height: 42px; border-radius: 50%;
-  background: radial-gradient(circle, #333, #1a1a1a);
-  border: 2px solid rgba(255,255,255,0.15);
+  width: 30px; height: 30px; border-radius: 50%;
+  background: radial-gradient(circle, #2e2e2e, #1a1a1a);
+  border: 1.5px solid rgba(255,255,255,0.13);
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Syne', sans-serif; font-size: 0.7rem; font-weight: 800;
-  color: white; letter-spacing: 0.05em; box-shadow: 0 0 30px rgba(0,0,0,0.5);
+  font-family: 'Syne', sans-serif; font-size: 0.55rem; font-weight: 800;
+  color: white; letter-spacing: 0.05em;
+  box-shadow: 0 0 18px rgba(0,0,0,0.45);
   animation: vs-pulse 3s ease-in-out infinite;
 }
-@keyframes vs-pulse { 0%,100% { box-shadow: 0 0 30px rgba(0,0,0,0.5); } 50% { box-shadow: 0 0 50px rgba(255,255,255,0.1), 0 0 30px rgba(0,0,0,0.5); } }
+@keyframes vs-pulse {
+  0%,100% { box-shadow: 0 0 18px rgba(0,0,0,0.45); }
+  50%      { box-shadow: 0 0 32px rgba(255,255,255,0.08), 0 0 18px rgba(0,0,0,0.45); }
+}
+/* ── Thumbnail ── */
 .fo-portrait-ring {
-  width: 85px; height: 85px; border-radius: 50%; padding: 3px;
-  position: relative; cursor: none; margin-bottom: 0.5rem;
+  width: 58px; height: 58px; border-radius: 50%; padding: 2px;
+  flex-shrink: 0; position: relative; cursor: none;
   transition: transform 0.3s;
 }
 .fo-portrait-ring:hover { transform: scale(1.06); }
-.fo-left .fo-portrait-ring { background: linear-gradient(135deg, #4361ee, #3a0ca3); }
+.fo-left  .fo-portrait-ring { background: linear-gradient(135deg, #4361ee, #3a0ca3); }
 .fo-right .fo-portrait-ring { background: linear-gradient(135deg, #e63946, #9d0208); }
 .fo-portrait-ring img {
-  width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 3px solid #1a1a1a;
+  width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 2px solid #1c1c1c;
+}
+/* ── Info column ── */
+.fo-info {
+  display: flex; flex-direction: column; flex: 1; min-width: 0;
 }
 .fo-name {
-  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem;
-  color: white; text-align: center; margin-bottom: 0.1rem;
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.82rem;
+  color: white; margin-bottom: 0.06rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.fo-party { font-size: 0.7rem; color: rgba(255,255,255,0.4); margin-bottom: 0.4rem; }
+.fo-party { font-size: 0.62rem; color: rgba(255,255,255,0.38); margin-bottom: 0.28rem; }
+/* ── Vote count row ── */
+.fo-stats-row {
+  display: flex; align-items: baseline; gap: 0.28rem; margin-bottom: 0.28rem;
+}
 .fo-votes {
-  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 2.2rem;
-  line-height: 1; text-align: center;
-  transition: all 0.3s;
+  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.05rem;
+  line-height: 1; transition: all 0.3s;
 }
-.fo-left .fo-votes { color: #4361ee; filter: drop-shadow(0 0 20px rgba(67,97,238,0.5)); }
-.fo-right .fo-votes { color: #e63946; filter: drop-shadow(0 0 20px rgba(230,57,70,0.5)); }
-.fo-votes-label { font-size: 0.7rem; color: rgba(255,255,255,0.3); letter-spacing: 0.15em; text-transform: uppercase; margin-top: 0.25rem; }
+.fo-left  .fo-votes { color: #6378ef; filter: drop-shadow(0 0 6px rgba(67,97,238,0.35)); }
+.fo-right .fo-votes { color: #ee5b66; filter: drop-shadow(0 0 6px rgba(230,57,70,0.35)); }
+.fo-votes-label { display: none; }
+.fo-votes-unit {
+  font-size: 0.58rem; color: rgba(255,255,255,0.28);
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+/* ── Per-candidate thin progress bar ── */
+.fo-bar-row {
+  display: flex; align-items: center; gap: 0.35rem;
+}
+.fo-mini-bar {
+  flex: 1; height: 4px; background: rgba(255,255,255,0.09);
+  border-radius: 2px; overflow: hidden; min-width: 32px;
+}
+.fo-mini-fill {
+  height: 100%; border-radius: 2px;
+  transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1);
+}
+.fo-left-fill  { background: linear-gradient(90deg, #4361ee, #738df5); }
+.fo-right-fill { background: linear-gradient(90deg, #e63946, #f5737d); }
+.fo-pct {
+  font-size: 0.63rem; font-weight: 700;
+  color: rgba(255,255,255,0.5); white-space: nowrap;
+}
+/* ── Compact footer strip ── */
 .fo-footer {
-  background: rgba(0,0,0,0.4); border-top: 1px solid rgba(255,255,255,0.06);
-  padding: 0.5rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 1rem;
+  background: rgba(0,0,0,0.32); border-top: 1px solid rgba(255,255,255,0.05);
+  padding: 0.35rem 1rem;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 0.5rem;
 }
-.fo-progress-wrap { flex: 1; min-width: 200px; }
-.fo-progress-labels { display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.7rem; color: rgba(255,255,255,0.4); }
+.fo-progress-wrap { flex: 1; min-width: 100px; }
+.fo-progress-labels {
+  display: flex; justify-content: space-between;
+  margin-bottom: 0.2rem; font-size: 0.6rem; color: rgba(255,255,255,0.3);
+}
 .fo-progress-bar {
-  height: 6px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden;
+  height: 3px; background: rgba(255,255,255,0.07); border-radius: 2px; overflow: hidden;
 }
 .fo-progress-fill {
-  height: 100%; border-radius: 3px;
+  height: 100%; border-radius: 2px;
   background: linear-gradient(90deg, #4361ee, #e63946);
   transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1);
 }
 .fo-total-chip {
-  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 50px; padding: 0.4rem 1rem;
-  font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 0.5rem;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 50px; padding: 0.2rem 0.65rem;
+  font-size: 0.7rem; color: rgba(255,255,255,0.75);
+  display: flex; align-items: center; gap: 0.3rem;
 }
 .fo-winner-chip {
-  background: linear-gradient(135deg, rgba(233,196,106,0.2), rgba(233,196,106,0.05));
-  border: 1px solid rgba(233,196,106,0.3);
-  border-radius: 50px; padding: 0.4rem 1rem;
-  font-size: 0.8rem; color: var(--gold);
+  background: linear-gradient(135deg, rgba(233,196,106,0.15), rgba(233,196,106,0.04));
+  border: 1px solid rgba(233,196,106,0.22);
+  border-radius: 50px; padding: 0.2rem 0.65rem;
+  font-size: 0.7rem; color: var(--gold);
 }
 .vote-flash { animation: vote-flash-anim 0.5s ease-out; }
-@keyframes vote-flash-anim { 0% { transform: scale(1); } 50% { transform: scale(1.15); filter: brightness(1.5); } 100% { transform: scale(1); } }
+@keyframes vote-flash-anim {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.15); filter: brightness(1.5); }
+  100% { transform: scale(1); }
+}
 
 /* ═══ AUTH SECTION ═══ */
 
@@ -1501,12 +1554,18 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
 /* MOBILE RESPONSIVE */
 @media (max-width: 768px) {
-  /* ── Faceoff ── */
-  .fo-vs-divider { display: none; }
+  /* ── Faceoff compact — mobile ── */
+  .fo-vs-divider { width: 28px; }
+  .fo-vs-badge { width: 24px; height: 24px; font-size: 0.48rem; }
   .faceoff-inner { flex-direction: column; }
-  .fo-votes { font-size: 2.5rem; }
-  .fo-portrait-ring { width: 65px; height: 65px; }
-  .fo-candidate { padding: 0.85rem 1rem; }
+  .fo-vs-divider { flex-direction: row; width: 100%; height: 24px; padding: 0 1rem; }
+  .fo-vs-line { flex: 1; height: 1px; width: auto; background: linear-gradient(to right, transparent, rgba(255,255,255,0.14), transparent); }
+  .fo-candidate { padding: 0.65rem 0.9rem; min-width: unset; }
+  .fo-portrait-ring { width: 48px; height: 48px; }
+  .fo-votes { font-size: 0.95rem; }
+  .fo-name { font-size: 0.78rem; }
+  .fo-footer { padding: 0.3rem 0.75rem; gap: 0.35rem; }
+  .fo-total-chip, .fo-winner-chip { font-size: 0.62rem; padding: 0.18rem 0.5rem; }
 
   /* ── Global container ── */
   .container { padding: 0 0.85rem; }
@@ -2488,37 +2547,61 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         <div class="faceoff-bg"></div>
         <div class="faceoff-grid-lines"></div>
         <div class="faceoff-inner">
+          <!-- Left candidate -->
           <div class="fo-candidate fo-left">
             <div class="fo-portrait-ring">
               <img id="foLeftImg" src="" alt="">
             </div>
-            <div class="fo-name" id="foLeftName">—</div>
-            <div class="fo-party" id="foLeftParty">—</div>
-            <div class="fo-votes" id="foLeftVotes">0</div>
-            <div class="fo-votes-label">Electoral Votes</div>
+            <div class="fo-info">
+              <div class="fo-name" id="foLeftName">—</div>
+              <div class="fo-party" id="foLeftParty">—</div>
+              <div class="fo-stats-row">
+                <span class="fo-votes" id="foLeftVotes">0</span>
+                <span class="fo-votes-unit">votes</span>
+              </div>
+              <div class="fo-bar-row">
+                <div class="fo-mini-bar">
+                  <div class="fo-mini-fill fo-left-fill" id="foLeftBar" style="width:0%"></div>
+                </div>
+                <span class="fo-pct" id="foLeftPct">0%</span>
+              </div>
+            </div>
           </div>
+          <!-- VS divider -->
           <div class="fo-vs-divider">
             <div class="fo-vs-line"></div>
             <div class="fo-vs-badge">VS</div>
             <div class="fo-vs-line"></div>
           </div>
+          <!-- Right candidate -->
           <div class="fo-candidate fo-right">
             <div class="fo-portrait-ring">
               <img id="foRightImg" src="" alt="">
             </div>
-            <div class="fo-name" id="foRightName">—</div>
-            <div class="fo-party" id="foRightParty">—</div>
-            <div class="fo-votes" id="foRightVotes">0</div>
-            <div class="fo-votes-label">Electoral Votes</div>
+            <div class="fo-info">
+              <div class="fo-name" id="foRightName">—</div>
+              <div class="fo-party" id="foRightParty">—</div>
+              <div class="fo-stats-row">
+                <span class="fo-votes" id="foRightVotes">0</span>
+                <span class="fo-votes-unit">votes</span>
+              </div>
+              <div class="fo-bar-row">
+                <div class="fo-mini-bar">
+                  <div class="fo-mini-fill fo-right-fill" id="foRightBar" style="width:0%"></div>
+                </div>
+                <span class="fo-pct" id="foRightPct">0%</span>
+              </div>
+            </div>
           </div>
         </div>
+        <!-- Compact footer strip -->
         <div class="fo-footer">
           <div class="fo-winner-chip" id="foWinnerChip">⏳ No winner yet</div>
           <div class="fo-progress-wrap">
-            <div class="fo-progress-labels"><span id="foLeftPct">0%</span><span>📊 Progress</span><span id="foRightPct">0%</span></div>
+            <div class="fo-progress-labels"><span>Turnout</span><span>📊</span><span>/ 540</span></div>
             <div class="fo-progress-bar"><div class="fo-progress-fill" id="foProgressFill" style="width:0%"></div></div>
           </div>
-          <div class="fo-total-chip">📈 Total: <strong id="foTotalVotes">0</strong></div>
+          <div class="fo-total-chip">📈 <strong id="foTotalVotes">0</strong> cast</div>
         </div>
       </div>
 
@@ -6933,6 +7016,9 @@ window.updateFaceoff = async function () {
     const rp = tv > 0 ? Math.round((rv / tv) * 100) : 0;
     const lpEl = document.getElementById('foLeftPct');  if(lpEl) lpEl.innerText = lp + '%';
     const rpEl = document.getElementById('foRightPct'); if(rpEl) rpEl.innerText = rp + '%';
+    // ── Compact redesign: drive individual candidate mini-bars ──
+    const lbEl = document.getElementById('foLeftBar');  if(lbEl) lbEl.style.width = lp + '%';
+    const rbEl = document.getElementById('foRightBar'); if(rbEl) rbEl.style.width = rp + '%';
 
     const progressFill = document.getElementById('foProgressFill');
     if (progressFill) progressFill.style.width =
