@@ -4,6 +4,18 @@
 require('dotenv').config();
 const analyticsRouter = require('./routes/analytics');
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
+
+// ── Authentication Rate Limiter ──
+// Limits repeated login/register attempts to 5 per 15 minutes per IP.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5,
+  statusCode: 429,
+  message: { success: false, message: 'Too many authentication attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
@@ -973,7 +985,7 @@ app.get('/api/me', async (req, res) => {
 // ════════════════════════════════════════════════
 // ROUTE: /api/auth
 // ════════════════════════════════════════════════
-app.post('/api/auth', async (req, res) => {
+app.post('/api/auth', authLimiter, async (req, res) => {
   const { action, password, phone, token } = req.body;
 
   // LOGIN
