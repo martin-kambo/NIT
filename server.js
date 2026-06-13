@@ -16,6 +16,30 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// ── Forum Rate Limiters ──
+// Applied only to content-creation actions (create_post, submit reply).
+// Read actions (list posts, fetch replies, likes) are NOT limited.
+
+// 10 new posts per 15 minutes per IP
+const forumPostLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  statusCode: 429,
+  message: { success: false, message: 'Too many forum submissions. Please wait before posting again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// 30 replies per 15 minutes per IP
+const forumReplyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  statusCode: 429,
+  message: { success: false, message: 'Too many forum submissions. Please wait before posting again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
@@ -2010,6 +2034,9 @@ app.post('/api/forum', async (req, res) => {
 
   // ── create_post ──────────────────────────────────────────────
   if (action === 'create_post') {
+    // Rate-limit post creation only — likes and reads are unaffected
+    const limited = await new Promise(resolve => forumPostLimiter(req, res, resolve));
+    if (res.headersSent) return; // limiter already sent 429
     const session = verifySession(req.headers.cookie || '');
     if (!session) return res.status(401).json({ success: false, error: 'Login required to post' });
 
@@ -2126,7 +2153,7 @@ app.get('/api/forum/replies/:postId', async (req, res) => {
 // ────────────────────────────────────────────────────────────────
 // POST /api/forum/replies  — add a reply to a post
 // ────────────────────────────────────────────────────────────────
-app.post('/api/forum/replies', async (req, res) => {
+app.post('/api/forum/replies', forumReplyLimiter, async (req, res) => {
   const session = verifySession(req.headers.cookie || '');
   if (!session) return res.status(401).json({ success: false, error: 'Login required to reply' });
 

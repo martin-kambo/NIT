@@ -4397,7 +4397,7 @@ const forumAPI = (() => {
         showToast('✅ Post published!', 'success');
         await loadPosts();
       } else {
-        showToast(data.error || 'Failed to post', 'error');
+        showToast(data.error || data.message || 'Failed to post', 'error');
       }
     } catch (err) {
       console.error('submitPost error:', err);
@@ -4488,7 +4488,7 @@ const forumAPI = (() => {
         render();
         showToast('Reply posted!', 'success');
       } else {
-        showToast(data.error || 'Failed to reply', 'error');
+        showToast(data.error || data.message || 'Failed to reply', 'error');
       }
     } catch (err) {
       console.error('submitReply error:', err);
