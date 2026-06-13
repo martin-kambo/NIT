@@ -3440,8 +3440,8 @@ async function submitVote(candidateId) {
 }
 function getUserVoterBadge(uid){ const cur=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}'); if(cur.firstVoter===uid) return "1st"; if(cur.secondVoter===uid) return "2nd"; if(cur.thirdVoter===uid) return "3rd"; return null; }
 function getNextVoterNumber(){ let n=parseInt(localStorage.getItem(KEYS.VOTER_COUNTER)||"0"); localStorage.setItem(KEYS.VOTER_COUNTER,String(n+1)); return n+1; }
-function getPreviousPeriodStats(){ const a=JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]"); return a.length?a[a.length-1]:null; }
-function getAllTimeTotalVotes(){ return JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]").reduce((s,p)=>s+Object.values(p.votesByCandidate||{}).reduce((ss,v)=>ss+(v.total||0),0),0)+(JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes||[]).length; }
+function getPreviousPeriodStats(){ const a=Array.isArray(window._periodHistory)?window._periodHistory:[]; return a.length?a[a.length-1]:null; }
+function getAllTimeTotalVotes(){ const archive=Array.isArray(window._periodHistory)?window._periodHistory:[]; return archive.reduce((s,p)=>s+(p.candidates||[]).reduce((ss,c)=>ss+c.votes,0),0)+(JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes||[]).length; }
 
 // ═══ GAMIFICATION — VOTER META ═══
 
@@ -3741,11 +3741,11 @@ function renderSublocationRanking(){
   document.getElementById("sublocationRanking").innerHTML=scores.map((c,i)=>`<div class="sub-rank-item"><div class="sub-rank-medal">${medals[i]||"📌"}</div><div class="sub-rank-bar-wrap"><div class="sub-rank-info"><span class="sub-rank-name">${c.name}</span><span class="sub-rank-count">${c.votes}</span></div><div class="sub-rank-bar"><div class="sub-rank-fill" style="width:${maxV?Math.round((c.votes/maxV)*100):0}%"></div></div></div></div>`).join("");
 }
 
-function renderHistoricalChart(){
-  const archive=JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]");
-  const labels=archive.map(p=>new Date(p.periodStart).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));
-  const datasets=CANDIDATES.map(c=>({label:c.name.split(" ")[0],data:archive.map(p=>p.votesByCandidate[c.id]?.total||0),borderColor:c.color,backgroundColor:c.color+"22",tension:0.4,fill:false,pointRadius:3,pointHoverRadius:6}));
-  
+function renderHistoricalChart(periods){
+  // periods comes from /api/period-history — array of { periodId, periodName, startDate, endDate, candidates[] }
+  // Fall back to empty array if not provided (e.g. API failure)
+  const data = Array.isArray(periods) ? periods : [];
+
   // ✅ STEP 1: Destroy both stored instances (historyChart AND analyticsChart since they share canvas)
   if(window.historyChart){
     try{
@@ -3778,6 +3778,32 @@ function renderHistoricalChart(){
   
   const ctx=canvas.getContext("2d");
   if(!ctx) return;
+
+  if(data.length === 0){
+    // Show empty state message instead of blank chart
+    chartWrap.querySelector("#analyticsHistoricalChart").insertAdjacentHTML('beforebegin','');
+    ctx.font="14px Outfit,sans-serif";
+    ctx.fillStyle="#9ca3af";
+    ctx.textAlign="center";
+    ctx.fillText("No historical voting data available.",canvas.width/2||150,canvas.height/2||60);
+    return;
+  }
+
+  // Build labels and datasets from server data
+  const labels = data.map(p => p.periodName || `Cycle ${p.periodId}`);
+  // Collect unique candidate names across all periods
+  const candMap = {};
+  data.forEach(p => (p.candidates||[]).forEach(c => {
+    if(!candMap[c.candidateId]) candMap[c.candidateId] = c.candidateName;
+  }));
+  const CHART_COLORS = ["#4361ee","#e63946","#40c27a","#e9c46a","#f4a261","#9b5de5","#00b4d8"];
+  const datasets = Object.entries(candMap).map(([id, name], i) => ({
+    label: name.split(" ")[0],
+    data: data.map(p => { const c = (p.candidates||[]).find(c=>c.candidateId===id); return c ? c.votes : 0; }),
+    borderColor: CHART_COLORS[i % CHART_COLORS.length],
+    backgroundColor: CHART_COLORS[i % CHART_COLORS.length]+"22",
+    tension: 0.4, fill: false, pointRadius: 3, pointHoverRadius: 6
+  }));
   
   // ✅ STEP 5: Create chart
   try{
@@ -4085,8 +4111,9 @@ function renderAnalyticsTab(){
   const cv=JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes;
   const totalVotes=cv.length;
   const allTime=getAllTimeTotalVotes();
-  const archive=JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]");
-  const prevTotal=archive.length?Object.values(archive[archive.length-1].votesByCandidate||{}).reduce((s,v)=>s+(v.total||0),0):0;
+  const archive = Array.isArray(window._periodHistory) ? window._periodHistory : [];
+  const prevCandidates = archive.length ? (archive[archive.length-1].candidates||[]) : [];
+  const prevTotal = prevCandidates.reduce((s,c)=>s+c.votes,0);
   const delta=totalVotes-prevTotal;
 
   // Category label for the analytics panel title
@@ -4151,17 +4178,33 @@ function renderAnalyticsTab(){
 }
 
 function renderAnalyticsChart(type){
-  const archive=JSON.parse(localStorage.getItem(KEYS.PERIOD_ARCHIVE)||"[]");
-  const labels=archive.map(p=>new Date(p.periodStart).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));
+  // Use server history cache populated by renderDashboard via /api/period-history.
+  // Falls back to empty array if not yet loaded or API failed.
+  const periods = Array.isArray(window._periodHistory) ? window._periodHistory : [];
+  const labels = periods.map(p => p.periodName || `Cycle ${p.periodId}`);
+  const CHART_COLORS = ["#4361ee","#e63946","#40c27a","#e9c46a","#f4a261","#9b5de5","#00b4d8"];
   let datasets;
   if(type==="votes"){
-    datasets=CANDIDATES.map(c=>({label:c.name.split(" ")[0],data:archive.map(p=>p.votesByCandidate[c.id]?.total||0),borderColor:c.color,backgroundColor:c.color+"22",tension:0.4,fill:false,pointRadius:3,pointHoverRadius:6}));
+    // Collect unique candidates across all periods
+    const candMap = {};
+    periods.forEach(p => (p.candidates||[]).forEach(c => {
+      if(!candMap[c.candidateId]) candMap[c.candidateId] = c.candidateName;
+    }));
+    datasets = Object.entries(candMap).map(([id, name], i) => ({
+      label: name.split(" ")[0],
+      data: periods.map(p => { const c=(p.candidates||[]).find(c=>c.candidateId===id); return c?c.votes:0; }),
+      borderColor: CHART_COLORS[i%CHART_COLORS.length],
+      backgroundColor: CHART_COLORS[i%CHART_COLORS.length]+"22",
+      tension:0.4, fill:false, pointRadius:3, pointHoverRadius:6
+    }));
   } else {
     const users=DB.getUsers();
     datasets=SUBLOCATIONS.map((s,i)=>{
       const total=users.filter(u=>u.sublocation===s).length||1;
-      const colors=["#4361ee","#e63946","#40c27a","#e9c46a"];
-      return{label:s,data:archive.map(p=>{ const sv=Object.values(p.votesByCandidate||{}).reduce((sum,v)=>sum+(v.sublocations?.[s]||0),0); return Math.round((sv/total)*100); }),borderColor:colors[i],tension:0.4,fill:false,pointRadius:3};
+      return{label:s,data:periods.map(p=>{
+        const sv=(p.candidates||[]).reduce((sum,c)=>sum+c.votes,0);
+        return Math.round((sv/total)*100);
+      }),borderColor:CHART_COLORS[i],tension:0.4,fill:false,pointRadius:3};
     });
   }
   
@@ -5570,7 +5613,14 @@ document.getElementById("resetPasswordConfirmBtn").onclick=resetPasswordConfirm;
 document.getElementById("closeOtpModal").onclick=()=>{closeModal("otpModal");document.getElementById("otpStep1").classList.add("active");document.getElementById("otpStep2").classList.remove("active");};
 // Dashboard
 document.getElementById("sublocationFilter").onchange=renderSublocationRanking;
-const _refreshBtn=document.getElementById("refreshHistoryBtn");if(_refreshBtn)_refreshBtn.onclick=renderHistoricalChart;
+const _refreshBtn=document.getElementById("refreshHistoryBtn");if(_refreshBtn)_refreshBtn.onclick=async function(){
+  try{
+    const res=await fetch('/api/period-history?limit=20');
+    const data=await res.json();
+    window._periodHistory=(data.success&&Array.isArray(data.periods))?data.periods:[];
+  }catch(e){ window._periodHistory=window._periodHistory||[]; }
+  renderHistoricalChart(window._periodHistory);
+};
 document.getElementById("compareCandidatesBtn").onclick=()=>{openModal("compareModal");populateCompareSelects();};
 document.getElementById("closeCompareBtn").onclick=()=>closeModal("compareModal");
 document.getElementById("refreshCompareBtn").onclick=refreshComparison;
@@ -6559,11 +6609,11 @@ window.renderDashboard = async function(){
     const [periodRes, votingPeriodRes, historyRes] = await Promise.all([
       fetch('/api/polling-results'),
       fetch('/api/voting-period'),
-      fetch('/api/history?limit=10')
+      fetch('/api/period-history?limit=20').catch(() => null)
     ]);
     const periodData       = await periodRes.json();
     const votingPeriodData = await votingPeriodRes.json();
-    const historyData      = await historyRes.json();
+    const historyData      = historyRes ? await historyRes.json().catch(() => ({ success: false, periods: [] })) : { success: false, periods: [] };
 
     window.currentPeriodId  = periodData.periodId;
     // /api/voting-period is authoritative for endsAt and userHasVoted
@@ -6592,7 +6642,12 @@ window.renderDashboard = async function(){
     if(typeof renderVoterRegistry === 'function') await renderVoterRegistry();
     if(typeof renderLeaderboard === 'function') await renderLeaderboard();
     if(typeof renderPeriodSummary === 'function') renderPeriodSummary(periodData);
-    if(typeof renderHistoricalChart === 'function') renderHistoricalChart(historyData.periods);
+
+    // Cache history for renderAnalyticsChart and renderAnalyticsTab
+    window._periodHistory = (historyData.success && Array.isArray(historyData.periods))
+      ? historyData.periods
+      : [];
+    if(typeof renderHistoricalChart === 'function') renderHistoricalChart(window._periodHistory);
 
     const el = document.getElementById("currentPeriodEnd");
     if(el && window.currentPeriodEnd) el.innerText = new Date(window.currentPeriodEnd).toLocaleTimeString();

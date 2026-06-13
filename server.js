@@ -1534,6 +1534,73 @@ app.get('/api/history', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════
+// ROUTE: GET /api/period-history
+// Returns completed voting periods with per-candidate vote totals.
+// Source of truth: voting_periods (is_active=false) + votes + candidates tables.
+// Does NOT depend on localStorage or period_archives.
+// ════════════════════════════════════════════════
+app.get('/api/period-history', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+
+    // Fetch completed periods only (is_active = false), most recent first
+    const periodsResult = await pool.query(`
+      SELECT id, period_start, period_end, total_votes
+        FROM voting_periods
+       WHERE is_active = false
+       ORDER BY id DESC
+       LIMIT $1
+    `, [limit]);
+
+    if (periodsResult.rows.length === 0) {
+      return res.json({ success: true, periods: [] });
+    }
+
+    // Fetch all candidates once (id, name, category) to avoid N+1 lookups
+    const candResult = await pool.query(
+      `SELECT id, name, category FROM candidates ORDER BY id`
+    );
+    const candidateMap = {};
+    candResult.rows.forEach(c => { candidateMap[c.id] = c; });
+
+    const periods = [];
+    for (const period of periodsResult.rows) {
+      // Aggregate votes per candidate for this period
+      const votesResult = await pool.query(
+        `SELECT candidate_id, COUNT(*) AS vote_count
+           FROM votes
+          WHERE period_id = $1
+          GROUP BY candidate_id`,
+        [period.id]
+      );
+
+      const candidates = votesResult.rows.map(row => {
+        const cand = candidateMap[row.candidate_id] || {};
+        return {
+          candidateId:   String(row.candidate_id),
+          candidateName: cand.name     || `Candidate ${row.candidate_id}`,
+          category:      cand.category || 'MCA',
+          votes:         parseInt(row.vote_count),
+        };
+      });
+
+      periods.push({
+        periodId:   String(period.id),
+        periodName: `Cycle ${period.id}`,
+        startDate:  period.period_start,
+        endDate:    period.period_end,
+        candidates,
+      });
+    }
+
+    return res.json({ success: true, periods });
+  } catch (e) {
+    console.error('/api/period-history error:', e.message);
+    return res.status(500).json({ success: false, error: 'Failed to fetch period history' });
+  }
+});
+
+// ════════════════════════════════════════════════
 // ROUTE: /api/transaction  (record STK push initiation)
 // ════════════════════════════════════════════════
 app.post('/api/transaction', async (req, res) => {
