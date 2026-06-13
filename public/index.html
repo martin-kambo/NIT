@@ -6739,13 +6739,13 @@ window.getCurrentPeriodAggregated = function(){
 };
 
 window.getAllTimeTotalVotes = function(){
-  // This needs API call - return 0 for now
-  return 0;
+  const archive = Array.isArray(window._periodHistory) ? window._periodHistory : [];
+  return archive.reduce((s, p) => s + (p.candidates || []).reduce((ss, c) => ss + c.votes, 0), 0);
 };
 
 window.getPreviousPeriodStats = function(){
-  // This needs API call - return empty
-  return {};
+  const a = Array.isArray(window._periodHistory) ? window._periodHistory : [];
+  return a.length ? a[a.length - 1] : null;
 };
 
 // FIX: initOverlayStats (Line 3907)
@@ -6812,6 +6812,43 @@ window.showWelcomePopup = async function(){
 
 // ── renderAnalyticsTab: uses /api/analytics/dashboard for accurate per-sublocation data ──
 window.renderAnalyticsTab = async function () {
+  // ── Ensure period history is loaded before chart renders ──
+  // renderDashboard populates window._periodHistory on login; but if the user
+  // navigates directly to the Analytics tab, it may not be set yet.
+  if (!Array.isArray(window._periodHistory)) {
+    // Show loading state on the chart canvas while we fetch
+    const chartWrap = document.querySelector('.chart-wrap');
+    if (chartWrap) {
+      const loadingMsg = document.createElement('p');
+      loadingMsg.id = '_historyLoadingMsg';
+      loadingMsg.style.cssText = 'text-align:center;color:#9ca3af;font-size:0.875rem;padding:1rem 0;';
+      loadingMsg.textContent = 'Loading historical results...';
+      chartWrap.prepend(loadingMsg);
+    }
+    try {
+      const res  = await fetch('/api/period-history?limit=20');
+      const data = await res.json();
+      window._periodHistory = (data.success && Array.isArray(data.periods)) ? data.periods : [];
+    } catch (e) {
+      console.warn('[Analytics] Failed to load period history:', e.message);
+      window._periodHistory = [];
+      // Show error state on chart
+      const chartWrap2 = document.querySelector('.chart-wrap');
+      const canvas = document.getElementById('analyticsHistoricalChart');
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.font = '13px Outfit,sans-serif';
+          ctx.fillStyle = '#9ca3af';
+          ctx.textAlign = 'center';
+          ctx.fillText('Unable to load historical voting data.', canvas.width / 2 || 150, canvas.height / 2 || 60);
+        }
+      }
+    } finally {
+      document.getElementById('_historyLoadingMsg')?.remove();
+    }
+  }
+
   try {
     // Single call that returns every metric the Analytics tab needs
     let data = null;
