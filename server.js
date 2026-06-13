@@ -1321,10 +1321,7 @@ app.post('/api/vote', async (req, res) => {
       return res.status(409).json({ error: `Already voted for ${voteCategory} this period`, alreadyVoted: true, category: voteCategory });
     }
 
-    await pool.query(
-      `UPDATE voting_periods SET total_votes = total_votes + 1 WHERE id = $1`,
-      [periodId]
-    );
+    // total_votes counter removed — totalVotes is now counted live from the votes table
 
     // ── Count totals and per-candidate ────────────────────────────────────
     const totalRes = await pool.query(
@@ -1428,6 +1425,12 @@ app.get('/api/polling-results', async (req, res) => {
       votesByCandidate[row.candidate_id].sublocations[sublocKey] = count;
     });
 
+    // Live count — always accurate regardless of deletes or restores
+    const liveTotalRes = await pool.query(
+      'SELECT COUNT(*) AS count FROM votes WHERE period_id = $1', [period.id]
+    );
+    const liveTotalVotes = parseInt(liveTotalRes.rows[0].count || 0);
+
     return res
       .set('Cache-Control', 'private, no-cache')
       .json({
@@ -1435,7 +1438,7 @@ app.get('/api/polling-results', async (req, res) => {
         periodStart: period.period_start,
         periodEnd: period.period_end,
         isActive: period.is_active,
-        totalVotes: parseInt(period.total_votes),
+        totalVotes: liveTotalVotes,
         hasVoted,
         votedCategories,
         votesByCandidate: votesByCandidate,
@@ -1762,12 +1765,21 @@ app.get('/api/stats', async (req, res) => {
     const votersBySubLocation = {};
     sublocResult.rows.forEach(r => { votersBySubLocation[r.sublocation] = parseInt(r.count); });
 
+    // Live count for current period
+    let statsTotalVotes = 0;
+    if (period) {
+      const statsTotalRes = await pool.query(
+        'SELECT COUNT(*) AS count FROM votes WHERE period_id = $1', [period.id]
+      );
+      statsTotalVotes = parseInt(statsTotalRes.rows[0].count || 0);
+    }
+
     res.json({
       success: true,
       registeredVoters,
       currentPeriod: period ? {
         periodId: period.id,
-        totalVotes: parseInt(period.total_votes || 0),
+        totalVotes: statsTotalVotes,
         periodStart: period.period_start,
         periodEnd: period.period_end,
         votesByCandidate
@@ -2843,6 +2855,12 @@ app.get('/api/voting-period', async (req, res) => {
       }
     }
 
+    // Live count — not the drifting counter column
+    const vpLiveRes = await pool.query(
+      'SELECT COUNT(*) AS count FROM votes WHERE period_id = $1', [period.id]
+    );
+    const periodLiveCount = parseInt(vpLiveRes.rows[0].count || 0);
+
     return res.json({
       success: true,
       data: {
@@ -2851,7 +2869,7 @@ app.get('/api/voting-period', async (req, res) => {
         endsAt:           period.period_end,
         endsIn:           endsInMs,
         secondsRemaining,
-        totalVotes:       parseInt(period.total_votes) || 0,
+        totalVotes:       periodLiveCount,
         isActive:         true,
         userHasVoted,
         votedCategories

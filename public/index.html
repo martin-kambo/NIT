@@ -2981,7 +2981,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           <span style="font-size:1.2rem">📲</span>
           <span class="mpesa-logo-text">M-PESA</span>
         </div>
-        <div class="mpesa-logo-sub">Safaricom Secure Payment</div>
+        <div class="mpesa-logo-sub">Preview Mode · Not a real payment</div>
       </div>
       <div class="mpesa-amount-display">KES 10</div>
       <div class="mpesa-amount-label">Per Vote · Ngoliba InfoTrack</div>
@@ -3007,10 +3007,10 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         </div>
         <div class="mpesa-note">
           <i class="fas fa-info-circle" style="margin-top:2px;flex-shrink:0;"></i>
-          <span>You will receive a push notification on your phone to confirm the KES 10 payment. Enter your M-Pesa PIN to proceed.</span>
+          <span><strong>Preview Mode:</strong> No real payment will be processed. M-Pesa Daraja integration is not yet active. Tap "Send" to continue the demo flow.</span>
         </div>
         <button class="btn-mpesa ripple-wrap" id="mpesaSendBtn" style="margin-top:1rem;">
-          <i class="fas fa-mobile-alt"></i> <span>Send M-Pesa Request</span>
+          <i class="fas fa-mobile-alt"></i> <span>Continue (Preview)</span>
         </button>
         <button class="mpesa-back" id="mpesaCancelStep1">Cancel</button>
       </div>
@@ -3019,8 +3019,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="mpesa-step" id="mpesaStep2">
         <div class="mpesa-processing">
           <div class="mpesa-spinner"></div>
-          <div class="mpesa-processing-text">STK Push Sent!</div>
-          <div class="mpesa-processing-sub">Check your phone <strong id="mpesaPhoneDisplay"></strong><br>Enter your M-Pesa PIN to confirm payment</div>
+          <div class="mpesa-processing-text">Preview Mode</div>
+          <div class="mpesa-processing-sub">In production, an STK push would be sent to <strong id="mpesaPhoneDisplay"></strong>.<br>Use the button below to simulate confirmation.</div>
           <div class="mpesa-pin-row" id="mpesaPinRow">
             <div class="mpesa-pin-dot"></div><div class="mpesa-pin-dot"></div>
             <div class="mpesa-pin-dot"></div><div class="mpesa-pin-dot"></div>
@@ -3029,10 +3029,10 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         </div>
         <div class="mpesa-note" style="margin-top:0.5rem;">
           <i class="fas fa-shield-alt" style="flex-shrink:0;margin-top:2px;"></i>
-          <span>For demo purposes, payment is simulated. In production this integrates with Safaricom Daraja API.</span>
+          <span><strong>Preview only.</strong> Wire <code>MPESA_CONSUMER_KEY</code>, <code>MPESA_CONSUMER_SECRET</code>, and <code>MPESA_SHORTCODE</code> in your Render environment to enable real Daraja payments.</span>
         </div>
-        <button class="btn-mpesa ripple-wrap" id="mpesaSimulateSuccess" style="margin-top:0.75rem;background:linear-gradient(135deg,#1e3a5f,#4361ee);">
-          <i class="fas fa-check-circle"></i> <span>Simulate PIN Entered ✓ (Demo)</span>
+        <button class="btn-mpesa ripple-wrap" id="mpesaSimulateSuccess" style="margin-top:0.75rem;background:linear-gradient(135deg,#6b7280,#9ca3af);font-size:0.82rem;">
+          <i class="fas fa-flask"></i> <span>[Preview] Simulate Confirmation</span>
         </button>
         <button class="mpesa-back" id="mpesaBackToStep1">← Change number</button>
       </div>
@@ -3041,8 +3041,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="mpesa-step" id="mpesaStep3">
         <div class="mpesa-processing">
           <div class="mpesa-spinner" style="border-top-color:#4361ee;"></div>
-          <div class="mpesa-processing-text">Processing Payment…</div>
-          <div class="mpesa-processing-sub">Confirming with Safaricom servers</div>
+          <div class="mpesa-processing-text">Simulating Confirmation…</div>
+          <div class="mpesa-processing-sub">Preview mode — no real transaction is occurring</div>
         </div>
       </div>
 
@@ -3050,8 +3050,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="mpesa-step" id="mpesaStep4">
         <div class="mpesa-success">
           <div class="mpesa-success-icon">✅</div>
-          <h3>Payment Confirmed!</h3>
-          <p>Your vote has been cast successfully</p>
+          <h3>Vote Recorded <span style="font-size:0.7rem;font-weight:500;color:var(--mid-gray);vertical-align:middle;">(Preview)</span></h3>
+          <p>Your vote has been cast. <em style="font-size:0.78rem;color:var(--mid-gray);">Payment was simulated — no real M-Pesa charge occurred.</em></p>
           <div class="mpesa-receipt">
             <div class="mpesa-receipt-row"><span>Transaction ID</span><strong id="mpesaTxnId">—</strong></div>
             <div class="mpesa-receipt-row"><span>Amount</span><strong>KES 10.00</strong></div>
@@ -3897,7 +3897,12 @@ function showCandidateProfile(cand){
   document.getElementById("closeProfModal").onclick=()=>closeModal("candidateProfileModal");
 }
 
-// ═══ DARAJA M-PESA ENGINE ═══
+// ═══ DARAJA M-PESA ENGINE — PREVIEW STUB ═══
+// All three methods below are simulated. No real API calls are made.
+// To enable real Daraja payments, replace each method with actual
+// Safaricom Daraja API calls and set these Render env vars:
+//   MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_SHORTCODE,
+//   MPESA_PASSKEY, MPESA_CALLBACK_URL
 const DARAJA={
   getAccessToken:async()=>{await new Promise(r=>setTimeout(r,300));return"oauth_sim_"+Date.now();},
   initiateStkPush:async({phone,amount,accountRef})=>{await new Promise(r=>setTimeout(r,900));return{CheckoutRequestID:"ws_CO_"+Date.now()+"_"+Math.floor(Math.random()*999999),MerchantRequestID:"MR-"+Date.now(),ResponseCode:"0",ResponseDescription:"Success. Request accepted for processing"};},
@@ -3965,7 +3970,7 @@ async function simulateMpesaSuccess(){
     document.getElementById("mpesaTxnId").innerText=result.MpesaReceiptNumber;
     document.getElementById("mpesaReceiptCand").innerText=cand?.name||"—";
     document.getElementById("mpesaReceiptTime").innerText=new Date().toLocaleTimeString();
-    setMpesaStep(4); showToast("💚 Payment confirmed by Safaricom!","success");
+    setMpesaStep(4); showToast("🗳️ Vote recorded (Preview — no real payment)","success");
     if(mpesaPendingVote){
       // recordVote() does not exist — submit vote via server API instead
       const voteRes=await fetch('/api/vote',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
@@ -4865,9 +4870,9 @@ async function initiateAdPayment() {
       document.getElementById('adSuccessState').style.display = 'block';
       document.getElementById('adSuccessState').innerHTML = `
         <div style="font-size:2.5rem;margin-bottom:0.75rem;">🎉</div>
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1rem;color:var(--text-dark);margin-bottom:0.4rem;">Payment Confirmed!</div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1rem;color:var(--text-dark);margin-bottom:0.4rem;">Ad Submitted <span style="font-size:0.7rem;font-weight:500;color:var(--mid-gray);">(Preview)</span></div>
         <div style="font-size:0.82rem;color:var(--mid-gray);line-height:1.5;margin-bottom:0.75rem;">
-          Receipt: <strong>${result.MpesaReceiptNumber}</strong><br>Your ad is now <strong>live</strong> on the notice board.
+          Simulated receipt: <strong>${result.MpesaReceiptNumber}</strong><br>Your ad is now <strong>live</strong>. <em>No real M-Pesa charge occurred.</em>
         </div>
         <button onclick="resetAdForm()" style="display:inline-flex;align-items:center;gap:0.4rem;background:var(--cream-dark);border:1px solid var(--sand);border-radius:50px;padding:0.45rem 1.2rem;font-size:0.78rem;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif;color:var(--text-mid);">
           Done

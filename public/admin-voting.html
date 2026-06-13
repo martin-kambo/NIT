@@ -292,7 +292,7 @@
     // ─────────────────────────────────────────
     const state = {
         isAuthenticated: false,
-        adminPassword:   '',
+        adminToken:      '',   // Bearer token only — raw password is never stored
         loginVerified:   false,
         period:          null,
         votes:           [],
@@ -310,24 +310,29 @@
         if (!password) { showAlert('loginAlert', 'Please enter a password', 'error'); return; }
 
         try {
-            const verifyRes = await fetch('/api/admin/votes', {
-                headers: { 'x-admin-password': password }
+            const res  = await fetch('/api/admin', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ action: 'admin_login', password })
             });
+            const json = await res.json();
 
-            if (verifyRes.status === 401) {
+            if (!res.ok || !json.success || !json.token) {
                 showAlert('loginAlert', 'Incorrect password. Please try again.', 'error');
                 document.getElementById('password').value = '';
                 return;
             }
 
-            console.log('[admin] Server confirmed password');
-        } catch (networkErr) {
-            console.warn('[admin] Could not verify with server:', networkErr);
-        }
+            // Store the Bearer token only — raw password is discarded immediately
+            state.adminToken      = json.token;
+            state.isAuthenticated = true;
+            state.loginVerified   = true;
 
-        state.adminPassword  = password;
-        state.isAuthenticated = true;
-        state.loginVerified   = true;
+        } catch (networkErr) {
+            showAlert('loginAlert', 'Network error — please try again.', 'error');
+            console.error('[admin] Login network error:', networkErr);
+            return;
+        }
 
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('adminScreen').classList.add('active');
@@ -338,7 +343,7 @@
 
     function handleLogout() {
         state.isAuthenticated = false;
-        state.adminPassword   = '';
+        state.adminToken      = '';
         state.loginVerified   = false;
 
         document.getElementById('loginScreen').style.display = 'block';
@@ -392,7 +397,7 @@
     async function loadVotes() {
         try {
             const res = await fetch('/api/admin/votes', {
-                headers: { 'x-admin-password': state.adminPassword }
+                headers: { 'Authorization': 'Bearer ' + state.adminToken }
             });
             const json = await res.json();
 
@@ -420,7 +425,7 @@
 
             const res  = await fetch('/api/period/next', {
                 method:  'POST',
-                headers: { 'Content-Type': 'application/json', 'x-admin-password': state.adminPassword },
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.adminToken },
                 body:    JSON.stringify({ durationMinutes: duration })
             });
 
@@ -441,7 +446,7 @@
         try {
             const res  = await fetch(`/api/vote/${voteId}`, {
                 method:  'DELETE',
-                headers: { 'x-admin-password': state.adminPassword }
+                headers: { 'Authorization': 'Bearer ' + state.adminToken }
             });
             const json = await res.json();
             if (!json.success) throw new Error(json.error);
