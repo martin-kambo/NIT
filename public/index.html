@@ -3500,7 +3500,7 @@ async function registerUser() {
     const data = await res.json();
 
     if (!data.success) {
-      fail(data.error || 'Registration failed');
+      fail(data.error || data.message || 'Registration failed');
       btn.disabled = false;
       btn.innerHTML = '<span>Create Account</span> <i class="fas fa-user-plus"></i>';
       return;
@@ -5198,7 +5198,7 @@ async function changePassword(){
   try {
     const data=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
       body:JSON.stringify({action:'change-password',currentPassword:curr,newPassword:n1})}).then(r=>r.json());
-    if(!data.success){showFormError(err,data.error||"Current password incorrect");return;}
+    if(!data.success){showFormError(err,data.error||data.message||"Current password incorrect");return;}
   } catch(e){showFormError(err,"Network error");return;}
   err.classList.remove("show"); showToast("🔐 Password changed","success");
   ["currentPassword","newPassword1","newPassword2"].forEach(id=>document.getElementById(id).value="");
@@ -5788,7 +5788,7 @@ async function loginUser() {
     const data = await res.json();
 
     if (!data.success) {
-      if (err) { err.textContent = data.error || 'Login failed'; err.classList.add('show'); }
+      if (err) { err.textContent = data.error || data.message || 'Login failed'; err.classList.add('show'); }
       if (typeof shakeEl === 'function') shakeEl('authContainer');
       if (spinner) spinner.classList.add('hidden');
       btn.disabled = false;
