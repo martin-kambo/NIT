@@ -74,6 +74,13 @@ pool.on('error', (err) => {
   console.error('Database error:', err);
 });
 
+// ── Phase 2: Ngoliba ward_id runtime cache ──
+// Populated once by ensurePhase2Migrations() at startup.
+// Injected into every new users / votes / notices / forum_posts / candidates row.
+// Stays null if geography tables are unavailable — all columns are nullable so
+// existing functionality is never broken.
+let NGOLIBA_WARD_ID = null;
+
 
 // ── Initialize Database Tables ──
 // ✅ NOW WITH BETTER ERROR HANDLING & SKIP IF TABLES EXIST
@@ -495,6 +502,7 @@ app.use((req, res, next) => {
     await ensureActivePeriod();        // now a no-op alias for backward compat
     await ensureCandidatesTable();     // multi-category candidates (preserves MCA IDs 0-6)
     await ensureGeographyTables();     // Phase 1: additive geographic foundation — no existing behaviour changes
+    await ensurePhase2Migrations();    // Phase 2: add ward_id columns, backfill existing rows, cache NGOLIBA_WARD_ID
   } else {
     console.warn('⚠️  Continuing without database. Some features may not work.');
   }
@@ -840,6 +848,91 @@ async function ensureGeographyTables() {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════
+// PHASE 2: ATTACH GEOGRAPHIC OWNERSHIP TO DATA
+// Additive only. No existing columns, queries, or routes are modified.
+// All new ward_id columns are nullable — existing rows and all
+// current functionality continue working with zero behaviour change.
+// ══════════════════════════════════════════════════════════════════
+async function ensurePhase2Migrations() {
+  try {
+    // ── Step 1: Add nullable ward_id + FK constraint to all 5 tables ──
+    // ADD COLUMN IF NOT EXISTS  → idempotent on every startup.
+    // DO $$ EXCEPTION block     → idempotent FK constraint (survives re-runs).
+    // CREATE INDEX IF NOT EXISTS → idempotent index for future-phase filtering.
+    const GEO_TABLES = [
+      { table: 'users',       fkName: 'users_ward_id_fk'       },
+      { table: 'votes',       fkName: 'votes_ward_id_fk'       },
+      { table: 'notices',     fkName: 'notices_ward_id_fk'     },
+      { table: 'forum_posts', fkName: 'forum_posts_ward_id_fk' },
+      { table: 'candidates',  fkName: 'candidates_ward_id_fk'  },
+    ];
+
+    for (const { table, fkName } of GEO_TABLES) {
+      // Column (no-op if already present)
+      await pool.query(
+        `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ward_id INT`
+      );
+      // FK constraint (no-op if already present — caught by EXCEPTION block)
+      await pool.query(`
+        DO $$
+        BEGIN
+          ALTER TABLE ${table}
+            ADD CONSTRAINT ${fkName} FOREIGN KEY (ward_id) REFERENCES wards(id);
+        EXCEPTION WHEN duplicate_object THEN
+          NULL;
+        END $$
+      `);
+      // Index for efficient ward-scoped queries in future phases
+      await pool.query(
+        `CREATE INDEX IF NOT EXISTS idx_${table}_ward_id ON ${table}(ward_id)`
+      );
+    }
+
+    // ── Step 2: Resolve the Ngoliba ward_id ──
+    // Depends on Phase 1 seed (Kiambu → Juja → Ngoliba) being present.
+    const wardRes = await pool.query(`
+      SELECT w.id
+        FROM wards        w
+        JOIN constituencies con ON con.id = w.constituency_id
+        JOIN counties       cty ON cty.id = con.county_id
+       WHERE cty.name = 'Kiambu'
+         AND con.name = 'Juja'
+         AND w.name   = 'Ngoliba'
+       LIMIT 1
+    `);
+
+    if (!wardRes.rows.length) {
+      console.warn('⚠️  [Phase 2] Ngoliba ward row not found — backfill skipped. Ensure ensureGeographyTables() ran successfully first.');
+      return;
+    }
+
+    const wardId = wardRes.rows[0].id;
+    NGOLIBA_WARD_ID = wardId; // cache for all new-record creation flows
+
+    // ── Step 3: Backfill all existing records ──
+    // WHERE ward_id IS NULL guarantees full idempotency:
+    //   • Already-backfilled rows are never touched again.
+    //   • Safe to rerun on every deployment with zero side effects.
+    //   • No data is deleted or overwritten.
+    for (const { table } of GEO_TABLES) {
+      const res = await pool.query(
+        `UPDATE ${table} SET ward_id = $1 WHERE ward_id IS NULL`,
+        [wardId]
+      );
+      if (res.rowCount > 0) {
+        console.log(`  ↳ [Phase 2] backfilled ${res.rowCount} ${table} row(s) → ward_id=${wardId}`);
+      }
+    }
+
+    console.log(`✅ Phase 2 complete — NGOLIBA_WARD_ID=${wardId}`);
+  } catch (e) {
+    console.error('❌ ensurePhase2Migrations error:', e.message);
+    console.error(e.stack);
+    // Non-fatal: ward_id is nullable — all existing flows continue unchanged.
+  }
+}
+
 // ── Middleware ──
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGIN || 'http://localhost:10000')
   .split(',')
@@ -1141,9 +1234,9 @@ app.post('/api/auth', authLimiter, async (req, res) => {
       const passwordHash = hashPassword(password, salt);
 
       await pool.query(
-        `INSERT INTO users (id, phone, first_name, surname, dob, sublocation, email, national_id, language, voter_number, password_hash, salt, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
-        [id, phone, firstName, surname, dob || null, sublocation || null, email || null, nationalId || null, language || 'en', voterNumber, passwordHash, salt]
+        `INSERT INTO users (id, phone, first_name, surname, dob, sublocation, email, national_id, language, voter_number, password_hash, salt, ward_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())`,
+        [id, phone, firstName, surname, dob || null, sublocation || null, email || null, nationalId || null, language || 'en', voterNumber, passwordHash, salt, NGOLIBA_WARD_ID]
       );
 
       const sessionToken = createSession(phone, id, 7);
@@ -1425,11 +1518,11 @@ app.post('/api/vote', async (req, res) => {
     const ipHash = crypto.createHash('sha256').update(rawIp).digest('hex').slice(0, 16);
 
     const insertResult = await pool.query(
-      `INSERT INTO votes (user_id, candidate_id, period_id, category, sublocation, ip_hash, timestamp)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO votes (user_id, candidate_id, period_id, category, sublocation, ip_hash, timestamp, ward_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (user_id, period_id, category) DO NOTHING
        RETURNING id`,
-      [session.userId, candidateId, periodId, voteCategory, user?.sublocation || null, ipHash, Date.now()]
+      [session.userId, candidateId, periodId, voteCategory, user?.sublocation || null, ipHash, Date.now(), NGOLIBA_WARD_ID]
     );
 
     // If no row was inserted, a concurrent request already recorded a vote (race condition)
@@ -1854,10 +1947,10 @@ app.post('/api/admin/candidates', async (req, res) => {
     );
     const nextOrd = parseInt(maxOrd.rows[0].max_ord) + 1;
     const result = await pool.query(
-      `INSERT INTO candidates (name, party, bio, img, category, incumbent, display_order)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO candidates (name, party, bio, img, category, incumbent, display_order, ward_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', nextOrd]
+      [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', nextOrd, NGOLIBA_WARD_ID]
     );
     res.json({ success: true, candidate: result.rows[0] });
   } catch (err) {
@@ -2209,10 +2302,10 @@ app.post('/api/forum', async (req, res) => {
 
       const post = await pool.query(
         `INSERT INTO forum_posts
-           (title, content, author_id, author_name, author_phone, category, last_activity_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+           (title, content, author_id, author_name, author_phone, category, ward_id, last_activity_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
          RETURNING *`,
-        [autoTitle, safeText, u.id, author, session.phone, safeCategory]
+        [autoTitle, safeText, u.id, author, session.phone, safeCategory, NGOLIBA_WARD_ID]
       );
 
       res.json({ success: true, post: formatPost(post.rows[0]) });
@@ -2529,10 +2622,10 @@ app.post('/api/notices', async (req, res) => {
       return res.status(400).json({ success: false, error: 'title and content are required' });
     }
     const result = await pool.query(
-      `INSERT INTO notices (title, content, category, priority, expires_at, created_by)
-       VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL, 'admin')
+      `INSERT INTO notices (title, content, category, priority, expires_at, created_by, ward_id)
+       VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL, 'admin', $6)
        RETURNING *`,
-      [title, content, category || 'general', priority || 'normal', String(days || 30)]
+      [title, content, category || 'general', priority || 'normal', String(days || 30), NGOLIBA_WARD_ID]
     );
     res.json({ success: true, notice: result.rows[0] });
   } catch (error) {
@@ -2612,8 +2705,8 @@ app.post('/api/admin/notices', async (req, res) => {
   if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
   try {
     const result = await pool.query(
-      'INSERT INTO notices (title,content,category,priority,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [title, content, category||'general', priority||'normal', expiresAt||null, 'admin']
+      'INSERT INTO notices (title,content,category,priority,expires_at,created_by,ward_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [title, content, category||'general', priority||'normal', expiresAt||null, 'admin', NGOLIBA_WARD_ID]
     );
     res.json({ success: true, notice: result.rows[0] });
   } catch (err) {
