@@ -494,6 +494,7 @@ app.use((req, res, next) => {
     await ensureVotingPeriodsTable();  // ← must run BEFORE ensureActivePeriod so schema is ready
     await ensureActivePeriod();        // now a no-op alias for backward compat
     await ensureCandidatesTable();     // multi-category candidates (preserves MCA IDs 0-6)
+    await ensureGeographyTables();     // Phase 1: additive geographic foundation — no existing behaviour changes
   } else {
     console.warn('⚠️  Continuing without database. Some features may not work.');
   }
@@ -757,6 +758,85 @@ async function ensureCandidatesTable() {
     console.log('✅ candidates table ready');
   } catch (e) {
     console.error('❌ ensureCandidatesTable error:', e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PHASE 1: GEOGRAPHIC FOUNDATION — County / Constituency / Ward
+// Additive only. No existing tables, columns, or routes are modified.
+// Future phases will wire ward_id into users/votes — not this phase.
+// ══════════════════════════════════════════════════════════════════
+async function ensureGeographyTables() {
+  try {
+    // ── Create tables with named constraints (idempotent on re-run) ──
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS counties (
+        id         SERIAL PRIMARY KEY,
+        name       VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT counties_name_unique UNIQUE (name)
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS constituencies (
+        id         SERIAL PRIMARY KEY,
+        county_id  INT NOT NULL,
+        name       VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT constituencies_county_fk   FOREIGN KEY (county_id) REFERENCES counties(id),
+        CONSTRAINT constituencies_county_name UNIQUE (county_id, name)
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS wards (
+        id              SERIAL PRIMARY KEY,
+        constituency_id INT NOT NULL,
+        name            VARCHAR(100) NOT NULL,
+        created_at      TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT wards_constituency_fk   FOREIGN KEY (constituency_id) REFERENCES constituencies(id),
+        CONSTRAINT wards_constituency_name UNIQUE (constituency_id, name)
+      )
+    `);
+
+    // ── Indexes for FK look-up performance (idempotent) ──
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_constituencies_county_id ON constituencies(county_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_wards_constituency_id    ON wards(constituency_id)`);
+
+    // ── Seed: Kiambu County → Juja Constituency → Ngoliba Ward ──
+    // ON CONFLICT ensures running startup multiple times never creates duplicates.
+
+    await pool.query(`
+      INSERT INTO counties (name)
+      VALUES ('Kiambu')
+      ON CONFLICT ON CONSTRAINT counties_name_unique DO NOTHING
+    `);
+
+    await pool.query(`
+      INSERT INTO constituencies (county_id, name)
+      SELECT id, 'Juja'
+        FROM counties
+       WHERE name = 'Kiambu'
+      ON CONFLICT ON CONSTRAINT constituencies_county_name DO NOTHING
+    `);
+
+    await pool.query(`
+      INSERT INTO wards (constituency_id, name)
+      SELECT con.id, 'Ngoliba'
+        FROM constituencies con
+        JOIN counties       cty ON cty.id = con.county_id
+       WHERE cty.name = 'Kiambu'
+         AND con.name = 'Juja'
+      ON CONFLICT ON CONSTRAINT wards_constituency_name DO NOTHING
+    `);
+
+    console.log('✅ geography tables ready (counties / constituencies / wards)');
+  } catch (e) {
+    console.error('❌ ensureGeographyTables error:', e.message);
+    // Non-fatal: geography tables are Phase 1 foundation only.
+    // Existing functionality is unaffected if this fails.
   }
 }
 
@@ -3052,6 +3132,68 @@ app.get('/advanced-leaderboard', (req, res) => {
 });
 app.get('/admin-voting', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin-voting.html'));
+});
+
+// ══════════════════════════════════════════════════════════════════
+// PHASE 1: READ-ONLY GEOGRAPHIC ENDPOINTS
+// These are purely additive. They do not touch authentication,
+// session handling, voting, timers, candidates, or any existing route.
+// ══════════════════════════════════════════════════════════════════
+
+// GET /api/counties
+// Returns all counties ordered alphabetically.
+app.get('/api/counties', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, name, created_at FROM counties ORDER BY name ASC'
+    );
+    return res.json({ success: true, counties: result.rows });
+  } catch (e) {
+    console.error('[/api/counties] ERROR:', e.message);
+    return res.status(500).json({ success: false, error: 'Failed to fetch counties' });
+  }
+});
+
+// GET /api/constituencies
+// Optional query param: ?county_id=<integer>
+// Returns all constituencies, or only those belonging to a specific county.
+app.get('/api/constituencies', async (req, res) => {
+  try {
+    const { county_id } = req.query;
+    const result = county_id
+      ? await pool.query(
+          'SELECT id, county_id, name, created_at FROM constituencies WHERE county_id = $1 ORDER BY name ASC',
+          [parseInt(county_id, 10)]
+        )
+      : await pool.query(
+          'SELECT id, county_id, name, created_at FROM constituencies ORDER BY name ASC'
+        );
+    return res.json({ success: true, constituencies: result.rows });
+  } catch (e) {
+    console.error('[/api/constituencies] ERROR:', e.message);
+    return res.status(500).json({ success: false, error: 'Failed to fetch constituencies' });
+  }
+});
+
+// GET /api/wards
+// Optional query param: ?constituency_id=<integer>
+// Returns all wards, or only those belonging to a specific constituency.
+app.get('/api/wards', async (req, res) => {
+  try {
+    const { constituency_id } = req.query;
+    const result = constituency_id
+      ? await pool.query(
+          'SELECT id, constituency_id, name, created_at FROM wards WHERE constituency_id = $1 ORDER BY name ASC',
+          [parseInt(constituency_id, 10)]
+        )
+      : await pool.query(
+          'SELECT id, constituency_id, name, created_at FROM wards ORDER BY name ASC'
+        );
+    return res.json({ success: true, wards: result.rows });
+  } catch (e) {
+    console.error('[/api/wards] ERROR:', e.message);
+    return res.status(500).json({ success: false, error: 'Failed to fetch wards' });
+  }
 });
 
 // ── Catch-all: serve index.html for any unmatched GET ──
