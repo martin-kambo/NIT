@@ -813,7 +813,7 @@ async function ensureGeographyTables() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_constituencies_county_id ON constituencies(county_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_wards_constituency_id    ON wards(constituency_id)`);
 
-    // ── Seed: Kiambu County → Juja Constituency → Ngoliba Ward ──
+    // ── Seed: Kiambu County → Thika Town Constituency → Ngoliba Ward ──
     // ON CONFLICT ensures running startup multiple times never creates duplicates.
 
     await pool.query(`
@@ -824,7 +824,7 @@ async function ensureGeographyTables() {
 
     await pool.query(`
       INSERT INTO constituencies (county_id, name)
-      SELECT id, 'Juja'
+      SELECT id, 'Thika Town'
         FROM counties
        WHERE name = 'Kiambu'
       ON CONFLICT ON CONSTRAINT constituencies_county_name DO NOTHING
@@ -836,7 +836,7 @@ async function ensureGeographyTables() {
         FROM constituencies con
         JOIN counties       cty ON cty.id = con.county_id
        WHERE cty.name = 'Kiambu'
-         AND con.name = 'Juja'
+         AND con.name = 'Thika Town'
       ON CONFLICT ON CONSTRAINT wards_constituency_name DO NOTHING
     `);
 
@@ -890,14 +890,14 @@ async function ensurePhase2Migrations() {
     }
 
     // ── Step 2: Resolve the Ngoliba ward_id ──
-    // Depends on Phase 1 seed (Kiambu → Juja → Ngoliba) being present.
+    // Depends on Phase 1 seed (Kiambu → Thika Town → Ngoliba) being present.
     const wardRes = await pool.query(`
       SELECT w.id
         FROM wards        w
         JOIN constituencies con ON con.id = w.constituency_id
         JOIN counties       cty ON cty.id = con.county_id
        WHERE cty.name = 'Kiambu'
-         AND con.name = 'Juja'
+         AND con.name = 'Thika Town'
          AND w.name   = 'Ngoliba'
        LIMIT 1
     `);
@@ -1508,6 +1508,18 @@ app.post('/api/vote', async (req, res) => {
     if (voteCheck.rows.length > 0)
       return res.status(409).json({ error: `Already voted for ${voteCategory} this period`, alreadyVoted: true, category: voteCategory });
 
+    // ── DEPRECATED: votes.sublocation ──────────────────────────────────────
+    // Phase 2.5: votes.sublocation is deprecated as a geographic field.
+    // It is a freetext copy of users.sublocation at vote cast-time and has
+    // no FK constraint or hierarchy link. It can diverge from the user's
+    // actual geographic record if their profile is updated after voting.
+    //
+    // Geographic source of truth is now: votes.ward_id → wards → constituencies → counties
+    //
+    // DO NOT add new queries that filter or group by votes.sublocation.
+    // Phase 3 migration will replace sublocation-based analytics with ward_id joins.
+    // This read and the write below are retained for backward compatibility only.
+    // ────────────────────────────────────────────────────────────────────────
     const userResult = await pool.query(
       'SELECT sublocation FROM users WHERE id = $1',
       [session.userId]
@@ -1518,6 +1530,8 @@ app.post('/api/vote', async (req, res) => {
     const ipHash = crypto.createHash('sha256').update(rawIp).digest('hex').slice(0, 16);
 
     const insertResult = await pool.query(
+      // DEPRECATED: sublocation ($5) — kept for backward compat; ward_id ($8) is the authoritative geographic field.
+      // Phase 3: remove sublocation from this INSERT and from vote-based analytics queries.
       `INSERT INTO votes (user_id, candidate_id, period_id, category, sublocation, ip_hash, timestamp, ward_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (user_id, period_id, category) DO NOTHING
@@ -1600,6 +1614,8 @@ app.get('/api/polling-results', async (req, res) => {
 
     const period = periodResult.rows[0];
     const votesResult = await pool.query(
+    // DEPRECATED: votes.sublocation grouping — Phase 3 replaces with ward_id join.
+    // votes.sublocation is a freetext snapshot; ward_id is the authoritative geographic field.
       'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
       [period.id]
     );
@@ -1676,6 +1692,7 @@ app.get('/api/history', async (req, res) => {
     const periods = [];
     for (const period of periodsResult.rows) {
       const votesResult = await pool.query(
+        // DEPRECATED: votes.sublocation grouping — Phase 3 replaces with ward_id join.
         'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
         [period.id]
       );
@@ -2075,7 +2092,13 @@ app.get('/api/stats', async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════
 app.get('/api/analytics/dashboard', async (req, res) => {
   try {
-    const KNOWN_SUBLOCATIONS = ['Ngoliba', 'Gatiiguru', 'Kilimambogo', 'Magogoni'];
+    // ── Phase 2.5: KNOWN_SUBLOCATIONS removed ──────────────────────────────
+    // Previously: const KNOWN_SUBLOCATIONS = ['Ngoliba','Gatiiguru','Kilimambogo','Magogoni']
+    // That array silently excluded any sublocation not in the list.
+    // Replacement: derive sublocations live from the users table so new
+    // sublocations appear in the heatmap automatically with zero code changes.
+    // Heatmap shape, calculations, and API response format are unchanged.
+    // ────────────────────────────────────────────────────────────────────────
 
     // 1. Registered voters
     const votersRes = await pool.query('SELECT COUNT(*) AS count FROM users');
@@ -2108,7 +2131,7 @@ app.get('/api/analytics/dashboard', async (req, res) => {
       ? parseFloat(((votesThisCycle / registeredVoters) * 100).toFixed(1))
       : 0;
 
-    // 6. Registered voters per sublocation
+    // 6. Registered voters per sublocation — also used to derive heatmap sublocation list
     const subVotersRes = await pool.query(
       `SELECT COALESCE(sublocation, 'Unknown') AS sub, COUNT(*) AS cnt FROM users GROUP BY sublocation`
     );
@@ -2126,7 +2149,14 @@ app.get('/api/analytics/dashboard', async (req, res) => {
     subVotesRes.rows.forEach(r => { votesBySubLocation[r.sub] = parseInt(r.cnt); });
 
     // 8. Heatmap — per-sublocation accuracy
-    const heatmap = KNOWN_SUBLOCATIONS.map(sub => {
+    // Phase 2.5: sublocation list is now derived from registered users (step 6 above).
+    // Any sublocation present in the users table appears automatically — no hardcoded list.
+    // Excludes 'Unknown' (NULL users) from the heatmap as they carry no geographic meaning.
+    // Sorted alphabetically so order is stable and deterministic across restarts.
+    const derivedSublocations = Object.keys(votersBySubLocation)
+      .filter(sub => sub !== 'Unknown')
+      .sort();
+    const heatmap = derivedSublocations.map(sub => {
       const registered = votersBySubLocation[sub] || 0;
       const votes      = votesBySubLocation[sub]  || 0;
       const pct        = registered > 0 ? parseFloat(((votes / registered) * 100).toFixed(1)) : 0;
@@ -2805,6 +2835,11 @@ if (action === 'get_periods') {
   // ✅ GET USERS - Removed non-existent civic_score column
 if (action === 'get_users') {
   try {
+    // Phase 2.5 NOTE — admin user list currently shows users.sublocation (freetext, no FK).
+    // Current behavior: correct for single-ward deployment; sublocation is user-entered text.
+    // Phase 3 migration recommendation: add ward join to expose w.name, con.name, cty.name
+    // alongside sublocation so admins see the full verified hierarchy, not just freetext.
+    // No code change required here until Phase 3.
     const result = await pool.query('SELECT id, phone, first_name, surname, sublocation, created_at FROM users ORDER BY created_at DESC LIMIT 100');
     return res.json({ success: true, users: result.rows, total: result.rowCount });
   } catch (error) {
