@@ -1789,6 +1789,80 @@ app.get('/api/history', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════
+// ROUTE: GET /api/voting-results
+// Returns CUMULATIVE vote totals across ALL periods, joined to the
+// candidates table (DB-backed). Mirrors the contract previously served
+// by routes/voting.js so frontend consumers need no changes.
+//
+// Response shape:
+//   { success, data: { periodId, results[ candidateId, name, party, img, votes, percentage ], totalVotes, updatedAt } }
+//
+// Vote semantics: lifetime cumulative (no period filter) — identical to
+// the voting.js implementation which used SELECT … FROM votes GROUP BY candidate_id.
+// ════════════════════════════════════════════════
+app.get('/api/voting-results', async (req, res) => {
+  try {
+    // 1. Cumulative vote counts across ALL periods (no period filter)
+    const voteRes = await pool.query(`
+      SELECT   candidate_id,
+               COUNT(*) AS vote_count
+      FROM     votes
+      GROUP BY candidate_id
+    `);
+
+    // Build a lookup map: candidate_id (int) → vote_count (int)
+    const countMap = {};
+    let totalVotes = 0;
+    voteRes.rows.forEach(row => {
+      const id    = parseInt(row.candidate_id);
+      const count = parseInt(row.vote_count);
+      countMap[id] = count;
+      totalVotes  += count;
+    });
+
+    // 2. Fetch all MCA candidates from the DB (authoritative source)
+    const candRes = await pool.query(`
+      SELECT id, name, party, img
+      FROM   candidates
+      WHERE  category = 'MCA'
+      ORDER BY id
+    `);
+
+    // 3. Build results array — every candidate appears even with 0 votes
+    const results = candRes.rows.map(c => {
+      const votes = countMap[parseInt(c.id)] || 0;
+      return {
+        candidateId: parseInt(c.id),
+        name:        c.name,
+        party:       c.party  || '',
+        img:         c.img    || '',
+        votes,
+        percentage:  totalVotes > 0 ? ((votes / totalVotes) * 100).toFixed(1) : '0.0'
+      };
+    }).sort((a, b) => b.votes - a.votes);
+
+    // 4. Current active period id for cycle context (mirrors voting.js behaviour)
+    const periodRes = await pool.query(
+      `SELECT id FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
+    );
+    const periodId = periodRes.rows.length > 0 ? periodRes.rows[0].id : null;
+
+    return res.json({
+      success: true,
+      data: {
+        periodId,
+        results,
+        totalVotes,
+        updatedAt: new Date().toISOString()
+      }
+    });
+  } catch (e) {
+    console.error('[/api/voting-results] ERROR:', e.message);
+    return res.status(500).json({ success: false, error: 'Failed to fetch voting results' });
+  }
+});
+
+// ════════════════════════════════════════════════
 // ROUTE: GET /api/period-history
 // Returns completed voting periods with per-candidate vote totals.
 // Source of truth: voting_periods (is_active=false) + votes + candidates tables.

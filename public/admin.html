@@ -496,7 +496,7 @@ async function loadDashboard() {
       </div>`).join('');
 
   // Sublocation
-  const subs = data.votersBySublocation || {};
+  const subs = data.votersBySubLocation || {};
   const subNames = ['Ngoliba','Gatiiguru','Kilimambogo','Magogoni'];
   document.getElementById('sublocationStats').innerHTML = `
     <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
@@ -516,20 +516,22 @@ function updateTimer() {
 
 // ── PERIODS ──
 async function loadPeriods() {
-  const res = await fetch('/api/history?limit=10');
+  const res = await fetch('/api/period-history?limit=10');
   const data = await res.json();
   if (!data.periods) return;
   const tbody = document.getElementById('periodsTable');
   if (data.periods.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--mid-gray);padding:2rem;">No completed periods yet</td></tr>'; return; }
   tbody.innerHTML = data.periods.reverse().map(p => {
-    let winnerId = null, maxV = 0;
-    for (const [id, v] of Object.entries(p.votesByCandidate || {})) { if (v > maxV) { maxV = v; winnerId = id; } }
-    const winnerName = winnerId !== null ? (CANDIDATES.find(c => String(c.id) === String(winnerId))?.name || '—') : '—';
+    // Derive total votes and winner directly from candidates array (no CANDIDATES[] lookup needed)
+    const candidates = p.candidates || [];
+    const totalVotes = candidates.reduce((sum, c) => sum + (c.votes || 0), 0);
+    const winnerCandidate = candidates.reduce((best, c) => (c.votes || 0) > (best?.votes || 0) ? c : best, null);
+    const winnerName = winnerCandidate?.candidateName || '—';
     return `<tr>
       <td><span class="badge badge-blue">#${p.periodId}</span></td>
-      <td style="font-size:0.78rem;">${new Date(p.periodStart).toLocaleTimeString()}</td>
-      <td style="font-size:0.78rem;">${new Date(p.periodEnd).toLocaleTimeString()}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-weight:700;">${p.totalVotes}</td>
+      <td style="font-size:0.78rem;">${new Date(p.startDate).toLocaleTimeString()}</td>
+      <td style="font-size:0.78rem;">${new Date(p.endDate).toLocaleTimeString()}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:700;">${totalVotes}</td>
       <td><span class="badge badge-green">${winnerName}</span></td>
     </tr>`;
   }).join('');

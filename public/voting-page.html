@@ -524,19 +524,33 @@
 
     async function loadFaceOff() {
         try {
-            const res  = await fetch('/api/voting-results/face-off', { credentials: 'include' });
+            const res  = await fetch('/api/faceoff', { credentials: 'include' });
             const json = await res.json();
             if (!json.success) return;
-            renderFaceOff(json.data.top2, json.data.totalVotes);
+            // /api/faceoff returns json.candidates (top 2) with vote_count instead of votes.
+            // Normalise to the shape renderFaceOff expects so no other code needs to change.
+            const top2 = (json.candidates || []).map(c => ({
+                ...c,
+                votes: c.vote_count || 0
+            }));
+            renderFaceOff(top2, json.totalVotes);
         } catch (_) {}
     }
 
     async function loadVoteHistory() {
         try {
-            const res  = await fetch('/api/my-vote-history', { credentials: 'include' });
+            const res  = await fetch('/api/my-votes', { credentials: 'include' });
             const json = await res.json();
             if (!json.success) { renderHistoryEmpty(); return; }
-            renderHistory(json.data.history);
+            // /api/my-votes returns json.votes; normalise to the shape renderHistory expects
+            // so renderHistory itself needs no changes.
+            const history = (json.votes || []).map(entry => ({
+                cycleId:        entry.periodId,
+                candidateName:  entry.candidateName,
+                candidateParty: entry.candidateParty,
+                voteTimestamp:  entry.votedAt
+            }));
+            renderHistory(history);
         } catch (_) {
             renderHistoryEmpty();
         }
@@ -858,6 +872,20 @@
                 state.results = [];
                 await loadResults();
                 document.getElementById('periodId').textContent = data.period;
+                startTimer();
+                renderCandidates();
+                renderStandings();
+                showAlert('New voting cycle started!', 'success');
+            });
+
+            // period-rollover is the event server.js actually broadcasts on every
+            // period transition (manual via /api/period/next and automatic via
+            // setInterval / /api/webhook). The legacy new-period event originates
+            // from the shadowed voting.js route and never fires in production.
+            state.sseSource.addEventListener('period-rollover', async () => {
+                await loadPeriod();
+                state.results = [];
+                await loadResults();
                 startTimer();
                 renderCandidates();
                 renderStandings();
