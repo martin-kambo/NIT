@@ -693,7 +693,13 @@ async function ensureVotingPeriodsTable() {
 // ── Ensure Active Voting Period (legacy alias) ──
 // Superseded by ensureVotingPeriodsTable() — kept so the startup call still works.
 async function ensureActivePeriod() {
-  await ensureVotingPeriodsTable();
+  const existing = await pool.query(
+    'SELECT id FROM voting_periods WHERE is_active = true LIMIT 1'
+  );
+
+  if (existing.rows.length === 0) {
+    // create period
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
