@@ -528,6 +528,65 @@ app.use((req, res, next) => {
       if (new Date(period.period_end) > new Date()) return;
 
       console.log(`[auto-rollover] Period ${period.id} expired — rolling over`);
+
+      // ── Archive the expiring period ────────────────────────────────────────
+      const fullPeriodRes = await pool.query(
+        `SELECT * FROM voting_periods WHERE id = $1`, [period.id]
+      );
+      const fullPeriod = fullPeriodRes.rows[0] || period;
+
+      const cycleCountsRes = await pool.query(`
+        SELECT   candidate_id, COUNT(*) AS vote_count
+        FROM     votes
+        WHERE    period_id = $1
+        GROUP BY candidate_id
+        ORDER BY vote_count DESC
+        LIMIT    1
+      `, [period.id]);
+
+      let autoWinner = null;
+      if (cycleCountsRes.rows.length > 0) {
+        autoWinner = {
+          id:    parseInt(cycleCountsRes.rows[0].candidate_id),
+          votes: parseInt(cycleCountsRes.rows[0].vote_count)
+        };
+      }
+
+      if (autoWinner) {
+        await pool.query(
+          `UPDATE voting_periods SET winner_id = $1, winner_votes = $2 WHERE id = $3`,
+          [autoWinner.id, autoWinner.votes, period.id]
+        );
+      }
+
+      const sublocRes = await pool.query(`
+        SELECT sublocation, candidate_id, COUNT(*) AS vote_count
+        FROM   votes
+        WHERE  period_id = $1 AND sublocation IS NOT NULL
+        GROUP BY sublocation, candidate_id
+        ORDER BY sublocation, vote_count DESC
+      `, [period.id]);
+
+      const breakdown = {};
+      sublocRes.rows.forEach(row => {
+        if (!breakdown[row.sublocation]) breakdown[row.sublocation] = [];
+        breakdown[row.sublocation].push({ candidateId: parseInt(row.candidate_id), votes: parseInt(row.vote_count) });
+      });
+
+      await pool.query(`
+        INSERT INTO period_archives (id, period_data, winner_id, winner_votes, total_votes)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (id) DO NOTHING
+      `, [
+        period.id,
+        JSON.stringify({ ...fullPeriod, winner_id: autoWinner?.id ?? null, winner_votes: autoWinner?.votes ?? 0, total_votes: fullPeriod.total_votes, vote_breakdown: breakdown }),
+        autoWinner?.id    ?? null,
+        autoWinner?.votes ?? 0,
+        fullPeriod.total_votes
+      ]);
+      console.log(`[auto-rollover] Archived period ${period.id} (winner=${autoWinner?.id ?? 'none'})`);
+      // ── End archive ───────────────────────────────────────────────────────
+
       await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
       const now     = new Date();
       const endTime = new Date(now.getTime() + PERIOD_DURATION_MS);
@@ -3092,6 +3151,92 @@ app.post('/api/period/next', async (req, res) => {
   }
 
   try {
+    // ── Archive the closing period before deactivating it ──────────────────
+    const closingRes = await pool.query(
+      `SELECT * FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
+    );
+
+    let completedPeriodId = null;
+    let winner            = null;
+
+    if (closingRes.rows.length > 0) {
+      const closingPeriod   = closingRes.rows[0];
+      completedPeriodId = closingPeriod.id;
+
+      // Per-cycle winner (not cumulative — archive records per-cycle leaders)
+      const cycleCounts = await pool.query(`
+        SELECT   candidate_id,
+                 COUNT(*) AS vote_count
+        FROM     votes
+        WHERE    period_id = $1
+        GROUP BY candidate_id
+        ORDER BY vote_count DESC
+        LIMIT    1
+      `, [closingPeriod.id]);
+
+      if (cycleCounts.rows.length > 0) {
+        winner = {
+          id:    parseInt(cycleCounts.rows[0].candidate_id),
+          votes: parseInt(cycleCounts.rows[0].vote_count)
+        };
+      }
+
+      // Update winner columns on the closing period row
+      await pool.query(`
+        UPDATE voting_periods
+        SET    winner_id = $1, winner_votes = $2
+        WHERE  id = $3
+      `, [winner?.id ?? null, winner?.votes ?? 0, closingPeriod.id]);
+
+      // Sublocation breakdown for the closing period
+      const sublocRes = await pool.query(`
+        SELECT   sublocation,
+                 candidate_id,
+                 COUNT(*) AS vote_count
+        FROM     votes
+        WHERE    period_id   = $1
+          AND    sublocation IS NOT NULL
+        GROUP BY sublocation, candidate_id
+        ORDER BY sublocation, vote_count DESC
+      `, [closingPeriod.id]);
+
+      const breakdown = {};
+      sublocRes.rows.forEach(row => {
+        if (!breakdown[row.sublocation]) breakdown[row.sublocation] = [];
+        breakdown[row.sublocation].push({
+          candidateId: parseInt(row.candidate_id),
+          votes:       parseInt(row.vote_count)
+        });
+      });
+
+      // Write archive record (idempotent — ON CONFLICT DO NOTHING)
+      await pool.query(`
+        INSERT INTO period_archives (id, period_data, winner_id, winner_votes, total_votes)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (id) DO NOTHING
+      `, [
+        closingPeriod.id,
+        JSON.stringify({
+          ...closingPeriod,
+          winner_id:      winner?.id    ?? null,
+          winner_votes:   winner?.votes ?? 0,
+          total_votes:    closingPeriod.total_votes,
+          vote_breakdown: breakdown
+        }),
+        winner?.id    ?? null,
+        winner?.votes ?? 0,
+        closingPeriod.total_votes
+      ]);
+
+      console.log(`[/api/period/next] Archived period ${closingPeriod.id} (winner=${winner?.id ?? 'none'}, votes=${winner?.votes ?? 0})`);
+
+      broadcastVoteUpdate('period-ended', {
+        period:      completedPeriodId,
+        winner:      winner?.id,
+        winnerVotes: winner?.votes
+      });
+    }
+
     // Deactivate all currently active periods
     await pool.query('UPDATE voting_periods SET is_active = false WHERE is_active = true');
 
@@ -3228,7 +3373,65 @@ app.post('/api/webhook', async (req, res) => {
       return res.json({ success: true, message: 'Period still active', endsAt: period.period_end });
     }
 
-    // Period expired — roll over to a fresh 5-minute cycle
+    // Period expired — archive it, then roll over to a fresh 5-minute cycle
+    // ── Archive the expiring period ────────────────────────────────────────
+    const fullPeriodRes = await pool.query(
+      `SELECT * FROM voting_periods WHERE id = $1`, [period.id]
+    );
+    const fullPeriod = fullPeriodRes.rows[0] || period;
+
+    const wCycleCountsRes = await pool.query(`
+      SELECT   candidate_id, COUNT(*) AS vote_count
+      FROM     votes
+      WHERE    period_id = $1
+      GROUP BY candidate_id
+      ORDER BY vote_count DESC
+      LIMIT    1
+    `, [period.id]);
+
+    let webhookWinner = null;
+    if (wCycleCountsRes.rows.length > 0) {
+      webhookWinner = {
+        id:    parseInt(wCycleCountsRes.rows[0].candidate_id),
+        votes: parseInt(wCycleCountsRes.rows[0].vote_count)
+      };
+    }
+
+    if (webhookWinner) {
+      await pool.query(
+        `UPDATE voting_periods SET winner_id = $1, winner_votes = $2 WHERE id = $3`,
+        [webhookWinner.id, webhookWinner.votes, period.id]
+      );
+    }
+
+    const wSublocRes = await pool.query(`
+      SELECT sublocation, candidate_id, COUNT(*) AS vote_count
+      FROM   votes
+      WHERE  period_id = $1 AND sublocation IS NOT NULL
+      GROUP BY sublocation, candidate_id
+      ORDER BY sublocation, vote_count DESC
+    `, [period.id]);
+
+    const wBreakdown = {};
+    wSublocRes.rows.forEach(row => {
+      if (!wBreakdown[row.sublocation]) wBreakdown[row.sublocation] = [];
+      wBreakdown[row.sublocation].push({ candidateId: parseInt(row.candidate_id), votes: parseInt(row.vote_count) });
+    });
+
+    await pool.query(`
+      INSERT INTO period_archives (id, period_data, winner_id, winner_votes, total_votes)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (id) DO NOTHING
+    `, [
+      period.id,
+      JSON.stringify({ ...fullPeriod, winner_id: webhookWinner?.id ?? null, winner_votes: webhookWinner?.votes ?? 0, total_votes: fullPeriod.total_votes, vote_breakdown: wBreakdown }),
+      webhookWinner?.id    ?? null,
+      webhookWinner?.votes ?? 0,
+      fullPeriod.total_votes
+    ]);
+    console.log(`[webhook] Archived period ${period.id} (winner=${webhookWinner?.id ?? 'none'})`);
+    // ── End archive ───────────────────────────────────────────────────────
+
     await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
     const now     = new Date();
     const endTime = new Date(now.getTime() + 5 * 60 * 1000);
