@@ -128,18 +128,61 @@ function formatCumulativeResults(cumulativeCounts, candidates) {
 }
 
 /**
- * Candidate list (single source of truth — mirrors server.js CANDIDATES).
+ * Emergency fallback only — used solely if the candidates table is
+ * unreachable or empty (first-boot race condition). Mirrors the shape
+ * server.js's own CANDIDATES fallback uses for the same situation.
+ * NOT the source of truth; do not edit party/img data here expecting it
+ * to take effect — fix the candidates table instead.
  */
-function getCandidates() {
-    return [
-        { id: 0, name: 'Hon. James Mwangi', party: 'Jubilee',     incumbent: true,  bio: 'Incumbent MCA, serving second term.',  img: 'https://ui-avatars.com/api/?name=James+Mwangi&background=0d2818&color=40c27a&size=120' },
-        { id: 1, name: 'Grace Wanjiku',     party: 'ODM',         incumbent: false, bio: 'Community health advocate.',            img: 'https://ui-avatars.com/api/?name=Grace+Wanjiku&background=1a3f28&color=e9c46a&size=120' },
-        { id: 2, name: 'Peter Kimani',      party: 'UDA',         incumbent: false, bio: 'Former ward administrator.',            img: 'https://ui-avatars.com/api/?name=Peter+Kimani&background=2d6a4f&color=fff&size=120' },
-        { id: 3, name: 'Sarah Nduati',      party: 'Wiper',       incumbent: false, bio: 'Women rights campaigner.',              img: 'https://ui-avatars.com/api/?name=Sarah+Nduati&background=4361ee&color=fff&size=120' },
-        { id: 4, name: 'John Otieno',       party: 'ANC',         incumbent: false, bio: 'Youth empowerment champion.',           img: 'https://ui-avatars.com/api/?name=John+Otieno&background=e63946&color=fff&size=120' },
-        { id: 5, name: 'Mary Wambui',       party: 'Ford-K',      incumbent: false, bio: 'Education sector advocate.',            img: 'https://ui-avatars.com/api/?name=Mary+Wambui&background=c9a027&color=fff&size=120' },
-        { id: 6, name: 'David Kiprotich',   party: 'Independent', incumbent: false, bio: 'Farmer and entrepreneur.',              img: 'https://ui-avatars.com/api/?name=David+Kiprotich&background=6b7280&color=fff&size=120' }
-    ];
+const FALLBACK_CANDIDATES = [
+    { id: 0, name: 'Hon. James Mwangi', party: 'UDA (Incumbent)', img: 'https://randomuser.me/api/portraits/men/32.jpg' },
+    { id: 1, name: 'Grace Wanjiku',     party: 'Independent',     img: 'https://randomuser.me/api/portraits/women/68.jpg' },
+    { id: 2, name: 'Peter Kimani',      party: 'Jubilee',         img: 'https://randomuser.me/api/portraits/men/45.jpg' },
+    { id: 3, name: 'Sarah Nduati',      party: 'Wiper',           img: 'https://randomuser.me/api/portraits/women/22.jpg' },
+    { id: 4, name: 'John Otieno',       party: 'Independent',     img: 'https://randomuser.me/api/portraits/men/89.jpg' },
+    { id: 5, name: 'Mary Wambui',       party: 'Maendeleo',       img: 'https://randomuser.me/api/portraits/women/54.jpg' },
+    { id: 6, name: 'David Kiprotich',   party: 'Roots',           img: 'https://randomuser.me/api/portraits/men/99.jpg' }
+];
+
+/**
+ * Candidate list — now DB-backed (candidates table), matching the
+ * authoritative source already used by /api/candidates, /api/faceoff,
+ * /api/voting-results, and /api/period-history in server.js.
+ *
+ * Scope: filtered to category = 'MCA' to preserve existing behavior —
+ * /api/leaderboard and /api/voting-results/face-off were built assuming
+ * a single fixed candidate set, so widening to all categories would
+ * silently change what these routes return. Same convention /api/faceoff
+ * already uses for its own MCA-default fallback.
+ *
+ * Only selects the columns these two routes actually read (id, name,
+ * party, img) — no new fields are exposed beyond what formatCumulativeResults
+ * and the leaderboard's winner-lookup already use.
+ */
+async function getCandidates(pool) {
+    try {
+        const result = await pool.query(`
+            SELECT id, name, party, img
+            FROM   candidates
+            WHERE  category = 'MCA'
+            ORDER BY display_order, id
+        `);
+
+        if (result.rows.length > 0) {
+            return result.rows.map(c => ({
+                id:    parseInt(c.id),
+                name:  c.name,
+                party: c.party || '',
+                img:   c.img   || ''
+            }));
+        }
+    } catch (error) {
+        console.error('Error fetching candidates from DB, using fallback:', error.message);
+    }
+
+    // DB empty or unreachable — fall back so leaderboard/face-off degrade
+    // gracefully instead of returning empty data.
+    return FALLBACK_CANDIDATES;
 }
 
 // ─────────────────────────────────────────
@@ -180,7 +223,7 @@ router.get('/api/votes/stream', (req, res) => {
  */
 router.get('/api/leaderboard', async (req, res) => {
     try {
-        const candidates       = getCandidates();
+        const candidates       = await getCandidates(req.pool);
         const cumulativeCounts = await getCumulativeVoteCounts(req.pool);
         const results          = formatCumulativeResults(cumulativeCounts, candidates);
         const period           = await getCurrentPeriod(req.pool);
@@ -237,6 +280,34 @@ router.get('/api/voting-results/by-sublocation', async (req, res) => {
     } catch (error) {
         console.error('Error fetching sublocation breakdown:', error);
         res.status(500).json({ success: false, error: 'Failed to fetch sublocation breakdown' });
+    }
+});
+
+
+/**
+ * GET /api/voting-results/face-off
+ * Returns the top two candidates by cumulative votes for the Face-Off section.
+ * Restored 2026-06-16: confirmed live consumer in leaderboard.html (loadFaceOff,
+ * line 587) — was removed in error during the original voting-results/
+ * my-vote-history cleanup, before leaderboard.html had been audited.
+ */
+router.get('/api/voting-results/face-off', async (req, res) => {
+    try {
+        const candidates       = await getCandidates(req.pool);
+        const cumulativeCounts = await getCumulativeVoteCounts(req.pool);
+        const results          = formatCumulativeResults(cumulativeCounts, candidates);
+        const totalVotes       = results.reduce((s, r) => s + r.votes, 0);
+
+        const top2 = results.slice(0, 2).map(r => ({
+            ...r,
+            percentage: totalVotes > 0 ? ((r.votes / totalVotes) * 100).toFixed(1) : '0.0'
+        }));
+
+        res.json({ success: true, data: { top2, totalVotes } });
+
+    } catch (error) {
+        console.error('Error fetching face-off:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch face-off data' });
     }
 });
 

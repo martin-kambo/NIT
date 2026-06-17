@@ -491,6 +491,177 @@ app.use((req, res, next) => {
   next();
 });
 
+// ════════════════════════════════════════════════════════════════════════
+// SINGLE AUTHORITATIVE ROLLOVER PATH  (Phase 3 determinism hardening)
+// ════════════════════════════════════════════════════════════════════════
+// createArchiveAndRollPeriod() is the ONLY place that may:
+//   - read the active voting period
+//   - decide whether it has expired
+//   - write to period_archives
+//   - flip voting_periods.is_active
+//   - create the next voting_periods row
+//
+// Every trigger in this file (setInterval, /api/webhook, /api/period/next)
+// calls this exact function instead of duplicating the logic. This removes
+// the three near-identical copies that previously existed and that could
+// race against each other.
+//
+// IDEMPOTENCY GUARD (no schema changes — uses existing columns only):
+//   The whole check-and-roll sequence runs inside ONE Postgres transaction
+//   that opens with `SELECT ... FOR UPDATE` on the active period row. That
+//   row lock is the "database lock" — any second caller (interval tick,
+//   cron webhook, admin click) that targets the SAME period blocks at the
+//   FOR UPDATE statement until the first transaction COMMITs. By the time
+//   it unblocks, that period is no longer is_active (the first transaction
+//   already rolled it), so the second caller's own active-period lookup
+//   resolves to the freshly-created period instead — which is not expired —
+//   and it exits via the "not-expired" branch having written nothing.
+//   This makes double-archiving structurally impossible, regardless of how
+//   many triggers fire at the exact same instant.
+//
+// trigger_source values: 'interval' | 'webhook' | 'manual'
+async function createArchiveAndRollPeriod(pool, { triggerSource, force = false, durationMinutes = 5 } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Row-level lock on the current active period — this IS the concurrency guard.
+    const activeRes = await client.query(
+      `SELECT * FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1 FOR UPDATE`
+    );
+
+    if (activeRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { rolled: false, reason: 'no-active-period', triggerSource };
+    }
+
+    const period  = activeRes.rows[0];
+    const expired = new Date(period.period_end) <= new Date();
+
+    if (!force && !expired) {
+      await client.query('ROLLBACK');
+      return { rolled: false, reason: 'not-expired', periodId: period.id, endsAt: period.period_end, triggerSource };
+    }
+
+    // ── Atomic claim: only proceed if WE are the one flipping is_active. ──
+    // Defense-in-depth on top of the row lock above — belt and suspenders.
+    const claim = await client.query(
+      `UPDATE voting_periods SET is_active = false WHERE id = $1 AND is_active = true RETURNING id`,
+      [period.id]
+    );
+    if (claim.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { rolled: false, reason: 'already-claimed', periodId: period.id, endsAt: period.period_end, triggerSource };
+    }
+
+    // ── Per-cycle winner (unchanged business logic) ──
+    const cycleCounts = await client.query(`
+      SELECT   candidate_id, COUNT(*) AS vote_count
+      FROM     votes
+      WHERE    period_id = $1
+      GROUP BY candidate_id
+      ORDER BY vote_count DESC
+      LIMIT    1
+    `, [period.id]);
+
+    let winner = null;
+    if (cycleCounts.rows.length > 0) {
+      winner = {
+        id:    parseInt(cycleCounts.rows[0].candidate_id),
+        votes: parseInt(cycleCounts.rows[0].vote_count)
+      };
+      await client.query(
+        `UPDATE voting_periods SET winner_id = $1, winner_votes = $2 WHERE id = $3`,
+        [winner.id, winner.votes, period.id]
+      );
+    }
+
+    // ── Sublocation breakdown (unchanged business logic) ──
+    const sublocRes = await client.query(`
+      SELECT   sublocation, candidate_id, COUNT(*) AS vote_count
+      FROM     votes
+      WHERE    period_id = $1 AND sublocation IS NOT NULL
+      GROUP BY sublocation, candidate_id
+      ORDER BY sublocation, vote_count DESC
+    `, [period.id]);
+
+    const breakdown = {};
+    sublocRes.rows.forEach(row => {
+      if (!breakdown[row.sublocation]) breakdown[row.sublocation] = [];
+      breakdown[row.sublocation].push({
+        candidateId: parseInt(row.candidate_id),
+        votes:       parseInt(row.vote_count)
+      });
+    });
+
+    // ── Archive the closed period ──
+    const archiveInsert = await client.query(`
+      INSERT INTO period_archives (id, period_data, winner_id, winner_votes, total_votes)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (id) DO NOTHING
+      RETURNING id
+    `, [
+      period.id,
+      JSON.stringify({
+        ...period,
+        winner_id:      winner?.id    ?? null,
+        winner_votes:   winner?.votes ?? 0,
+        total_votes:    period.total_votes,
+        vote_breakdown: breakdown
+      }),
+      winner?.id    ?? null,
+      winner?.votes ?? 0,
+      period.total_votes
+    ]);
+    const archiveId = archiveInsert.rows[0]?.id ?? period.id; // ON CONFLICT still means "this id is the archive"
+
+    // ── Create the next period ──
+    const mins    = force ? Math.min(Math.max(parseInt(durationMinutes) || 5, 1), 60) : 5;
+    const now     = new Date();
+    const endTime = new Date(now.getTime() + mins * 60 * 1000);
+    const maxRes  = await client.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
+    const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
+    await client.query(
+      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
+         VALUES ($1, $2, $3, true, 0)`,
+      [nextId, now, endTime]
+    );
+
+    await client.query('COMMIT');
+
+    // ── Execution trace log (auditability requirement) ──
+    console.log(JSON.stringify({
+      event:          'period-rollover',
+      trigger_source: triggerSource,
+      period_id:      period.id,
+      archive_id:     archiveId,
+      new_period_id:  nextId,
+      winner_id:      winner?.id ?? null,
+      winner_votes:   winner?.votes ?? 0,
+      timestamp:      new Date().toISOString()
+    }));
+
+    broadcastVoteUpdate('period-rollover', { newPeriodId: nextId, endsAt: endTime });
+
+    return {
+      rolled:         true,
+      triggerSource,
+      completedPeriod: period.id,
+      archiveId,
+      winner,
+      newPeriod:      nextId,
+      endsAt:         endTime
+    };
+
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error(`[createArchiveAndRollPeriod:${triggerSource}] ERROR:`, e.message);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 
 // Initialize on startup — server only starts listening AFTER all migrations complete
 (async () => {
@@ -516,91 +687,21 @@ app.use((req, res, next) => {
     console.log(`\n🌐 Access the app at: http://localhost:${PORT}`);
   });
 
-  // ── Auto-rollover: check every 30s for expired periods and start a fresh 5-min cycle ──
-  const PERIOD_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+  // ── AUTHORITATIVE TRIGGER: check every 30s for expired periods and roll over. ──
+  // This in-process timer is the system's primary, self-contained rollover
+  // mechanism — it has no dependency on any external service being reachable
+  // or correctly configured. /api/webhook and /api/period/next below are now
+  // thin wrappers around the exact same createArchiveAndRollPeriod() call.
   setInterval(async () => {
     try {
-      const res = await pool.query(
-        `SELECT id, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
-      );
-      if (res.rows.length === 0) return;
-      const period = res.rows[0];
-      if (new Date(period.period_end) > new Date()) return;
-
-      console.log(`[auto-rollover] Period ${period.id} expired — rolling over`);
-
-      // ── Archive the expiring period ────────────────────────────────────────
-      const fullPeriodRes = await pool.query(
-        `SELECT * FROM voting_periods WHERE id = $1`, [period.id]
-      );
-      const fullPeriod = fullPeriodRes.rows[0] || period;
-
-      const cycleCountsRes = await pool.query(`
-        SELECT   candidate_id, COUNT(*) AS vote_count
-        FROM     votes
-        WHERE    period_id = $1
-        GROUP BY candidate_id
-        ORDER BY vote_count DESC
-        LIMIT    1
-      `, [period.id]);
-
-      let autoWinner = null;
-      if (cycleCountsRes.rows.length > 0) {
-        autoWinner = {
-          id:    parseInt(cycleCountsRes.rows[0].candidate_id),
-          votes: parseInt(cycleCountsRes.rows[0].vote_count)
-        };
+      const result = await createArchiveAndRollPeriod(pool, { triggerSource: 'interval' });
+      if (result.rolled) {
+        console.log(`[interval] Period ${result.completedPeriod} → archived (archive ${result.archiveId}); new period ${result.newPeriod}`);
       }
-
-      if (autoWinner) {
-        await pool.query(
-          `UPDATE voting_periods SET winner_id = $1, winner_votes = $2 WHERE id = $3`,
-          [autoWinner.id, autoWinner.votes, period.id]
-        );
-      }
-
-      const sublocRes = await pool.query(`
-        SELECT sublocation, candidate_id, COUNT(*) AS vote_count
-        FROM   votes
-        WHERE  period_id = $1 AND sublocation IS NOT NULL
-        GROUP BY sublocation, candidate_id
-        ORDER BY sublocation, vote_count DESC
-      `, [period.id]);
-
-      const breakdown = {};
-      sublocRes.rows.forEach(row => {
-        if (!breakdown[row.sublocation]) breakdown[row.sublocation] = [];
-        breakdown[row.sublocation].push({ candidateId: parseInt(row.candidate_id), votes: parseInt(row.vote_count) });
-      });
-
-      await pool.query(`
-        INSERT INTO period_archives (id, period_data, winner_id, winner_votes, total_votes)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (id) DO NOTHING
-      `, [
-        period.id,
-        JSON.stringify({ ...fullPeriod, winner_id: autoWinner?.id ?? null, winner_votes: autoWinner?.votes ?? 0, total_votes: fullPeriod.total_votes, vote_breakdown: breakdown }),
-        autoWinner?.id    ?? null,
-        autoWinner?.votes ?? 0,
-        fullPeriod.total_votes
-      ]);
-      console.log(`[auto-rollover] Archived period ${period.id} (winner=${autoWinner?.id ?? 'none'})`);
-      // ── End archive ───────────────────────────────────────────────────────
-
-      await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
-      const now     = new Date();
-      const endTime = new Date(now.getTime() + PERIOD_DURATION_MS);
-      const maxRes  = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
-      const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
-      await pool.query(
-        `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-           VALUES ($1, $2, $3, true, 0)`,
-        [nextId, now, endTime]
-      );
-      console.log(`[auto-rollover] New period ${nextId} started, ends ${endTime.toISOString()}`);
-      broadcastVoteUpdate('period-rollover', { newPeriodId: nextId, endsAt: endTime });
+      // result.rolled === false (not-expired / no-active-period) is the normal,
+      // silent case on most ticks — nothing to log.
     } catch (e) {
-      console.error('[auto-rollover] ERROR:', e.message);
+      console.error('[interval] ERROR:', e.message);
     }
   }, 30_000);
 
@@ -3213,126 +3314,41 @@ app.post('/api/ad-requests/:id/pay', async (req, res) => {
 
 // ════════════════════════════════════════════════
 // ROUTE: /api/period/next  — start a new voting cycle (admin only)
+// MANUAL WRAPPER around the single authoritative createArchiveAndRollPeriod().
+// force:true preserves the existing admin feature of ending a period early
+// (the auto interval/webhook path only rolls over once period_end has
+// actually passed) — that is the one intentional behavioral difference
+// between this trigger and the other two, and it is now expressed as a
+// parameter rather than a second copy of the rollover logic.
 // ════════════════════════════════════════════════
 app.post('/api/period/next', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
 
   const { durationMinutes } = req.body;
-  const raw  = parseInt(durationMinutes) || 5;
-  const mins = Math.min(Math.max(raw, 1), 60); // hard cap: 1 min ≤ duration ≤ 60 min
-  if (raw !== mins) {
-    console.warn(`[/api/period/next] durationMinutes ${raw} clamped to ${mins}`);
-  }
 
   try {
-    // ── Archive the closing period before deactivating it ──────────────────
-    const closingRes = await pool.query(
-      `SELECT * FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
-    );
+    const result = await createArchiveAndRollPeriod(pool, {
+      triggerSource: 'manual',
+      force: true,
+      durationMinutes
+    });
 
-    let completedPeriodId = null;
-    let winner            = null;
+    if (!result.rolled) {
+      // Practically unreachable with force:true unless there's truly no
+      // active period row at all — still handled cleanly rather than crashing.
+      return res.status(409).json({ success: false, error: result.reason });
+    }
 
-    if (closingRes.rows.length > 0) {
-      const closingPeriod   = closingRes.rows[0];
-      completedPeriodId = closingPeriod.id;
-
-      // Per-cycle winner (not cumulative — archive records per-cycle leaders)
-      const cycleCounts = await pool.query(`
-        SELECT   candidate_id,
-                 COUNT(*) AS vote_count
-        FROM     votes
-        WHERE    period_id = $1
-        GROUP BY candidate_id
-        ORDER BY vote_count DESC
-        LIMIT    1
-      `, [closingPeriod.id]);
-
-      if (cycleCounts.rows.length > 0) {
-        winner = {
-          id:    parseInt(cycleCounts.rows[0].candidate_id),
-          votes: parseInt(cycleCounts.rows[0].vote_count)
-        };
-      }
-
-      // Update winner columns on the closing period row
-      await pool.query(`
-        UPDATE voting_periods
-        SET    winner_id = $1, winner_votes = $2
-        WHERE  id = $3
-      `, [winner?.id ?? null, winner?.votes ?? 0, closingPeriod.id]);
-
-      // Sublocation breakdown for the closing period
-      const sublocRes = await pool.query(`
-        SELECT   sublocation,
-                 candidate_id,
-                 COUNT(*) AS vote_count
-        FROM     votes
-        WHERE    period_id   = $1
-          AND    sublocation IS NOT NULL
-        GROUP BY sublocation, candidate_id
-        ORDER BY sublocation, vote_count DESC
-      `, [closingPeriod.id]);
-
-      const breakdown = {};
-      sublocRes.rows.forEach(row => {
-        if (!breakdown[row.sublocation]) breakdown[row.sublocation] = [];
-        breakdown[row.sublocation].push({
-          candidateId: parseInt(row.candidate_id),
-          votes:       parseInt(row.vote_count)
-        });
-      });
-
-      // Write archive record (idempotent — ON CONFLICT DO NOTHING)
-      await pool.query(`
-        INSERT INTO period_archives (id, period_data, winner_id, winner_votes, total_votes)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (id) DO NOTHING
-      `, [
-        closingPeriod.id,
-        JSON.stringify({
-          ...closingPeriod,
-          winner_id:      winner?.id    ?? null,
-          winner_votes:   winner?.votes ?? 0,
-          total_votes:    closingPeriod.total_votes,
-          vote_breakdown: breakdown
-        }),
-        winner?.id    ?? null,
-        winner?.votes ?? 0,
-        closingPeriod.total_votes
-      ]);
-
-      console.log(`[/api/period/next] Archived period ${closingPeriod.id} (winner=${winner?.id ?? 'none'}, votes=${winner?.votes ?? 0})`);
-
+    if (result.winner) {
       broadcastVoteUpdate('period-ended', {
-        period:      completedPeriodId,
-        winner:      winner?.id,
-        winnerVotes: winner?.votes
+        period:      result.completedPeriod,
+        winner:      result.winner.id,
+        winnerVotes: result.winner.votes
       });
     }
 
-    // Deactivate all currently active periods
-    await pool.query('UPDATE voting_periods SET is_active = false WHERE is_active = true');
-
-    // Create the new period
-    const result = await pool.query(
-      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-       VALUES (
-         COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
-         NOW(),
-         NOW() + ($1 || ' minutes')::INTERVAL,
-         true,
-         0
-       )
-       RETURNING id, period_start, period_end`,
-      [String(mins)]
-    );
-
-    const newPeriod = result.rows[0];
-    console.log(`[/api/period/next] New period created: id=${newPeriod.id}, duration=${mins}min, ends=${newPeriod.period_end}`);
-    // Notify all connected SSE clients so their countdowns restart immediately
-    broadcastVoteUpdate('period-rollover', { newPeriodId: newPeriod.id, endsAt: newPeriod.period_end });
-    return res.json({ success: true, data: { newPeriod: newPeriod.id, endsAt: newPeriod.period_end } });
+    console.log(`[/api/period/next] New period created: id=${result.newPeriod}, ends=${result.endsAt}`);
+    return res.json({ success: true, data: { newPeriod: result.newPeriod, endsAt: result.endsAt } });
   } catch (e) {
     console.error('[/api/period/next] ERROR:', e.message);
     return res.status(500).json({ success: false, error: 'Failed to start new period' });
@@ -3423,8 +3439,18 @@ app.get('/api/voting-period', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════
-// ROUTE: /api/webhook  — called by cron-period-reset.js every minute
-// Checks if the active period has expired and rolls it over if so.
+// ROUTE: /api/webhook  — optional external ping (e.g. cron-period-reset.js)
+// BACKUP WRAPPER around the single authoritative createArchiveAndRollPeriod().
+//
+// This is intentionally NOT the authoritative trigger. The in-process
+// setInterval above already checks for expiry every 30s and needs nothing
+// external to function correctly. This endpoint exists purely as a
+// resilience net for platforms (e.g. Render free tier) where the process
+// can be put to sleep and an external ping is what wakes it back up — in
+// that scenario this fires the exact same guarded function the interval
+// would have fired anyway. The system's correctness no longer depends on
+// any external cron script reaching this URL on schedule; if it never
+// fires again, the interval alone keeps rollovers happening.
 // Protected by CRON_SECRET header to prevent unauthenticated calls.
 // ════════════════════════════════════════════════
 app.post('/api/webhook', async (req, res) => {
@@ -3434,91 +3460,22 @@ app.post('/api/webhook', async (req, res) => {
   }
 
   try {
-    const active = await pool.query(
-      `SELECT id, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
-    );
+    const result = await createArchiveAndRollPeriod(pool, { triggerSource: 'webhook' });
 
-    if (!active.rows.length) {
-      return res.json({ success: true, message: 'No active period' });
+    if (!result.rolled) {
+      if (result.reason === 'no-active-period') {
+        return res.json({ success: true, message: 'No active period' });
+      }
+      // not-expired / already-claimed — another trigger handled it, or it's not due yet
+      return res.json({ success: true, message: 'Period still active', endsAt: result.endsAt });
     }
 
-    const period = active.rows[0];
-    if (new Date(period.period_end) > new Date()) {
-      return res.json({ success: true, message: 'Period still active', endsAt: period.period_end });
-    }
-
-    // Period expired — archive it, then roll over to a fresh 5-minute cycle
-    // ── Archive the expiring period ────────────────────────────────────────
-    const fullPeriodRes = await pool.query(
-      `SELECT * FROM voting_periods WHERE id = $1`, [period.id]
-    );
-    const fullPeriod = fullPeriodRes.rows[0] || period;
-
-    const wCycleCountsRes = await pool.query(`
-      SELECT   candidate_id, COUNT(*) AS vote_count
-      FROM     votes
-      WHERE    period_id = $1
-      GROUP BY candidate_id
-      ORDER BY vote_count DESC
-      LIMIT    1
-    `, [period.id]);
-
-    let webhookWinner = null;
-    if (wCycleCountsRes.rows.length > 0) {
-      webhookWinner = {
-        id:    parseInt(wCycleCountsRes.rows[0].candidate_id),
-        votes: parseInt(wCycleCountsRes.rows[0].vote_count)
-      };
-    }
-
-    if (webhookWinner) {
-      await pool.query(
-        `UPDATE voting_periods SET winner_id = $1, winner_votes = $2 WHERE id = $3`,
-        [webhookWinner.id, webhookWinner.votes, period.id]
-      );
-    }
-
-    const wSublocRes = await pool.query(`
-      SELECT sublocation, candidate_id, COUNT(*) AS vote_count
-      FROM   votes
-      WHERE  period_id = $1 AND sublocation IS NOT NULL
-      GROUP BY sublocation, candidate_id
-      ORDER BY sublocation, vote_count DESC
-    `, [period.id]);
-
-    const wBreakdown = {};
-    wSublocRes.rows.forEach(row => {
-      if (!wBreakdown[row.sublocation]) wBreakdown[row.sublocation] = [];
-      wBreakdown[row.sublocation].push({ candidateId: parseInt(row.candidate_id), votes: parseInt(row.vote_count) });
+    return res.json({
+      success: true,
+      completedPeriod: result.completedPeriod,
+      newPeriod: result.newPeriod,
+      endsAt: result.endsAt
     });
-
-    await pool.query(`
-      INSERT INTO period_archives (id, period_data, winner_id, winner_votes, total_votes)
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (id) DO NOTHING
-    `, [
-      period.id,
-      JSON.stringify({ ...fullPeriod, winner_id: webhookWinner?.id ?? null, winner_votes: webhookWinner?.votes ?? 0, total_votes: fullPeriod.total_votes, vote_breakdown: wBreakdown }),
-      webhookWinner?.id    ?? null,
-      webhookWinner?.votes ?? 0,
-      fullPeriod.total_votes
-    ]);
-    console.log(`[webhook] Archived period ${period.id} (winner=${webhookWinner?.id ?? 'none'})`);
-    // ── End archive ───────────────────────────────────────────────────────
-
-    await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
-    const now     = new Date();
-    const endTime = new Date(now.getTime() + 5 * 60 * 1000);
-    const maxRes  = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
-    const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
-    await pool.query(
-      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-         VALUES ($1, $2, $3, true, 0)`,
-      [nextId, now, endTime]
-    );
-    console.log(`[webhook] Period ${period.id} rolled over → new period ${nextId}, ends ${endTime.toISOString()}`);
-    broadcastVoteUpdate('period-rollover', { newPeriodId: nextId, endsAt: endTime });
-    return res.json({ success: true, completedPeriod: period.id, newPeriod: nextId, endsAt: endTime });
   } catch (e) {
     console.error('[webhook] ERROR:', e.message);
     return res.status(500).json({ success: false, error: e.message });
