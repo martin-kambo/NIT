@@ -6,6 +6,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const analyticsEngine = require('../lib/analytics-engine');
+const { getCandidatesByCategory } = require('../lib/candidates');
 
 const router = express.Router();
 
@@ -14,18 +15,15 @@ const router = express.Router();
 // ─────────────────────────────────────────
 
 /**
- * Get candidate information
+ * Get candidate information.
+ * Phase 2.6C: this used to be a hardcoded array that NEVER touched the
+ * database — a second, permanent source of truth that could silently
+ * disagree with whatever the `candidates` table actually said. It now
+ * delegates to lib/candidates.js, the single canonical candidate source;
+ * the hardcoded data only survives as that module's last-resort fallback.
  */
-function getCandidates() {
-    return [
-        { id: 0, name: 'Hon. James Mwangi', party: 'UDA', incumbent: true },
-        { id: 1, name: 'Grace Wanjiku', party: 'Independent' },
-        { id: 2, name: 'Peter Kimani', party: 'Jubilee' },
-        { id: 3, name: 'Sarah Nduati', party: 'Wiper' },
-        { id: 4, name: 'John Otieno', party: 'Independent' },
-        { id: 5, name: 'Mary Wambui', party: 'Maendeleo' },
-        { id: 6, name: 'David Kiprotich', party: 'Roots' }
-    ];
+async function getCandidates(pool) {
+    return getCandidatesByCategory(pool, 'MCA');
 }
 
 /**
@@ -78,7 +76,7 @@ async function getCurrentPeriodVotes(pool) {
  */
 router.get('/api/analytics/leaders', async (req, res) => {
     try {
-        const candidates = getCandidates();
+        const candidates = await getCandidates(req.pool);
         const currentVotes = await getCurrentPeriodVotes(req.pool);
         const archives = await getAllPeriodArchives(req.pool);
 
@@ -148,7 +146,7 @@ router.get('/api/analytics/leaders', async (req, res) => {
  */
 router.get('/api/analytics/trends', async (req, res) => {
     try {
-        const candidates = getCandidates();
+        const candidates = await getCandidates(req.pool);
         const archives = await getAllPeriodArchives(req.pool);
 
         if (archives.length === 0) {
@@ -215,7 +213,7 @@ router.get('/api/analytics/candidate/:id', async (req, res) => {
             });
         }
 
-        const candidates = getCandidates();
+        const candidates = await getCandidates(req.pool);
         const candidate = candidates.find(c => c.id === candidateId);
         const archives = await getAllPeriodArchives(req.pool);
         const currentVotes = await getCurrentPeriodVotes(req.pool);
@@ -267,7 +265,7 @@ router.get('/api/analytics/stats', async (req, res) => {
     try {
         const archives = await getAllPeriodArchives(req.pool);
         const currentVotes = await getCurrentPeriodVotes(req.pool);
-        const candidates = getCandidates();
+        const candidates = await getCandidates(req.pool);
 
         const totalVotes = currentVotes.reduce((sum, v) => sum + v.votes, 0);
 
@@ -333,7 +331,7 @@ router.get('/api/analytics/stats', async (req, res) => {
  */
 router.get('/api/analytics/predict', async (req, res) => {
     try {
-        const candidates = getCandidates();
+        const candidates = await getCandidates(req.pool);
         const archives = await getAllPeriodArchives(req.pool);
 
         const predictions = candidates.map(candidate => {
@@ -391,7 +389,7 @@ router.get('/api/analytics/compare', async (req, res) => {
             });
         }
 
-        const candidates = getCandidates();
+        const candidates = await getCandidates(req.pool);
         const archives = await getAllPeriodArchives(req.pool);
         const currentVotes = await getCurrentPeriodVotes(req.pool);
 
@@ -466,7 +464,7 @@ router.post('/api/analytics/export', async (req, res) => {
         const { format = 'csv' } = req.body;
 
         if (format === 'csv') {
-            const candidates = getCandidates();
+            const candidates = await getCandidates(req.pool);
             const archives = await getAllPeriodArchives(req.pool);
             const currentVotes = await getCurrentPeriodVotes(req.pool);
 
@@ -482,7 +480,7 @@ router.post('/api/analytics/export', async (req, res) => {
             res.send(csv);
 
         } else if (format === 'json') {
-            const candidates = getCandidates();
+            const candidates = await getCandidates(req.pool);
             const archives = await getAllPeriodArchives(req.pool);
             const currentVotes = await getCurrentPeriodVotes(req.pool);
 

@@ -51,6 +51,8 @@ const axios = require('axios');
 
 // ── PHASE 2: Voting Router ──
 const votingRouterModule = require('./routes/voting');
+const { getAllCandidates, getCandidatesByCategory, FALLBACK_CANDIDATES } = require('./lib/candidates');
+const { transitionPeriod } = require('./lib/period-engine');
 const votingRouter          = votingRouterModule.router || votingRouterModule;
 const broadcastVoteUpdate   = votingRouterModule.broadcastVoteUpdate || function(){};
 
@@ -491,176 +493,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ════════════════════════════════════════════════════════════════════════
-// SINGLE AUTHORITATIVE ROLLOVER PATH  (Phase 3 determinism hardening)
-// ════════════════════════════════════════════════════════════════════════
-// createArchiveAndRollPeriod() is the ONLY place that may:
-//   - read the active voting period
-//   - decide whether it has expired
-//   - write to period_archives
-//   - flip voting_periods.is_active
-//   - create the next voting_periods row
-//
-// Every trigger in this file (setInterval, /api/webhook, /api/period/next)
-// calls this exact function instead of duplicating the logic. This removes
-// the three near-identical copies that previously existed and that could
-// race against each other.
-//
-// IDEMPOTENCY GUARD (no schema changes — uses existing columns only):
-//   The whole check-and-roll sequence runs inside ONE Postgres transaction
-//   that opens with `SELECT ... FOR UPDATE` on the active period row. That
-//   row lock is the "database lock" — any second caller (interval tick,
-//   cron webhook, admin click) that targets the SAME period blocks at the
-//   FOR UPDATE statement until the first transaction COMMITs. By the time
-//   it unblocks, that period is no longer is_active (the first transaction
-//   already rolled it), so the second caller's own active-period lookup
-//   resolves to the freshly-created period instead — which is not expired —
-//   and it exits via the "not-expired" branch having written nothing.
-//   This makes double-archiving structurally impossible, regardless of how
-//   many triggers fire at the exact same instant.
-//
-// trigger_source values: 'interval' | 'webhook' | 'manual'
-async function createArchiveAndRollPeriod(pool, { triggerSource, force = false, durationMinutes = 5 } = {}) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // Row-level lock on the current active period — this IS the concurrency guard.
-    const activeRes = await client.query(
-      `SELECT * FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1 FOR UPDATE`
-    );
-
-    if (activeRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return { rolled: false, reason: 'no-active-period', triggerSource };
-    }
-
-    const period  = activeRes.rows[0];
-    const expired = new Date(period.period_end) <= new Date();
-
-    if (!force && !expired) {
-      await client.query('ROLLBACK');
-      return { rolled: false, reason: 'not-expired', periodId: period.id, endsAt: period.period_end, triggerSource };
-    }
-
-    // ── Atomic claim: only proceed if WE are the one flipping is_active. ──
-    // Defense-in-depth on top of the row lock above — belt and suspenders.
-    const claim = await client.query(
-      `UPDATE voting_periods SET is_active = false WHERE id = $1 AND is_active = true RETURNING id`,
-      [period.id]
-    );
-    if (claim.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return { rolled: false, reason: 'already-claimed', periodId: period.id, endsAt: period.period_end, triggerSource };
-    }
-
-    // ── Per-cycle winner (unchanged business logic) ──
-    const cycleCounts = await client.query(`
-      SELECT   candidate_id, COUNT(*) AS vote_count
-      FROM     votes
-      WHERE    period_id = $1
-      GROUP BY candidate_id
-      ORDER BY vote_count DESC
-      LIMIT    1
-    `, [period.id]);
-
-    let winner = null;
-    if (cycleCounts.rows.length > 0) {
-      winner = {
-        id:    parseInt(cycleCounts.rows[0].candidate_id),
-        votes: parseInt(cycleCounts.rows[0].vote_count)
-      };
-      await client.query(
-        `UPDATE voting_periods SET winner_id = $1, winner_votes = $2 WHERE id = $3`,
-        [winner.id, winner.votes, period.id]
-      );
-    }
-
-    // ── Sublocation breakdown (unchanged business logic) ──
-    const sublocRes = await client.query(`
-      SELECT   sublocation, candidate_id, COUNT(*) AS vote_count
-      FROM     votes
-      WHERE    period_id = $1 AND sublocation IS NOT NULL
-      GROUP BY sublocation, candidate_id
-      ORDER BY sublocation, vote_count DESC
-    `, [period.id]);
-
-    const breakdown = {};
-    sublocRes.rows.forEach(row => {
-      if (!breakdown[row.sublocation]) breakdown[row.sublocation] = [];
-      breakdown[row.sublocation].push({
-        candidateId: parseInt(row.candidate_id),
-        votes:       parseInt(row.vote_count)
-      });
-    });
-
-    // ── Archive the closed period ──
-    const archiveInsert = await client.query(`
-      INSERT INTO period_archives (id, period_data, winner_id, winner_votes, total_votes)
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (id) DO NOTHING
-      RETURNING id
-    `, [
-      period.id,
-      JSON.stringify({
-        ...period,
-        winner_id:      winner?.id    ?? null,
-        winner_votes:   winner?.votes ?? 0,
-        total_votes:    period.total_votes,
-        vote_breakdown: breakdown
-      }),
-      winner?.id    ?? null,
-      winner?.votes ?? 0,
-      period.total_votes
-    ]);
-    const archiveId = archiveInsert.rows[0]?.id ?? period.id; // ON CONFLICT still means "this id is the archive"
-
-    // ── Create the next period ──
-    const mins    = force ? Math.min(Math.max(parseInt(durationMinutes) || 5, 1), 60) : 5;
-    const now     = new Date();
-    const endTime = new Date(now.getTime() + mins * 60 * 1000);
-    const maxRes  = await client.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
-    const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
-    await client.query(
-      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-         VALUES ($1, $2, $3, true, 0)`,
-      [nextId, now, endTime]
-    );
-
-    await client.query('COMMIT');
-
-    // ── Execution trace log (auditability requirement) ──
-    console.log(JSON.stringify({
-      event:          'period-rollover',
-      trigger_source: triggerSource,
-      period_id:      period.id,
-      archive_id:     archiveId,
-      new_period_id:  nextId,
-      winner_id:      winner?.id ?? null,
-      winner_votes:   winner?.votes ?? 0,
-      timestamp:      new Date().toISOString()
-    }));
-
-    broadcastVoteUpdate('period-rollover', { newPeriodId: nextId, endsAt: endTime });
-
-    return {
-      rolled:         true,
-      triggerSource,
-      completedPeriod: period.id,
-      archiveId,
-      winner,
-      newPeriod:      nextId,
-      endsAt:         endTime
-    };
-
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    console.error(`[createArchiveAndRollPeriod:${triggerSource}] ERROR:`, e.message);
-    throw e;
-  } finally {
-    client.release();
-  }
-}
+// transitionPeriod() now lives in ./lib/period-engine.js — see require at top of file.
 
 
 // Initialize on startup — server only starts listening AFTER all migrations complete
@@ -691,15 +524,15 @@ async function createArchiveAndRollPeriod(pool, { triggerSource, force = false, 
   // This in-process timer is the system's primary, self-contained rollover
   // mechanism — it has no dependency on any external service being reachable
   // or correctly configured. /api/webhook and /api/period/next below are now
-  // thin wrappers around the exact same createArchiveAndRollPeriod() call.
+  // thin wrappers around the exact same transitionPeriod() call.
   setInterval(async () => {
     try {
-      const result = await createArchiveAndRollPeriod(pool, { triggerSource: 'interval' });
-      if (result.rolled) {
+      const result = await transitionPeriod(pool, broadcastVoteUpdate, { triggerSource: 'interval', mode: 'auto' });
+      if (result.transitioned) {
         console.log(`[interval] Period ${result.completedPeriod} → archived (archive ${result.archiveId}); new period ${result.newPeriod}`);
       }
-      // result.rolled === false (not-expired / no-active-period) is the normal,
-      // silent case on most ticks — nothing to log.
+      // result.transitioned === false (not-expired / no-active-period) is the
+      // normal, silent case on most ticks — nothing to log.
     } catch (e) {
       console.error('[interval] ERROR:', e.message);
     }
@@ -798,18 +631,13 @@ async function ensureVotingPeriodsTable() {
 
     if (existing.rows.length === 0) {
       console.log('\ud83d\udcdd No active voting period — creating one...');
-      const now     = new Date();
-      const endTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
-
-      const maxIdRes = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
-      const nextId   = parseInt(maxIdRes.rows[0].maxid) + 1;
-
-      await pool.query(
-        `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-         VALUES ($1, $2, $3, true, 0)`,
-        [nextId, now, endTime]
-      );
-      console.log(`\u2705 Active voting period created (id=${nextId}, ends ${endTime.toISOString()})`);
+      const boot = await transitionPeriod(pool, broadcastVoteUpdate, { triggerSource: 'startup', mode: 'bootstrap' });
+      if (boot.transitioned) {
+        console.log(`\u2705 Active voting period created (id=${boot.newPeriod}, ends ${new Date(boot.endsAt).toISOString()})`);
+      } else {
+        // 'already-active' — a concurrent process won the bootstrap race; nothing to do.
+        console.log(`\u2139\ufe0f  Bootstrap skipped (${boot.reason}) — an active period already exists`);
+      }
     } else {
       const period = existing.rows[0];
       const now = new Date();
@@ -826,18 +654,16 @@ async function ensureVotingPeriodsTable() {
         } else {
           console.log(`⚠️  Period ${period.id} has expired — closing and creating new one`);
         }
-        await pool.query(`UPDATE voting_periods SET is_active = false WHERE id = $1`, [period.id]);
-
-        const endTime  = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
-        const maxIdRes = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
-        const nextId   = parseInt(maxIdRes.rows[0].maxid) + 1;
-
-        await pool.query(
-          `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-           VALUES ($1, $2, $3, true, 0)`,
-          [nextId, now, endTime]
-        );
-        console.log(`✅ Fresh voting period created (id=${nextId}, ends ${endTime.toISOString()})`);
+        // force:true here because period age was determined by wall-clock
+        // comparison above (isExpired/isTooLong), not by re-checking inside
+        // the transaction — transitionPeriod still re-validates the row
+        // under its own lock before doing anything.
+        const startupRoll = await transitionPeriod(pool, broadcastVoteUpdate, { triggerSource: 'startup', mode: 'force', force: true });
+        if (startupRoll.transitioned) {
+          console.log(`✅ Fresh voting period created (id=${startupRoll.newPeriod}, archived stale period ${startupRoll.completedPeriod} as archive ${startupRoll.archiveId})`);
+        } else {
+          console.log(`\u2139\ufe0f  Startup rollover skipped (${startupRoll.reason})`);
+        }
       } else {
         console.log(`✅ Active voting period OK (id=${period.id}, ends ${new Date(period.period_end).toISOString()})`);
       }
@@ -1269,49 +1095,25 @@ async function getNextVoterNumber() {
   return next;
 }
 
-const CANDIDATES = [
-  { id: 0, name: 'Hon. James Mwangi', party: 'UDA (Incumbent)', bio: 'Two-term MCA, water projects.',   img: 'https://randomuser.me/api/portraits/men/32.jpg',   incumbent: true },
-  { id: 1, name: 'Grace Wanjiku',     party: 'Independent',     bio: 'Teacher & community organizer.',  img: 'https://randomuser.me/api/portraits/women/68.jpg' },
-  { id: 2, name: 'Peter Kimani',      party: 'Jubilee',         bio: 'Agri-business entrepreneur.',      img: 'https://randomuser.me/api/portraits/men/45.jpg'   },
-  { id: 3, name: 'Sarah Nduati',      party: 'Wiper',           bio: 'Public health expert.',            img: 'https://randomuser.me/api/portraits/women/22.jpg' },
-  { id: 4, name: 'John Otieno',       party: 'Independent',     bio: 'Farmer cooperative leader.',       img: 'https://randomuser.me/api/portraits/men/89.jpg'   },
-  { id: 5, name: 'Mary Wambui',       party: 'Maendeleo',       bio: 'ICT & agribusiness graduate.',     img: 'https://randomuser.me/api/portraits/women/54.jpg' },
-  { id: 6, name: 'David Kiprotich',   party: 'Roots',           bio: 'Governance activist.',             img: 'https://randomuser.me/api/portraits/men/99.jpg'   }
-];
-
 // ════════════════════════════════════════════════
 // ROUTE: /api/candidates (PUBLIC - NO AUTH REQUIRED)
 // Supports ?category=MCA|MP|Governor|WomenRep
 // Defaults to all candidates when no category specified (backward compat)
+// Candidate data now comes exclusively from lib/candidates.js, which reads
+// the `candidates` table — no in-memory candidate list lives in this file
+// anymore (Phase 2.6C candidate fragmentation fix).
 // ════════════════════════════════════════════════
 app.get('/api/candidates', async (req, res) => {
   try {
     const { category } = req.query;
-    let result;
-    if (category) {
-      result = await pool.query(
-        `SELECT id, name, party, bio, img, category, incumbent
-           FROM candidates
-          WHERE category = $1
-          ORDER BY display_order, id`,
-        [category]
-      );
-    } else {
-      result = await pool.query(
-        `SELECT id, name, party, bio, img, category, incumbent
-           FROM candidates
-          ORDER BY category, display_order, id`
-      );
-    }
-
-    // If DB has no rows yet (first boot race condition), fall back to in-memory list
-    const candidates = result.rows.length > 0 ? result.rows : CANDIDATES.map(c => ({ ...c, category: 'MCA' }));
+    const candidates = category
+      ? await getCandidatesByCategory(pool, category)
+      : await getAllCandidates(pool);
 
     return res.json({ success: true, candidates });
   } catch (e) {
     console.error('/api/candidates error:', e);
-    // Fall back to in-memory for any DB error
-    return res.json({ success: true, candidates: CANDIDATES.map(c => ({ ...c, category: 'MCA' })) });
+    return res.json({ success: true, candidates: FALLBACK_CANDIDATES.map(c => ({ ...c, category: 'MCA' })) });
   }
 });
 
@@ -2127,20 +1929,15 @@ app.get('/api/my-votes', async (req, res) => {
         cr.rows.forEach(c => { candMap[c.id] = c; });
       } catch (_) {}
     }
-    // In-memory fallback for original MCA candidates
-    const CANDS_FALLBACK = [
-      { id: 0, name: 'Hon. James Mwangi', party: 'Jubilee',      category: 'MCA' },
-      { id: 1, name: 'Grace Wanjiku',     party: 'ODM',          category: 'MCA' },
-      { id: 2, name: 'Peter Kimani',      party: 'UDA',          category: 'MCA' },
-      { id: 3, name: 'Sarah Nduati',      party: 'Wiper',        category: 'MCA' },
-      { id: 4, name: 'John Otieno',       party: 'ANC',          category: 'MCA' },
-      { id: 5, name: 'Mary Wambui',       party: 'Ford-K',       category: 'MCA' },
-      { id: 6, name: 'David Kiprotich',   party: 'Independent',  category: 'MCA' }
-    ];
+    // In-memory fallback for original MCA candidates — single canonical
+    // source (lib/candidates.js). This used to be a fourth local copy with
+    // party affiliations that had drifted out of sync with every other
+    // candidate list in the codebase (Phase 2.6C finding).
+    const candsFallback = FALLBACK_CANDIDATES;
 
     const votes = result.rows.map(row => {
       const cid = parseInt(row.candidate_id);
-      const cand = candMap[cid] || CANDS_FALLBACK.find(c => c.id === cid) || {};
+      const cand = candMap[cid] || candsFallback.find(c => c.id === cid) || {};
       return {
         id:               row.id,
         candidateId:      parseInt(row.candidate_id),
@@ -2722,22 +2519,9 @@ app.get('/api/faceoff', async (req, res) => {
   try {
     const category = req.query.category || 'MCA';
 
-    // Load candidates for this category from DB
-    let candRes;
-    try {
-      candRes = await pool.query(
-        `SELECT id, name, party, bio, img, category, incumbent
-           FROM candidates
-          WHERE category = $1
-          ORDER BY display_order, id`,
-        [category]
-      );
-    } catch (_) { candRes = { rows: [] }; }
-
-    // Fallback to in-memory CANDIDATES if DB not ready / empty
-    const candidates = candRes.rows.length > 0
-      ? candRes.rows
-      : (category === 'MCA' ? CANDIDATES.map(c => ({ ...c, category: 'MCA' })) : []);
+    // Single canonical candidate source (lib/candidates.js) — same helper
+    // /api/candidates, routes/voting.js, and routes/analytics.js now use.
+    const candidates = await getCandidatesByCategory(pool, category);
 
     if (candidates.length === 0) {
       return res.json({ success: true, candidates: [], allCandidates: [], periodId: null, totalVotes: 0 });
@@ -3088,40 +2872,56 @@ if (action === 'get_users') {
   }
 }
 
-  // ✅ ADD PERIOD - uses minutes (1–60), never days; hard cap prevents runaway durations
+  // ✅ ADD PERIOD — WRAPPER around transitionPeriod(mode:'force'). No longer
+  // touches voting_periods directly; this used to bypass the archive engine
+  // entirely (Phase 2.6C finding). Now funnels through the same single
+  // control function as every other trigger, so the closing period (if any)
+  // is always archived before the new one opens.
 if (action === 'add_period') {
-  // Accept durationMinutes (preferred) or legacy durationDays field — always treat as minutes.
-  const raw = parseInt(req.body.durationMinutes ?? req.body.durationDays) || 5;
-  const mins = Math.min(Math.max(raw, 1), 60); // clamp: 1 min ≤ duration ≤ 60 min
-  if (raw !== mins) {
-    console.warn(`[add_period] durationMinutes ${raw} clamped to ${mins}`);
-  }
+  const durationMinutes = req.body.durationMinutes ?? req.body.durationDays; // legacy field name accepted, always treated as minutes
   try {
-    // Deactivate any currently active periods first
-    await pool.query('UPDATE voting_periods SET is_active = false WHERE is_active = true');
-    const result = await pool.query(
-      `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-       VALUES (
-         COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
-         NOW(), NOW() + ($1 || ' minutes')::INTERVAL, true, 0
-       )
-       RETURNING id, period_start, period_end, is_active, total_votes`,
-      [String(mins)]
-    );
-    console.log(`[add_period] New period created: id=${result.rows[0].id}, duration=${mins}min, ends=${result.rows[0].period_end}`);
-    return res.json({ success: true, period: result.rows[0] });
+    const result = await transitionPeriod(pool, broadcastVoteUpdate, {
+      triggerSource: 'admin',
+      mode: 'force',
+      force: true,
+      durationMinutes
+    });
+
+    if (!result.transitioned) {
+      return res.status(409).json({ success: false, error: result.reason });
+    }
+
+    console.log(`[add_period] New period created: id=${result.newPeriod}, ends=${result.endsAt}`);
+    return res.json({
+      success: true,
+      period: { id: result.newPeriod, period_end: result.endsAt, is_active: true, total_votes: 0 }
+    });
   } catch (error) {
     console.error('Error in add_period:', error.message);
     return res.status(500).json({ success: false, error: error.message });
   }
 }
-// ✅ END PERIOD
+// ✅ END PERIOD — WRAPPER around transitionPeriod(mode:'end'). Previously
+// flipped is_active straight to false with NO archive write (Phase 2.6C
+// finding — votes for that period were silently lost). Now always archives
+// before closing, and refuses to act if the given periodId isn't actually
+// the live active period (boundary guard against stale admin UI state).
 if (action === 'end_period') {
   const { periodId } = req.body;
   if (!periodId) return res.status(400).json({ success: false, error: 'Period ID required' });
   try {
-    await pool.query('UPDATE voting_periods SET is_active = false WHERE id = $1', [periodId]);
-    return res.json({ success: true });
+    const result = await transitionPeriod(pool, broadcastVoteUpdate, {
+      triggerSource: 'admin',
+      mode: 'end',
+      force: true,
+      periodId
+    });
+
+    if (!result.transitioned) {
+      return res.status(409).json({ success: false, error: result.reason });
+    }
+
+    return res.json({ success: true, archivedPeriod: result.completedPeriod, archiveId: result.archiveId });
   } catch (error) {
     console.error('Error in end_period:', error.message);
     return res.status(500).json({ success: false, error: error.message });
@@ -3314,12 +3114,12 @@ app.post('/api/ad-requests/:id/pay', async (req, res) => {
 
 // ════════════════════════════════════════════════
 // ROUTE: /api/period/next  — start a new voting cycle (admin only)
-// MANUAL WRAPPER around the single authoritative createArchiveAndRollPeriod().
-// force:true preserves the existing admin feature of ending a period early
-// (the auto interval/webhook path only rolls over once period_end has
-// actually passed) — that is the one intentional behavioral difference
-// between this trigger and the other two, and it is now expressed as a
-// parameter rather than a second copy of the rollover logic.
+// MANUAL WRAPPER around the single control function transitionPeriod().
+// mode:'force' preserves the existing admin feature of ending a period
+// early with a custom duration (the auto interval/webhook path only rolls
+// over once period_end has actually passed) — that is the one intentional
+// behavioral difference between this trigger and the automatic ones, now
+// expressed as a parameter rather than a second copy of the logic.
 // ════════════════════════════════════════════════
 app.post('/api/period/next', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
@@ -3327,13 +3127,14 @@ app.post('/api/period/next', async (req, res) => {
   const { durationMinutes } = req.body;
 
   try {
-    const result = await createArchiveAndRollPeriod(pool, {
+    const result = await transitionPeriod(pool, broadcastVoteUpdate, {
       triggerSource: 'manual',
+      mode: 'force',
       force: true,
       durationMinutes
     });
 
-    if (!result.rolled) {
+    if (!result.transitioned) {
       // Practically unreachable with force:true unless there's truly no
       // active period row at all — still handled cleanly rather than crashing.
       return res.status(409).json({ success: false, error: result.reason });
@@ -3371,22 +3172,20 @@ app.get('/api/voting-period', async (req, res) => {
         LIMIT 1`
     );
 
-    // 2. If none exists, auto-create one (safety net)
+    // 2. If none exists, auto-create one via the single control function (safety net)
     if (periodRes.rows.length === 0) {
-      console.warn('[voting-period] No active period found — creating one');
-      const now     = new Date();
-      const endTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
-      const maxRes  = await pool.query('SELECT COALESCE(MAX(id), 0) AS maxid FROM voting_periods');
-      const nextId  = parseInt(maxRes.rows[0].maxid) + 1;
-      await pool.query(
-        `INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-           VALUES ($1, $2, $3, true, 0)`,
-        [nextId, now, endTime]
-      );
-      periodRes = await pool.query(
-        `SELECT id, period_start, period_end, total_votes
-           FROM voting_periods WHERE id = $1`, [nextId]
-      );
+      console.warn('[voting-period] No active period found — bootstrapping one');
+      const boot = await transitionPeriod(pool, broadcastVoteUpdate, { triggerSource: 'safety-net', mode: 'bootstrap' });
+      const nextId = boot.transitioned ? boot.newPeriod : null;
+      periodRes = nextId
+        ? await pool.query(
+            `SELECT id, period_start, period_end, total_votes
+               FROM voting_periods WHERE id = $1`, [nextId]
+          )
+        : await pool.query(
+            `SELECT id, period_start, period_end, total_votes
+               FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1`
+          ); // boot.reason === 'already-active': a concurrent caller won the race, just re-read it
     }
 
     const period = periodRes.rows[0];
@@ -3440,7 +3239,7 @@ app.get('/api/voting-period', async (req, res) => {
 
 // ════════════════════════════════════════════════
 // ROUTE: /api/webhook  — optional external ping (e.g. cron-period-reset.js)
-// BACKUP WRAPPER around the single authoritative createArchiveAndRollPeriod().
+// BACKUP WRAPPER around the single control function transitionPeriod().
 //
 // This is intentionally NOT the authoritative trigger. The in-process
 // setInterval above already checks for expiry every 30s and needs nothing
@@ -3460,13 +3259,14 @@ app.post('/api/webhook', async (req, res) => {
   }
 
   try {
-    const result = await createArchiveAndRollPeriod(pool, { triggerSource: 'webhook' });
+    const result = await transitionPeriod(pool, broadcastVoteUpdate, { triggerSource: 'webhook', mode: 'auto' });
 
-    if (!result.rolled) {
+    if (!result.transitioned) {
       if (result.reason === 'no-active-period') {
         return res.json({ success: true, message: 'No active period' });
       }
-      // not-expired / already-claimed — another trigger handled it, or it's not due yet
+      // not-expired / already-claimed / archive-exists — another trigger
+      // handled it already, or it's not due yet.
       return res.json({ success: true, message: 'Period still active', endsAt: result.endsAt });
     }
 

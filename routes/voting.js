@@ -5,6 +5,8 @@
 
 const express = require('express');
 const crypto  = require('crypto');
+const { getCandidatesByCategory } = require('../lib/candidates');
+const { transitionPeriod } = require('../lib/period-engine');
 
 const router = express.Router();
 
@@ -31,7 +33,12 @@ function broadcastVoteUpdate(eventType, data) {
 // ─────────────────────────────────────────
 
 /**
- * Get or create current (active) voting period
+ * Get or create current (active) voting period.
+ * Phase 2.6C: the "no active period" branch used to INSERT directly —
+ * a hidden mutation path outside the period engine. It now delegates the
+ * actual creation to transitionPeriod(mode:'bootstrap'), the same single
+ * control function server.js uses, so there is still exactly one place
+ * in the whole system that can write a voting_periods row.
  */
 async function getCurrentPeriod(pool) {
     let result = await pool.query(`
@@ -43,18 +50,19 @@ async function getCurrentPeriod(pool) {
 
     if (result.rows.length > 0) return result.rows[0];
 
-    // No active period — create one
-    const periodStart = new Date();
-    const periodEnd   = new Date(periodStart.getTime() + 5 * 60 * 1000); // 5 minutes
+    // No active period — bootstrap one via the single control function.
+    const boot = await transitionPeriod(pool, broadcastVoteUpdate, {
+        triggerSource: 'leaderboard-read',
+        mode: 'bootstrap'
+    });
 
     result = await pool.query(`
-        INSERT INTO voting_periods (id, period_start, period_end, is_active, total_votes)
-        VALUES (
-            COALESCE((SELECT MAX(id) FROM voting_periods), 0) + 1,
-            $1, $2, true, 0
-        )
-        RETURNING id, period_start, period_end, total_votes
-    `, [periodStart, periodEnd]);
+        SELECT id, period_start, period_end, total_votes
+        FROM   voting_periods
+        WHERE  is_active = true
+        LIMIT  1
+    `); // re-read regardless of boot.transitioned — covers both "we created it"
+        // and "already-active" (a concurrent caller won the bootstrap race)
 
     return result.rows[0];
 }
@@ -128,61 +136,22 @@ function formatCumulativeResults(cumulativeCounts, candidates) {
 }
 
 /**
- * Emergency fallback only — used solely if the candidates table is
- * unreachable or empty (first-boot race condition). Mirrors the shape
- * server.js's own CANDIDATES fallback uses for the same situation.
- * NOT the source of truth; do not edit party/img data here expecting it
- * to take effect — fix the candidates table instead.
- */
-const FALLBACK_CANDIDATES = [
-    { id: 0, name: 'Hon. James Mwangi', party: 'UDA (Incumbent)', img: 'https://randomuser.me/api/portraits/men/32.jpg' },
-    { id: 1, name: 'Grace Wanjiku',     party: 'Independent',     img: 'https://randomuser.me/api/portraits/women/68.jpg' },
-    { id: 2, name: 'Peter Kimani',      party: 'Jubilee',         img: 'https://randomuser.me/api/portraits/men/45.jpg' },
-    { id: 3, name: 'Sarah Nduati',      party: 'Wiper',           img: 'https://randomuser.me/api/portraits/women/22.jpg' },
-    { id: 4, name: 'John Otieno',       party: 'Independent',     img: 'https://randomuser.me/api/portraits/men/89.jpg' },
-    { id: 5, name: 'Mary Wambui',       party: 'Maendeleo',       img: 'https://randomuser.me/api/portraits/women/54.jpg' },
-    { id: 6, name: 'David Kiprotich',   party: 'Roots',           img: 'https://randomuser.me/api/portraits/men/99.jpg' }
-];
-
-/**
- * Candidate list — now DB-backed (candidates table), matching the
- * authoritative source already used by /api/candidates, /api/faceoff,
- * /api/voting-results, and /api/period-history in server.js.
+ * Candidate list — delegates to lib/candidates.js, the single canonical
+ * candidate source (Phase 2.6C). This file no longer carries its own
+ * hardcoded fallback array; getCandidatesByCategory() already falls back
+ * to the shared FALLBACK_CANDIDATES constant if the DB is unreachable.
  *
  * Scope: filtered to category = 'MCA' to preserve existing behavior —
  * /api/leaderboard and /api/voting-results/face-off were built assuming
  * a single fixed candidate set, so widening to all categories would
- * silently change what these routes return. Same convention /api/faceoff
- * already uses for its own MCA-default fallback.
+ * silently change what these routes return.
  *
- * Only selects the columns these two routes actually read (id, name,
- * party, img) — no new fields are exposed beyond what formatCumulativeResults
- * and the leaderboard's winner-lookup already use.
+ * Trims to the columns these two routes actually read (id, name, party,
+ * img) — same shape callers here always expected.
  */
 async function getCandidates(pool) {
-    try {
-        const result = await pool.query(`
-            SELECT id, name, party, img
-            FROM   candidates
-            WHERE  category = 'MCA'
-            ORDER BY display_order, id
-        `);
-
-        if (result.rows.length > 0) {
-            return result.rows.map(c => ({
-                id:    parseInt(c.id),
-                name:  c.name,
-                party: c.party || '',
-                img:   c.img   || ''
-            }));
-        }
-    } catch (error) {
-        console.error('Error fetching candidates from DB, using fallback:', error.message);
-    }
-
-    // DB empty or unreachable — fall back so leaderboard/face-off degrade
-    // gracefully instead of returning empty data.
-    return FALLBACK_CANDIDATES;
+    const candidates = await getCandidatesByCategory(pool, 'MCA');
+    return candidates.map(c => ({ id: c.id, name: c.name, party: c.party, img: c.img }));
 }
 
 // ─────────────────────────────────────────
