@@ -490,6 +490,11 @@ async function testDBConnection() {
 
 app.use((req, res, next) => {
   req.pool = pool;
+  // Phase 2.6D Group 3: every route gets the current ward via req.wardId,
+  // the same pattern req.pool already uses. NGOLIBA_WARD_ID is resolved
+  // once in ensurePhase2Migrations() before app.listen() runs (line ~509
+  // above), so it is never null by the time a real request is served.
+  req.wardId = NGOLIBA_WARD_ID;
   next();
 });
 
@@ -1107,8 +1112,8 @@ app.get('/api/candidates', async (req, res) => {
   try {
     const { category } = req.query;
     const candidates = category
-      ? await getCandidatesByCategory(pool, category)
-      : await getAllCandidates(pool);
+      ? await getCandidatesByCategory(pool, category, req.wardId)
+      : await getAllCandidates(pool, req.wardId);
 
     return res.json({ success: true, candidates });
   } catch (e) {
@@ -1184,7 +1189,7 @@ app.post('/api/auth', authLimiter, async (req, res) => {
 
   // REGISTER
   if (action === 'register') {
-    const { firstName, surname, dob, sublocation, email, nationalId, language } = req.body;
+    const { firstName, surname, dob, sublocation, email, nationalId, language, wardId } = req.body;
 
     if (!phone || !password || !firstName || !surname)
       return res.status(400).json({ error: 'Phone, password, first name, and surname are required' });
@@ -1201,10 +1206,16 @@ app.post('/api/auth', authLimiter, async (req, res) => {
       const salt = crypto.randomBytes(16).toString('hex');
       const passwordHash = hashPassword(password, salt);
 
+      // Phase 3A Task 4: was hardcoded NGOLIBA_WARD_ID. wardId is now read
+      // from the request body (sent by index.html's new County→Constituency→
+      // Ward selector), falling back to NGOLIBA_WARD_ID so old clients that
+      // don't send it yet keep registering exactly as before.
+      const resolvedWardId = parseInt(wardId, 10) || NGOLIBA_WARD_ID;
+
       await pool.query(
         `INSERT INTO users (id, phone, first_name, surname, dob, sublocation, email, national_id, language, voter_number, password_hash, salt, ward_id, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())`,
-        [id, phone, firstName, surname, dob || null, sublocation || null, email || null, nationalId || null, language || 'en', voterNumber, passwordHash, salt, NGOLIBA_WARD_ID]
+        [id, phone, firstName, surname, dob || null, sublocation || null, email || null, nationalId || null, language || 'en', voterNumber, passwordHash, salt, resolvedWardId]
       );
 
       const sessionToken = createSession(phone, id, 7);
@@ -1515,9 +1526,21 @@ app.post('/api/vote', async (req, res) => {
     // total_votes counter removed — totalVotes is now counted live from the votes table
 
     // ── Count totals and per-candidate ────────────────────────────────────
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    // NOTE: this only fixes the query — the SSE broadcast below still fans
+    // out to every connected client regardless of ward (voteClients in
+    // routes/voting.js isn't partitioned by ward at the connection level).
+    // That's a separate, larger change than "filter the read query" and
+    // wasn't attempted here.
+    const totalParams = [periodId];
+    let totalWardClause = '';
+    if (req.wardId != null) {
+      totalParams.push(req.wardId);
+      totalWardClause = 'AND ward_id = $2';
+    }
     const totalRes = await pool.query(
-      'SELECT COUNT(*) as count FROM votes WHERE period_id = $1',
-      [periodId]
+      `SELECT COUNT(*) as count FROM votes WHERE period_id = $1 ${totalWardClause}`,
+      totalParams
     );
     const voterCount = parseInt(totalRes.rows[0].count);
 
@@ -1527,23 +1550,32 @@ app.post('/api/vote', async (req, res) => {
     else if (voterCount === 3) badge = '3rd';
 
     // Per-candidate counts for faceoff / live display
+    const perCandParams = [periodId];
+    let perCandWardClause = '';
+    if (req.wardId != null) {
+      perCandParams.push(req.wardId);
+      perCandWardClause = 'AND ward_id = $2';
+    }
     const perCandRes = await pool.query(
-      'SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
-      [periodId]
+      `SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 ${perCandWardClause} GROUP BY candidate_id`,
+      perCandParams
     );
     const votesByCandidate = {};
     perCandRes.rows.forEach(r => {
       votesByCandidate[r.candidate_id] = parseInt(r.vote_count);
     });
 
-    // ── Broadcast to every SSE subscriber (faceoff, voting-page live tab) ──
+    // ── Broadcast to SSE subscribers in THIS ward only (Phase 2.6E) ──────
+    // Was a global broadcast to every connected client regardless of ward;
+    // now targeted via the third (optional) wardId argument added to
+    // broadcastVoteUpdate in routes/voting.js.
     broadcastVoteUpdate('vote-received', {
       candidateId,
       periodId,
       totalVotes: voterCount,
       votes: votesByCandidate[candidateId] || 1,
       votesByCandidate
-    });
+    }, req.wardId);
 
     return res.json({
       success: true,
@@ -1581,11 +1613,18 @@ app.get('/api/polling-results', async (req, res) => {
     }
 
     const period = periodResult.rows[0];
+    // Phase 2.6D Group 3: this is the ward_id join the old comment below
+    // said "Phase 3" would add — votes.sublocation stays as a freetext
+    // display value, ward_id is now the actual filter.
+    const votesParams = [period.id];
+    let votesWardClause = '';
+    if (req.wardId != null) {
+      votesParams.push(req.wardId);
+      votesWardClause = 'AND ward_id = $2';
+    }
     const votesResult = await pool.query(
-    // DEPRECATED: votes.sublocation grouping — Phase 3 replaces with ward_id join.
-    // votes.sublocation is a freetext snapshot; ward_id is the authoritative geographic field.
-      'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
-      [period.id]
+      `SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 ${votesWardClause} GROUP BY candidate_id, sublocation`,
+      votesParams
     );
 
     // Check which categories the authenticated user has voted in this period
@@ -1619,8 +1658,14 @@ app.get('/api/polling-results', async (req, res) => {
     });
 
     // Live count — always accurate regardless of deletes or restores
+    const liveTotalParams = [period.id];
+    let liveTotalWardClause = '';
+    if (req.wardId != null) {
+      liveTotalParams.push(req.wardId);
+      liveTotalWardClause = 'AND ward_id = $2';
+    }
     const liveTotalRes = await pool.query(
-      'SELECT COUNT(*) AS count FROM votes WHERE period_id = $1', [period.id]
+      `SELECT COUNT(*) AS count FROM votes WHERE period_id = $1 ${liveTotalWardClause}`, liveTotalParams
     );
     const liveTotalVotes = parseInt(liveTotalRes.rows[0].count || 0);
 
@@ -1659,13 +1704,20 @@ app.get('/api/history', async (req, res) => {
     
     const periods = [];
     for (const period of periodsResult.rows) {
+      // Phase 2.6D Group 3: ward_id join, same as /api/polling-results above.
+      const votesParams = [period.id];
+      let votesWardClause = '';
+      if (req.wardId != null) {
+        votesParams.push(req.wardId);
+        votesWardClause = 'AND ward_id = $2';
+      }
       const votesResult = await pool.query(
-        // DEPRECATED: votes.sublocation grouping — Phase 3 replaces with ward_id join.
-        'SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 GROUP BY candidate_id, sublocation',
-        [period.id]
+        `SELECT candidate_id, sublocation, COUNT(*) as count FROM votes WHERE period_id = $1 ${votesWardClause} GROUP BY candidate_id, sublocation`,
+        votesParams
       );
-      
+
       const votesByCandidate = {};
+      let periodTotalVotes = 0;
       votesResult.rows.forEach(row => {
         if (!votesByCandidate[row.candidate_id]) {
           votesByCandidate[row.candidate_id] = { total: 0, sublocations: {} };
@@ -1673,13 +1725,19 @@ app.get('/api/history', async (req, res) => {
         const count = parseInt(row.count);
         votesByCandidate[row.candidate_id].total += count;
         votesByCandidate[row.candidate_id].sublocations[row.sublocation || 'Unknown'] = count;
+        periodTotalVotes += count;
       });
-      
+
       periods.push({
         periodId: period.id,
         periodStart: period.period_start,
         periodEnd: period.period_end,
-        totalVotes: period.total_votes,
+        // Phase 2.6D Group 3: was period.total_votes (the global per-period
+        // counter incremented by EVERY ward combined — voting_periods has
+        // no ward_id column, see lib/period-engine.js). Now the sum of the
+        // ward-filtered rows above, so it's actually filterable. Identical
+        // number today (one ward); correct once a second ward exists.
+        totalVotes: req.wardId != null ? periodTotalVotes : period.total_votes,
         votesByCandidate: votesByCandidate
       });
     }
@@ -1705,13 +1763,25 @@ app.get('/api/history', async (req, res) => {
 // ════════════════════════════════════════════════
 app.get('/api/voting-results', async (req, res) => {
   try {
+    const category = req.query.category || 'MCA';
+
     // 1. Cumulative vote counts across ALL periods (no period filter)
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set —
+    // defense-in-depth on top of the candidate-list join below (candidate
+    // ids never collide across wards, so the join alone already isolates).
+    const voteParams = [];
+    let voteWardClause = '';
+    if (req.wardId != null) {
+      voteParams.push(req.wardId);
+      voteWardClause = `WHERE ward_id = $${voteParams.length}`;
+    }
     const voteRes = await pool.query(`
       SELECT   candidate_id,
                COUNT(*) AS vote_count
       FROM     votes
+      ${voteWardClause}
       GROUP BY candidate_id
-    `);
+    `, voteParams);
 
     // Build a lookup map: candidate_id (int) → vote_count (int)
     const countMap = {};
@@ -1723,13 +1793,24 @@ app.get('/api/voting-results', async (req, res) => {
       totalVotes  += count;
     });
 
-    // 2. Fetch all MCA candidates from the DB (authoritative source)
+    // 2. Fetch candidates for the requested category from the DB (authoritative source)
+    // Phase 2.6D: this used to be hardcoded to category = 'MCA' with no
+    // parameter at all — ?category= now defaults to MCA so existing
+    // callers keep the exact same behavior.
+    // Phase 2.6D Group 3: also filtered by ward_id when req.wardId is set.
+    const candParams = [category];
+    let candWardClause = '';
+    if (req.wardId != null) {
+      candParams.push(req.wardId);
+      candWardClause = 'AND ward_id = $2';
+    }
     const candRes = await pool.query(`
       SELECT id, name, party, img
       FROM   candidates
-      WHERE  category = 'MCA'
+      WHERE  category = $1
+      ${candWardClause}
       ORDER BY id
-    `);
+    `, candParams);
 
     // 3. Build results array — every candidate appears even with 0 votes
     const results = candRes.rows.map(c => {
@@ -1753,6 +1834,7 @@ app.get('/api/voting-results', async (req, res) => {
     return res.json({
       success: true,
       data: {
+        category,
         periodId,
         results,
         totalVotes,
@@ -1789,8 +1871,16 @@ app.get('/api/period-history', async (req, res) => {
     }
 
     // Fetch all candidates once (id, name, category) to avoid N+1 lookups
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    const candParams = [];
+    let candWardClause = '';
+    if (req.wardId != null) {
+      candParams.push(req.wardId);
+      candWardClause = 'WHERE ward_id = $1';
+    }
     const candResult = await pool.query(
-      `SELECT id, name, category FROM candidates ORDER BY id`
+      `SELECT id, name, category FROM candidates ${candWardClause} ORDER BY id`,
+      candParams
     );
     const candidateMap = {};
     candResult.rows.forEach(c => { candidateMap[c.id] = c; });
@@ -1798,12 +1888,21 @@ app.get('/api/period-history', async (req, res) => {
     const periods = [];
     for (const period of periodsResult.rows) {
       // Aggregate votes per candidate for this period
+      // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set —
+      // defense-in-depth on top of the candidateMap join above.
+      const voteParams = [period.id];
+      let voteWardClause = '';
+      if (req.wardId != null) {
+        voteParams.push(req.wardId);
+        voteWardClause = 'AND ward_id = $2';
+      }
       const votesResult = await pool.query(
         `SELECT candidate_id, COUNT(*) AS vote_count
            FROM votes
           WHERE period_id = $1
+          ${voteWardClause}
           GROUP BY candidate_id`,
-        [period.id]
+        voteParams
       );
 
       const candidates = votesResult.rows.map(row => {
@@ -1990,9 +2089,13 @@ app.get('/api/admin/candidates', async (req, res) => {
 // POST /api/admin/candidates — add a new candidate
 app.post('/api/admin/candidates', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
-  const { name, party, bio, img, category, incumbent } = req.body;
+  const { name, party, bio, img, category, incumbent, wardId } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ success: false, error: 'name is required' });
   const cat = CANDIDATE_CATEGORIES.includes(category) ? category : 'MCA';
+  // Phase 3A Task 6: was hardcoded NGOLIBA_WARD_ID. wardId now read from
+  // body (sent by admin.html's new County→Constituency→Ward selector),
+  // falling back so existing calls that don't send it keep working.
+  const resolvedWardId = parseInt(wardId, 10) || NGOLIBA_WARD_ID;
   try {
     // display_order = 1 + current max within category
     const maxOrd = await pool.query(
@@ -2004,7 +2107,7 @@ app.post('/api/admin/candidates', async (req, res) => {
       `INSERT INTO candidates (name, party, bio, img, category, incumbent, display_order, ward_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', nextOrd, NGOLIBA_WARD_ID]
+      [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', nextOrd, resolvedWardId]
     );
     res.json({ success: true, candidate: result.rows[0] });
   } catch (err) {
@@ -2016,17 +2119,32 @@ app.post('/api/admin/candidates', async (req, res) => {
 // PUT /api/admin/candidates/:id — edit an existing candidate
 app.put('/api/admin/candidates/:id', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
-  const { name, party, bio, img, category, incumbent } = req.body;
+  const { name, party, bio, img, category, incumbent, wardId } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ success: false, error: 'name is required' });
   const cat = CANDIDATE_CATEGORIES.includes(category) ? category : 'MCA';
   try {
-    const result = await pool.query(
-      `UPDATE candidates
-          SET name=$1, party=$2, bio=$3, img=$4, category=$5, incumbent=$6
-        WHERE id=$7
-        RETURNING *`,
-      [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', req.params.id]
-    );
+    // Phase 3A Task 7: ward_id is only updated when wardId is supplied in
+    // the request — omitting it (as every pre-existing caller does) leaves
+    // the candidate's ward exactly as it was, so existing edits keep
+    // working unchanged.
+    const parsedWardId = parseInt(wardId, 10);
+    const hasWardId = !isNaN(parsedWardId);
+
+    const result = hasWardId
+      ? await pool.query(
+          `UPDATE candidates
+              SET name=$1, party=$2, bio=$3, img=$4, category=$5, incumbent=$6, ward_id=$7
+            WHERE id=$8
+            RETURNING *`,
+          [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', parsedWardId, req.params.id]
+        )
+      : await pool.query(
+          `UPDATE candidates
+              SET name=$1, party=$2, bio=$3, img=$4, category=$5, incumbent=$6
+            WHERE id=$7
+            RETURNING *`,
+          [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', req.params.id]
+        );
     if (!result.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
     res.json({ success: true, candidate: result.rows[0] });
   } catch (err) {
@@ -2068,7 +2186,14 @@ app.use((err, req, res, next) => {
 // GET /api/stats - Return voting statistics
 app.get('/api/stats', async (req, res) => {
   try {
-    const votersResult = await pool.query('SELECT COUNT(*) as count FROM users');
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    const votersParams = [];
+    let votersWardClause = '';
+    if (req.wardId != null) {
+      votersParams.push(req.wardId);
+      votersWardClause = 'WHERE ward_id = $1';
+    }
+    const votersResult = await pool.query(`SELECT COUNT(*) as count FROM users ${votersWardClause}`, votersParams);
     const registeredVoters = parseInt(votersResult.rows[0].count || 0);
 
     const periodResult = await pool.query(
@@ -2078,9 +2203,15 @@ app.get('/api/stats', async (req, res) => {
 
     const votesByCandidate = {};
     if (period) {
+      const votesParams = [period.id];
+      let votesWardClause = '';
+      if (req.wardId != null) {
+        votesParams.push(req.wardId);
+        votesWardClause = 'AND ward_id = $2';
+      }
       const votesResult = await pool.query(
-        'SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 GROUP BY candidate_id',
-        [period.id]
+        `SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 ${votesWardClause} GROUP BY candidate_id`,
+        votesParams
       );
       votesResult.rows.forEach(row => {
         votesByCandidate[row.candidate_id] = parseInt(row.vote_count);
@@ -2088,9 +2219,16 @@ app.get('/api/stats', async (req, res) => {
     }
 
     // Real sublocation breakdown from users table
+    const sublocParams = [];
+    let sublocWardClause = '';
+    if (req.wardId != null) {
+      sublocParams.push(req.wardId);
+      sublocWardClause = 'WHERE ward_id = $1';
+    }
     const sublocResult = await pool.query(
       `SELECT COALESCE(sublocation, 'Unknown') as sublocation, COUNT(*) as count
-       FROM users GROUP BY sublocation`
+       FROM users ${sublocWardClause} GROUP BY sublocation`,
+      sublocParams
     );
     const votersBySubLocation = {};
     sublocResult.rows.forEach(r => { votersBySubLocation[r.sublocation] = parseInt(r.count); });
@@ -2098,8 +2236,14 @@ app.get('/api/stats', async (req, res) => {
     // Live count for current period
     let statsTotalVotes = 0;
     if (period) {
+      const statsTotalParams = [period.id];
+      let statsTotalWardClause = '';
+      if (req.wardId != null) {
+        statsTotalParams.push(req.wardId);
+        statsTotalWardClause = 'AND ward_id = $2';
+      }
       const statsTotalRes = await pool.query(
-        'SELECT COUNT(*) AS count FROM votes WHERE period_id = $1', [period.id]
+        `SELECT COUNT(*) AS count FROM votes WHERE period_id = $1 ${statsTotalWardClause}`, statsTotalParams
       );
       statsTotalVotes = parseInt(statsTotalRes.rows[0].count || 0);
     }
@@ -2138,7 +2282,14 @@ app.get('/api/analytics/dashboard', async (req, res) => {
     // ────────────────────────────────────────────────────────────────────────
 
     // 1. Registered voters
-    const votersRes = await pool.query('SELECT COUNT(*) AS count FROM users');
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    const votersParams = [];
+    let votersWardClause = '';
+    if (req.wardId != null) {
+      votersParams.push(req.wardId);
+      votersWardClause = 'WHERE ward_id = $1';
+    }
+    const votersRes = await pool.query(`SELECT COUNT(*) AS count FROM users ${votersWardClause}`, votersParams);
     const registeredVoters = parseInt(votersRes.rows[0].count || 0);
 
     // 2. Active period
@@ -2149,17 +2300,36 @@ app.get('/api/analytics/dashboard', async (req, res) => {
     const periodId = period ? period.id : null;
 
     // 3. Votes this cycle — live count from votes table (authoritative)
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
     let votesThisCycle = 0;
     if (periodId !== null) {
+      const cycleParams = [periodId];
+      let cycleWardClause = '';
+      if (req.wardId != null) {
+        cycleParams.push(req.wardId);
+        cycleWardClause = 'AND ward_id = $2';
+      }
       const cycleRes = await pool.query(
-        'SELECT COUNT(*) AS count FROM votes WHERE period_id = $1', [periodId]
+        `SELECT COUNT(*) AS count FROM votes WHERE period_id = $1 ${cycleWardClause}`, cycleParams
       );
       votesThisCycle = parseInt(cycleRes.rows[0].count || 0);
     }
 
     // 4. All-time total votes across every period
+    // Phase 2.6D Group 3: voting_periods.total_votes is a per-period counter
+    // incremented by EVERY ward's votes combined (voting_periods has no
+    // ward_id column — periods are global by design, see GEO_TABLES above).
+    // That makes it structurally impossible to filter. Reading directly
+    // from the votes table instead gives the identical number today (one
+    // ward) and becomes correctly filterable once a second ward exists.
+    const allTimeParams = [];
+    let allTimeWardClause = '';
+    if (req.wardId != null) {
+      allTimeParams.push(req.wardId);
+      allTimeWardClause = 'WHERE ward_id = $1';
+    }
     const allTimeRes = await pool.query(
-      'SELECT COALESCE(SUM(total_votes), 0) AS total FROM voting_periods'
+      `SELECT COUNT(*) AS total FROM votes ${allTimeWardClause}`, allTimeParams
     );
     const allTimeVotes = parseInt(allTimeRes.rows[0].total || 0);
 
@@ -2169,19 +2339,36 @@ app.get('/api/analytics/dashboard', async (req, res) => {
       : 0;
 
     // 6. Registered voters per sublocation — also used to derive heatmap sublocation list
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    const subVotersParams = [];
+    let subVotersWardClause = '';
+    if (req.wardId != null) {
+      subVotersParams.push(req.wardId);
+      subVotersWardClause = 'WHERE ward_id = $1';
+    }
     const subVotersRes = await pool.query(
-      `SELECT COALESCE(sublocation, 'Unknown') AS sub, COUNT(*) AS cnt FROM users GROUP BY sublocation`
+      `SELECT COALESCE(sublocation, 'Unknown') AS sub, COUNT(*) AS cnt FROM users ${subVotersWardClause} GROUP BY sublocation`,
+      subVotersParams
     );
     const votersBySubLocation = {};
     subVotersRes.rows.forEach(r => { votersBySubLocation[r.sub] = parseInt(r.cnt); });
 
     // 7. Votes per sublocation in current period
-    const subVotesRes = periodId !== null
-      ? await pool.query(
-          `SELECT COALESCE(sublocation, 'Unknown') AS sub, COUNT(*) AS cnt
-           FROM votes WHERE period_id = $1 GROUP BY sublocation`, [periodId]
-        )
-      : { rows: [] };
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    let subVotesRes = { rows: [] };
+    if (periodId !== null) {
+      const subVotesParams = [periodId];
+      let subVotesWardClause = '';
+      if (req.wardId != null) {
+        subVotesParams.push(req.wardId);
+        subVotesWardClause = 'AND ward_id = $2';
+      }
+      subVotesRes = await pool.query(
+        `SELECT COALESCE(sublocation, 'Unknown') AS sub, COUNT(*) AS cnt
+         FROM votes WHERE period_id = $1 ${subVotesWardClause} GROUP BY sublocation`,
+        subVotesParams
+      );
+    }
     const votesBySubLocation = {};
     subVotesRes.rows.forEach(r => { votesBySubLocation[r.sub] = parseInt(r.cnt); });
 
@@ -2204,14 +2391,22 @@ app.get('/api/analytics/dashboard', async (req, res) => {
     //    Shows votes cast in the last 24 hours, bucketed by local hour
     let hourlyVotes = [];
     try {
+      const hourlyParams = [];
+      let hourlyWardClause = '';
+      if (req.wardId != null) {
+        hourlyParams.push(req.wardId);
+        hourlyWardClause = `AND ward_id = $${hourlyParams.length}`;
+      }
       const hourlyRes = await pool.query(
         `SELECT
            EXTRACT(HOUR FROM (to_timestamp(timestamp::bigint / 1000) + INTERVAL '3 hours')) AS hr,
            COUNT(*) AS cnt
          FROM votes
          WHERE timestamp::bigint >= (EXTRACT(EPOCH FROM (NOW() - INTERVAL '24 hours')) * 1000)
+         ${hourlyWardClause}
          GROUP BY hr
-         ORDER BY hr`
+         ORDER BY hr`,
+        hourlyParams
       );
       const hrMap = {};
       hourlyRes.rows.forEach(r => { hrMap[parseInt(r.hr)] = parseInt(r.cnt); });
@@ -2226,16 +2421,28 @@ app.get('/api/analytics/dashboard', async (req, res) => {
     }
 
     // 10. AI Prediction — leading candidate by cumulative all-category votes
+    // Phase 2.6D fix: this query had a `WHERE c.category = 'MCA'` filter
+    // that directly contradicted its own comment and every other section
+    // of this route (registered voters, votes this cycle, heatmap, hourly
+    // votes) — none of which filter by category at all. Removed so the
+    // prediction widget is consistent with the rest of the dashboard.
     let prediction = { leader: null, confidence: 50 };
     try {
+      const predParams = [];
+      let predWardClause = '';
+      if (req.wardId != null) {
+        predParams.push(req.wardId);
+        predWardClause = `WHERE c.ward_id = $${predParams.length}`;
+      }
       const allVotesRes = await pool.query(
         `SELECT v.candidate_id, COUNT(*) AS cnt, c.name
          FROM votes v
          JOIN candidates c ON c.id = v.candidate_id
-         WHERE c.category = 'MCA'
+         ${predWardClause}
          GROUP BY v.candidate_id, c.name
          ORDER BY cnt DESC
-         LIMIT 2`
+         LIMIT 2`,
+        predParams
       );
       if (allVotesRes.rows.length > 0) {
         const top    = allVotesRes.rows[0];
@@ -2310,25 +2517,79 @@ app.get('/api/forum', async (req, res) => {
     const cat = req.query.category;
     const validCat = cat && FORUM_CATEGORIES.includes(cat) ? cat : null;
 
-    const result = validCat
-      ? await pool.query(
-          `SELECT * FROM forum_posts
-            WHERE COALESCE(is_deleted, false) = false
-              AND COALESCE(is_hidden,  false) = false
-              AND category = $1
-            ORDER BY last_activity_at DESC LIMIT 60`,
-          [validCat]
-        )
-      : await pool.query(
-          `SELECT * FROM forum_posts
-            WHERE COALESCE(is_deleted, false) = false
-              AND COALESCE(is_hidden,  false) = false
-            ORDER BY last_activity_at DESC LIMIT 60`
-        );
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    const forumParams = [];
+    let forumWhere = `COALESCE(is_deleted, false) = false AND COALESCE(is_hidden, false) = false`;
+    if (validCat) {
+      forumParams.push(validCat);
+      forumWhere += ` AND category = $${forumParams.length}`;
+    }
+    if (req.wardId != null) {
+      forumParams.push(req.wardId);
+      forumWhere += ` AND ward_id = $${forumParams.length}`;
+    }
+    const result = await pool.query(
+      `SELECT * FROM forum_posts
+        WHERE ${forumWhere}
+        ORDER BY last_activity_at DESC LIMIT 60`,
+      forumParams
+    );
 
     res.json({ success: true, posts: result.rows.map(formatPost) });
   } catch (error) {
     console.error('GET /api/forum error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to get forum posts' });
+  }
+});
+
+// GET /api/admin/forum-posts — Phase 3A Task 12. Admin-only, backend
+// support only — no corresponding UI is built in this phase, per the
+// explicit instruction not to invent new admin pages. A future
+// forum-moderation panel would consume this. Mirrors get_users' filter
+// priority (wardId > constituencyId > countyId) for consistency.
+app.get('/api/admin/forum-posts', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  try {
+    const { wardId, constituencyId, countyId } = req.query;
+    const params = [];
+    let whereClause = '';
+    if (wardId != null) {
+      params.push(parseInt(wardId, 10));
+      whereClause = `WHERE p.ward_id = $${params.length}`;
+    } else if (constituencyId != null) {
+      params.push(parseInt(constituencyId, 10));
+      whereClause = `WHERE w.constituency_id = $${params.length}`;
+    } else if (countyId != null) {
+      params.push(parseInt(countyId, 10));
+      whereClause = `WHERE con.county_id = $${params.length}`;
+    }
+
+    const result = await pool.query(
+      `SELECT p.*,
+              w.name   AS ward_name,
+              con.name AS constituency_name,
+              cty.name AS county_name
+         FROM forum_posts p
+         LEFT JOIN wards         w   ON w.id = p.ward_id
+         LEFT JOIN constituencies con ON con.id = w.constituency_id
+         LEFT JOIN counties      cty ON cty.id = con.county_id
+         ${whereClause}
+         ORDER BY p.created_at DESC
+         LIMIT 100`,
+      params
+    );
+    res.json({
+      success: true,
+      posts: result.rows.map(p => ({
+        ...formatPost(p),
+        wardName: p.ward_name,
+        constituencyName: p.constituency_name,
+        countyName: p.county_name
+      })),
+      total: result.rowCount
+    });
+  } catch (error) {
+    console.error('GET /api/admin/forum-posts error:', error.message);
     res.status(500).json({ success: false, error: 'Failed to get forum posts' });
   }
 });
@@ -2358,21 +2619,27 @@ app.post('/api/forum', async (req, res) => {
     const safeText = trimmed.replace(/<[^>]*>/g, '');
 
     try {
+      // Phase 3A Task 10: was hardcoded NGOLIBA_WARD_ID, ignoring the
+      // author's own ward entirely. ward_id is NOT accepted from the
+      // client (trust boundary) — it's derived from the author's own
+      // users row, with NGOLIBA_WARD_ID only as a null-safety fallback
+      // (shouldn't occur post-backfill, but never insert a null ward_id).
       const user = await pool.query(
-        'SELECT id, first_name, surname, profile_photo FROM users WHERE id = $1',
+        'SELECT id, first_name, surname, profile_photo, ward_id FROM users WHERE id = $1',
         [session.userId]
       );
       if (!user.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
       const u = user.rows[0];
       const author = `${u.first_name} ${u.surname}`.trim() || 'Anonymous';
       const autoTitle = title?.trim() || safeText.slice(0, 80);
+      const authorWardId = u.ward_id || NGOLIBA_WARD_ID;
 
       const post = await pool.query(
         `INSERT INTO forum_posts
            (title, content, author_id, author_name, author_phone, category, ward_id, last_activity_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
          RETURNING *`,
-        [autoTitle, safeText, u.id, author, session.phone, safeCategory, NGOLIBA_WARD_ID]
+        [autoTitle, safeText, u.id, author, session.phone, safeCategory, authorWardId]
       );
 
       res.json({ success: true, post: formatPost(post.rows[0]) });
@@ -2418,14 +2685,21 @@ app.post('/api/forum', async (req, res) => {
     try {
       const cat = req.body.category;
       const validCat = cat && FORUM_CATEGORIES.includes(cat) ? cat : null;
-      const result = validCat
-        ? await pool.query(
-            `SELECT * FROM forum_posts WHERE COALESCE(is_deleted,false)=false AND COALESCE(is_hidden,false)=false AND category=$1 ORDER BY last_activity_at DESC LIMIT 60`,
-            [validCat]
-          )
-        : await pool.query(
-            `SELECT * FROM forum_posts WHERE COALESCE(is_deleted,false)=false AND COALESCE(is_hidden,false)=false ORDER BY last_activity_at DESC LIMIT 60`
-          );
+      // Phase 2.6D Group 3: same ward_id filtering as GET /api/forum above.
+      const lpParams = [];
+      let lpWhere = `COALESCE(is_deleted,false)=false AND COALESCE(is_hidden,false)=false`;
+      if (validCat) {
+        lpParams.push(validCat);
+        lpWhere += ` AND category=$${lpParams.length}`;
+      }
+      if (req.wardId != null) {
+        lpParams.push(req.wardId);
+        lpWhere += ` AND ward_id=$${lpParams.length}`;
+      }
+      const result = await pool.query(
+        `SELECT * FROM forum_posts WHERE ${lpWhere} ORDER BY last_activity_at DESC LIMIT 60`,
+        lpParams
+      );
       res.json({ success: true, posts: result.rows.map(formatPost) });
     } catch (error) {
       console.error('POST /api/forum list_posts error:', error.message);
@@ -2521,20 +2795,30 @@ app.get('/api/faceoff', async (req, res) => {
 
     // Single canonical candidate source (lib/candidates.js) — same helper
     // /api/candidates, routes/voting.js, and routes/analytics.js now use.
-    const candidates = await getCandidatesByCategory(pool, category);
+    const candidates = await getCandidatesByCategory(pool, category, req.wardId);
 
     if (candidates.length === 0) {
       return res.json({ success: true, candidates: [], allCandidates: [], periodId: null, totalVotes: 0 });
     }
 
     // Cumulative vote counts for this category's candidates
+    // Phase 2.6D Group 3: ward_id filter added as defense-in-depth on top
+    // of the candidate_id = ANY($1) filter, which already disambiguates
+    // since candidate ids never collide across wards.
     const candidateIds = candidates.map(c => c.id);
+    const voteParams = [candidateIds];
+    let voteWardClause = '';
+    if (req.wardId != null) {
+      voteParams.push(req.wardId);
+      voteWardClause = 'AND ward_id = $2';
+    }
     const allVotes = await pool.query(
       `SELECT candidate_id, COUNT(*) AS vote_count
          FROM votes
         WHERE candidate_id = ANY($1)
+        ${voteWardClause}
         GROUP BY candidate_id`,
-      [candidateIds]
+      voteParams
     );
 
     const voteMap = {};
@@ -2580,25 +2864,28 @@ app.get('/api/notices', async (req, res) => {
     const filterCat = cat && cat !== 'all' ? cat : null;
 
     // Query 1: admin notices
-    const noticesQ = filterCat
-      ? pool.query(
-          `SELECT id, title, content, category, priority, created_at, expires_at,
-                  NULL AS contact_phone, NULL AS business_name, false AS is_ad
-           FROM notices
-           WHERE (expires_at IS NULL OR expires_at > NOW())
-             AND COALESCE(is_archived, false) = false
-             AND category = $1
-           ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`,
-          [filterCat]
-        )
-      : pool.query(
-          `SELECT id, title, content, category, priority, created_at, expires_at,
-                  NULL AS contact_phone, NULL AS business_name, false AS is_ad
-           FROM notices
-           WHERE (expires_at IS NULL OR expires_at > NOW())
-             AND COALESCE(is_archived, false) = false
-           ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`
-        );
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    // (ad_requests below has no ward_id column — it's not in GEO_TABLES —
+    // so that query is left as-is; this table is the only one of the two
+    // that can be ward-filtered.)
+    const noticeParams = [];
+    let noticeWhere = `(expires_at IS NULL OR expires_at > NOW()) AND COALESCE(is_archived, false) = false`;
+    if (filterCat) {
+      noticeParams.push(filterCat);
+      noticeWhere += ` AND category = $${noticeParams.length}`;
+    }
+    if (req.wardId != null) {
+      noticeParams.push(req.wardId);
+      noticeWhere += ` AND ward_id = $${noticeParams.length}`;
+    }
+    const noticesQ = pool.query(
+      `SELECT id, title, content, category, priority, created_at, expires_at,
+              NULL AS contact_phone, NULL AS business_name, false AS is_ad
+       FROM notices
+       WHERE ${noticeWhere}
+       ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`,
+      noticeParams
+    );
 
     // Query 2: approved paid ad requests shaped to match notice cards
     const adsQ = filterCat
@@ -2666,7 +2953,7 @@ app.get('/api/notices', async (req, res) => {
 // ══════════════════════════════════════════════
 app.post('/api/notices', async (req, res) => {
   try {
-    const { title, content, category, priority, days, adminSecret } = req.body;
+    const { title, content, category, priority, days, adminSecret, wardId } = req.body;
     const secret = process.env.ADMIN_SECRET;
     if (!secret) return res.status(503).json({ success: false, error: 'Admin service not configured.' });
     if (adminSecret !== secret) {
@@ -2675,11 +2962,14 @@ app.post('/api/notices', async (req, res) => {
     if (!title || !content) {
       return res.status(400).json({ success: false, error: 'title and content are required' });
     }
+    // Phase 3A Task 9: was hardcoded NGOLIBA_WARD_ID. wardId now read from
+    // body, falling back so existing callers that don't send it keep working.
+    const resolvedWardId = parseInt(wardId, 10) || NGOLIBA_WARD_ID;
     const result = await pool.query(
       `INSERT INTO notices (title, content, category, priority, expires_at, created_by, ward_id)
        VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL, 'admin', $6)
        RETURNING *`,
-      [title, content, category || 'general', priority || 'normal', String(days || 30), NGOLIBA_WARD_ID]
+      [title, content, category || 'general', priority || 'normal', String(days || 30), resolvedWardId]
     );
     res.json({ success: true, notice: result.rows[0] });
   } catch (error) {
@@ -2755,12 +3045,15 @@ app.get('/api/admin/notices', async (req, res) => {
 
 app.post('/api/admin/notices', async (req, res) => {
   if (!checkNoticeAdminAuth(req, res)) return;
-  const { title, content, category, priority, expiresAt } = req.body;
+  const { title, content, category, priority, expiresAt, wardId } = req.body;
   if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
+  // Phase 3A Task 9: was hardcoded NGOLIBA_WARD_ID. wardId now read from
+  // body, falling back so existing callers that don't send it keep working.
+  const resolvedWardId = parseInt(wardId, 10) || NGOLIBA_WARD_ID;
   try {
     const result = await pool.query(
       'INSERT INTO notices (title,content,category,priority,expires_at,created_by,ward_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [title, content, category||'general', priority||'normal', expiresAt||null, 'admin', NGOLIBA_WARD_ID]
+      [title, content, category||'general', priority||'normal', expiresAt||null, 'admin', resolvedWardId]
     );
     res.json({ success: true, notice: result.rows[0] });
   } catch (err) {
@@ -2859,12 +3152,40 @@ if (action === 'get_periods') {
   // ✅ GET USERS - Removed non-existent civic_score column
 if (action === 'get_users') {
   try {
-    // Phase 2.5 NOTE — admin user list currently shows users.sublocation (freetext, no FK).
-    // Current behavior: correct for single-ward deployment; sublocation is user-entered text.
-    // Phase 3 migration recommendation: add ward join to expose w.name, con.name, cty.name
-    // alongside sublocation so admins see the full verified hierarchy, not just freetext.
-    // No code change required here until Phase 3.
-    const result = await pool.query('SELECT id, phone, first_name, surname, sublocation, created_at FROM users ORDER BY created_at DESC LIMIT 100');
+    // Phase 3A Task 11: implements the join this comment block recommended —
+    // w.name/con.name/cty.name alongside the existing freetext sublocation,
+    // plus optional wardId/constituencyId/countyId filters. Filters are
+    // optional and additive: omitting all three (every existing caller,
+    // since admin.html doesn't send any yet) reproduces the exact same
+    // unfiltered result set as before, just with 3 extra columns appended.
+    const { wardId, constituencyId, countyId } = req.body;
+    const params = [];
+    let whereClause = '';
+    if (wardId != null) {
+      params.push(parseInt(wardId, 10));
+      whereClause = `WHERE u.ward_id = $${params.length}`;
+    } else if (constituencyId != null) {
+      params.push(parseInt(constituencyId, 10));
+      whereClause = `WHERE w.constituency_id = $${params.length}`;
+    } else if (countyId != null) {
+      params.push(parseInt(countyId, 10));
+      whereClause = `WHERE con.county_id = $${params.length}`;
+    }
+
+    const result = await pool.query(
+      `SELECT u.id, u.phone, u.first_name, u.surname, u.sublocation, u.created_at,
+              w.name   AS ward_name,
+              con.name AS constituency_name,
+              cty.name AS county_name
+         FROM users u
+         LEFT JOIN wards         w   ON w.id = u.ward_id
+         LEFT JOIN constituencies con ON con.id = w.constituency_id
+         LEFT JOIN counties      cty ON cty.id = con.county_id
+         ${whereClause}
+         ORDER BY u.created_at DESC
+         LIMIT 100`,
+      params
+    );
     return res.json({ success: true, users: result.rows, total: result.rowCount });
   } catch (error) {
     console.error('Error in get_users:', error.message);
@@ -3210,8 +3531,15 @@ app.get('/api/voting-period', async (req, res) => {
     }
 
     // Live count — not the drifting counter column
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    const vpLiveParams = [period.id];
+    let vpLiveWardClause = '';
+    if (req.wardId != null) {
+      vpLiveParams.push(req.wardId);
+      vpLiveWardClause = 'AND ward_id = $2';
+    }
     const vpLiveRes = await pool.query(
-      'SELECT COUNT(*) AS count FROM votes WHERE period_id = $1', [period.id]
+      `SELECT COUNT(*) AS count FROM votes WHERE period_id = $1 ${vpLiveWardClause}`, vpLiveParams
     );
     const periodLiveCount = parseInt(vpLiveRes.rows[0].count || 0);
 
@@ -3295,8 +3623,12 @@ app.get('/voting', (req, res) => {
 app.get('/leaderboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'leaderboard.html'));
 });
+// 'advanced-leaderboard.html' was an improved version of leaderboard.html
+// that has now superseded it — the improved file is deployed as
+// public/leaderboard.html itself, so this route is kept only as a
+// redirect for anyone with the old URL bookmarked, rather than a 404.
 app.get('/advanced-leaderboard', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'advanced-leaderboard.html'));
+  res.redirect(301, '/leaderboard');
 });
 app.get('/admin-voting', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin-voting.html'));
@@ -3310,6 +3642,122 @@ app.get('/admin-voting', (req, res) => {
 
 // GET /api/counties
 // Returns all counties ordered alphabetically.
+// ════════════════════════════════════════════════
+// PHASE 3A — Geographic hierarchy administration
+// Tables already exist (ensureGeographyTables, above) with the UNIQUE
+// constraints needed — counties.name, constituencies(county_id,name),
+// wards(constituency_id,name). These endpoints are new write-paths onto
+// that existing schema; no migration, no new table.
+// ════════════════════════════════════════════════
+
+// POST /api/admin/counties  { name }
+app.post('/api/admin/counties', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  try {
+    const name = (req.body.name || '').trim();
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'name is required' });
+    }
+
+    const existing = await pool.query('SELECT id FROM counties WHERE name = $1', [name]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ success: false, error: `County '${name}' already exists` });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO counties (name) VALUES ($1) RETURNING id, name, created_at',
+      [name]
+    );
+    return res.status(201).json({ success: true, county: result.rows[0] });
+  } catch (e) {
+    if (e.code === '23505') { // unique_violation — race with the pre-check above
+      return res.status(409).json({ success: false, error: 'County already exists' });
+    }
+    console.error('[POST /api/admin/counties] ERROR:', e.message);
+    return res.status(500).json({ success: false, error: 'Failed to create county' });
+  }
+});
+
+// POST /api/admin/constituencies  { name, countyId }
+app.post('/api/admin/constituencies', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  try {
+    const name = (req.body.name || '').trim();
+    const countyId = parseInt(req.body.countyId, 10);
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'name is required' });
+    }
+    if (!countyId || isNaN(countyId)) {
+      return res.status(400).json({ success: false, error: 'countyId is required' });
+    }
+
+    const county = await pool.query('SELECT id FROM counties WHERE id = $1', [countyId]);
+    if (county.rows.length === 0) {
+      return res.status(404).json({ success: false, error: `County ${countyId} does not exist` });
+    }
+
+    const existing = await pool.query(
+      'SELECT id FROM constituencies WHERE county_id = $1 AND name = $2',
+      [countyId, name]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ success: false, error: `Constituency '${name}' already exists in this county` });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO constituencies (county_id, name) VALUES ($1, $2) RETURNING id, county_id, name, created_at',
+      [countyId, name]
+    );
+    return res.status(201).json({ success: true, constituency: result.rows[0] });
+  } catch (e) {
+    if (e.code === '23505') {
+      return res.status(409).json({ success: false, error: 'Constituency already exists in this county' });
+    }
+    console.error('[POST /api/admin/constituencies] ERROR:', e.message);
+    return res.status(500).json({ success: false, error: 'Failed to create constituency' });
+  }
+});
+
+// POST /api/admin/wards  { name, constituencyId }
+app.post('/api/admin/wards', async (req, res) => {
+  if (!checkNoticeAdminAuth(req, res)) return;
+  try {
+    const name = (req.body.name || '').trim();
+    const constituencyId = parseInt(req.body.constituencyId, 10);
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'name is required' });
+    }
+    if (!constituencyId || isNaN(constituencyId)) {
+      return res.status(400).json({ success: false, error: 'constituencyId is required' });
+    }
+
+    const constituency = await pool.query('SELECT id FROM constituencies WHERE id = $1', [constituencyId]);
+    if (constituency.rows.length === 0) {
+      return res.status(404).json({ success: false, error: `Constituency ${constituencyId} does not exist` });
+    }
+
+    const existing = await pool.query(
+      'SELECT id FROM wards WHERE constituency_id = $1 AND name = $2',
+      [constituencyId, name]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ success: false, error: `Ward '${name}' already exists in this constituency` });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO wards (constituency_id, name) VALUES ($1, $2) RETURNING id, constituency_id, name, created_at',
+      [constituencyId, name]
+    );
+    return res.status(201).json({ success: true, ward: result.rows[0] });
+  } catch (e) {
+    if (e.code === '23505') {
+      return res.status(409).json({ success: false, error: 'Ward already exists in this constituency' });
+    }
+    console.error('[POST /api/admin/wards] ERROR:', e.message);
+    return res.status(500).json({ success: false, error: 'Failed to create ward' });
+  }
+});
+
 app.get('/api/counties', async (req, res) => {
   try {
     const result = await pool.query(

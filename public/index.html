@@ -2452,6 +2452,13 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <div class="field-group"><label class="field-label">Phone *</label><input type="tel" id="regPhone" class="field-input no-icon" placeholder="0712345678"></div>
             </div>
             <div class="field-grid anim-item" style="--i:4">
+              <div class="field-group"><label class="field-label">County *</label><select id="regCounty" class="field-input no-icon"><option value="">Select&hellip;</option></select></div>
+              <div class="field-group"><label class="field-label">Constituency *</label><select id="regConstituency" class="field-input no-icon" disabled><option value="">Select county first&hellip;</option></select></div>
+            </div>
+            <div class="field-grid anim-item" style="--i:4">
+              <div class="field-group"><label class="field-label">Ward *</label><select id="regWard" class="field-input no-icon" disabled><option value="">Select constituency first&hellip;</option></select></div>
+            </div>
+            <div class="field-grid anim-item" style="--i:4">
               <div class="field-group"><label class="field-label">Sublocation</label><select id="regSublocation" class="field-input no-icon"><option value="">Select&hellip;</option><option>Ngoliba</option><option>Gatiiguru</option><option>Kilimambogo</option><option>Magogoni</option></select></div>
               <div class="field-group"><label class="field-label">Email (optional)</label><input type="email" id="regEmail" class="field-input no-icon" placeholder="you@example.com"></div>
             </div>
@@ -3468,6 +3475,7 @@ async function registerUser() {
   const sn      = document.getElementById('regSurname').value.trim();
   const dob     = document.getElementById('regDob').value;
   const phone   = document.getElementById('regPhone').value.trim();
+  const ward    = document.getElementById('regWard').value;
   const sub     = document.getElementById('regSublocation').value;
   const email   = document.getElementById('regEmail').value.trim();
   const natId   = document.getElementById('regNationalId').value.trim();
@@ -3480,6 +3488,7 @@ async function registerUser() {
   if (!isValidName(fn) || !isValidName(sn)) return fail('First and last name must be 2–30 letters');
   if (!dob)                                 return fail('Date of birth required');
   if (!isValidPhone(phone))                 return fail('Valid phone required (07XXXXXXXX)');
+  if (!ward)                                 return fail('Select your county, constituency, and ward');
   if (!sub)                                 return fail('Select sublocation');
   if (!isValidEmail(email))                 return fail('Invalid email address');
   if (!isValidNationalId(natId))            return fail('National ID must be 7–8 digits');
@@ -3494,7 +3503,11 @@ async function registerUser() {
     const res  = await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      // Phase 3A Task 5: wardId now sent alongside the existing fields.
+      // sublocation is untouched — still the same freetext sub-ward field
+      // it always was, sent exactly as before.
       body: JSON.stringify({ action:'register', firstName:fn, surname:sn, dob, phone,
+                             wardId: parseInt(ward, 10),
                              sublocation:sub, email, nationalId:natId, language:lang, password:pwd })
     });
     const data = await res.json();
@@ -5470,12 +5483,82 @@ document.getElementById("regPassword")?.addEventListener("input",function(){
 
 // ═══ ALL EVENT BINDINGS ═══
 // ═══ AUTH PANEL SWITCHING ═══
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 3A Task 5: County → Constituency → Ward cascading selector for
+// registration. Uses the existing GET /api/counties, /api/constituencies,
+// /api/wards endpoints — no new backend routes needed for this part.
+// ─────────────────────────────────────────────────────────────────────────
+let _regGeoLoaded = false;
+async function loadRegCounties() {
+  if (_regGeoLoaded) return;
+  _regGeoLoaded = true;
+  try {
+    const res = await fetch('/api/counties');
+    const data = await res.json();
+    const sel = document.getElementById('regCounty');
+    if (data.success && sel) {
+      data.counties.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        sel.appendChild(opt);
+      });
+    }
+  } catch (e) { console.error('Failed to load counties:', e); }
+}
+
+function resetRegSelect(sel, placeholder) {
+  sel.innerHTML = `<option value="">${placeholder}</option>`;
+  sel.disabled = true;
+}
+
+document.getElementById('regCounty').addEventListener('change', async function() {
+  const constSel = document.getElementById('regConstituency');
+  const wardSel   = document.getElementById('regWard');
+  resetRegSelect(constSel, 'Select…');
+  resetRegSelect(wardSel, 'Select constituency first…');
+  if (!this.value) { resetRegSelect(constSel, 'Select county first…'); return; }
+  try {
+    const res = await fetch(`/api/constituencies?county_id=${this.value}`);
+    const data = await res.json();
+    if (data.success) {
+      data.constituencies.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        constSel.appendChild(opt);
+      });
+      constSel.disabled = false;
+    }
+  } catch (e) { console.error('Failed to load constituencies:', e); }
+});
+
+document.getElementById('regConstituency').addEventListener('change', async function() {
+  const wardSel = document.getElementById('regWard');
+  resetRegSelect(wardSel, 'Select…');
+  if (!this.value) { resetRegSelect(wardSel, 'Select constituency first…'); return; }
+  try {
+    const res = await fetch(`/api/wards?constituency_id=${this.value}`);
+    const data = await res.json();
+    if (data.success) {
+      data.wards.forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = w.id;
+        opt.textContent = w.name;
+        wardSel.appendChild(opt);
+      });
+      wardSel.disabled = false;
+    }
+  } catch (e) { console.error('Failed to load wards:', e); }
+});
+
 function switchToRegister(){
   const card=document.getElementById("authCard");
   card.classList.add("register-active");
   card.classList.remove("login-loaded");
   setTimeout(()=>card.classList.add("register-loaded"),80);
   document.getElementById("regErrorMsg").classList.remove("show");
+  loadRegCounties();
 }
 function switchToLogin(){
   const card=document.getElementById("authCard");

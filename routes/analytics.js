@@ -21,9 +21,17 @@ const router = express.Router();
  * disagree with whatever the `candidates` table actually said. It now
  * delegates to lib/candidates.js, the single canonical candidate source;
  * the hardcoded data only survives as that module's last-resort fallback.
+ *
+ * Phase 2.6D: was permanently hardcoded to 'MCA' with no way to call it
+ * for anything else, which is why every route below could only ever
+ * return MCA data. category now defaults to 'MCA' so any existing caller
+ * that doesn't pass one keeps the exact same behavior.
+ *
+ * Phase 2.6D Group 3: wardId added, same optional/backward-compatible
+ * pattern as lib/candidates.js.
  */
-async function getCandidates(pool) {
-    return getCandidatesByCategory(pool, 'MCA');
+async function getCandidates(pool, category = 'MCA', wardId = null) {
+    return getCandidatesByCategory(pool, category, wardId);
 }
 
 /**
@@ -45,9 +53,17 @@ async function getAllPeriodArchives(pool) {
 
 /**
  * Get current period votes by candidate
+ * Phase 2.6D Group 3: wardId optional, defense-in-depth on top of the
+ * candidate-list join (candidate ids never collide across wards).
  */
-async function getCurrentPeriodVotes(pool) {
+async function getCurrentPeriodVotes(pool, wardId = null) {
     try {
+        const params = [];
+        let wardClause = '';
+        if (wardId != null) {
+            params.push(wardId);
+            wardClause = `AND ward_id = $${params.length}`;
+        }
         const result = await pool.query(`
             SELECT 
                 candidate_id,
@@ -56,9 +72,10 @@ async function getCurrentPeriodVotes(pool) {
             WHERE period_id = (
                 SELECT id FROM voting_periods WHERE is_active = true LIMIT 1
             )
+            ${wardClause}
             GROUP BY candidate_id
             ORDER BY votes DESC
-        `);
+        `, params);
         return result.rows;
     } catch (error) {
         console.error('Error fetching current votes:', error);
@@ -76,8 +93,9 @@ async function getCurrentPeriodVotes(pool) {
  */
 router.get('/api/analytics/leaders', async (req, res) => {
     try {
-        const candidates = await getCandidates(req.pool);
-        const currentVotes = await getCurrentPeriodVotes(req.pool);
+        const category = req.query.category || 'MCA';
+        const candidates = await getCandidates(req.pool, category, req.wardId);
+        const currentVotes = await getCurrentPeriodVotes(req.pool, req.wardId);
         const archives = await getAllPeriodArchives(req.pool);
 
         // Calculate current rankings with metrics
@@ -124,6 +142,7 @@ router.get('/api/analytics/leaders', async (req, res) => {
         res.json({
             success: true,
             data: {
+                category,
                 current,
                 allTime,
                 totalVotes,
@@ -146,13 +165,14 @@ router.get('/api/analytics/leaders', async (req, res) => {
  */
 router.get('/api/analytics/trends', async (req, res) => {
     try {
-        const candidates = await getCandidates(req.pool);
+        const category = req.query.category || 'MCA';
+        const candidates = await getCandidates(req.pool, category, req.wardId);
         const archives = await getAllPeriodArchives(req.pool);
 
         if (archives.length === 0) {
             return res.json({
                 success: true,
-                data: { labels: [], datasets: [] }
+                data: { category, labels: [], datasets: [] }
             });
         }
 
@@ -165,9 +185,13 @@ router.get('/api/analytics/trends', async (req, res) => {
             ];
 
             const data = archives.map(archive => {
-                const periodData = JSON.parse(archive.period_data);
-                const voteData = periodData.votes?.find(v => v.candidate_id === candidate.id);
-                return voteData?.votes || 0;
+                // archive.period_data is already a parsed object (JSONB) —
+                // see analyticsEngine.getCandidateVotesFromArchive's doc
+                // comment. The old JSON.parse(archive.period_data) here
+                // threw on every real archive (double-parsing an object),
+                // which is why this route used to 500 once any period had
+                // ever been archived.
+                return analyticsEngine.getCandidateVotesFromArchive(archive.period_data, candidate.id);
             });
 
             return {
@@ -183,6 +207,7 @@ router.get('/api/analytics/trends', async (req, res) => {
         res.json({
             success: true,
             data: {
+                category,
                 labels,
                 datasets
             }
@@ -205,28 +230,36 @@ router.get('/api/analytics/candidate/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const candidateId = parseInt(id);
+        const category = req.query.category || 'MCA';
 
-        if (candidateId < 0 || candidateId > 6) {
+        // Phase 2.6D Task 4 fix: this used to reject any candidateId > 6,
+        // a hardcoded bound from the original 7 MCA-only seed candidates.
+        // Any candidate in any of the 6 categories (or any future MCA
+        // candidate added after the original 7) gets id >= 7 by design
+        // (ensureCandidatesTable's sequence starts at 7), so the old bound
+        // rejected every one of them. Only a basic sanity check remains.
+        if (isNaN(candidateId) || candidateId < 0) {
             return res.status(400).json({
                 success: false,
                 error: 'Invalid candidate ID'
             });
         }
 
-        const candidates = await getCandidates(req.pool);
+        const candidates = await getCandidates(req.pool, category, req.wardId);
         const candidate = candidates.find(c => c.id === candidateId);
         const archives = await getAllPeriodArchives(req.pool);
-        const currentVotes = await getCurrentPeriodVotes(req.pool);
+        const currentVotes = await getCurrentPeriodVotes(req.pool, req.wardId);
 
         const stats = analyticsEngine.calculateCandidateStats(candidateId, archives, currentVotes);
 
         // Build history
         const history = archives.map(archive => {
-            const periodData = JSON.parse(archive.period_data);
-            const voteData = periodData.votes?.find(v => v.candidate_id === candidateId);
+            // archive.period_data is already a parsed object (JSONB) — see
+            // analyticsEngine.getCandidateVotesFromArchive's doc comment.
+            const votes = analyticsEngine.getCandidateVotesFromArchive(archive.period_data, candidateId);
             return {
                 period: archive.id,
-                votes: voteData?.votes || 0,
+                votes,
                 rank: 0 // Will calculate
             };
         });
@@ -263,9 +296,10 @@ router.get('/api/analytics/candidate/:id', async (req, res) => {
  */
 router.get('/api/analytics/stats', async (req, res) => {
     try {
+        const category = req.query.category || 'MCA';
         const archives = await getAllPeriodArchives(req.pool);
-        const currentVotes = await getCurrentPeriodVotes(req.pool);
-        const candidates = await getCandidates(req.pool);
+        const currentVotes = await getCurrentPeriodVotes(req.pool, req.wardId);
+        const candidates = await getCandidates(req.pool, category, req.wardId);
 
         const totalVotes = currentVotes.reduce((sum, v) => sum + v.votes, 0);
 
@@ -276,7 +310,13 @@ router.get('/api/analytics/stats', async (req, res) => {
         let minPeriodVotes = Infinity;
 
         archives.forEach(archive => {
-            const periodData = JSON.parse(archive.period_data);
+            // (No period_data parsing needed here — this loop only uses
+            // archive.total_votes, a real column already selected by
+            // getAllPeriodArchives. A JSON.parse(archive.period_data) call
+            // used to sit here with its result never referenced anywhere
+            // below; since period_data is already a parsed JSONB object by
+            // the time pg returns it, that call threw on every real archive
+            // and was the reason this route 500'd once any period existed.)
             allTimeVotes += archive.total_votes;
             allTimePeriods++;
             maxPeriodVotes = Math.max(maxPeriodVotes, archive.total_votes);
@@ -300,10 +340,16 @@ router.get('/api/analytics/stats', async (req, res) => {
         res.json({
             success: true,
             data: {
+                category,
                 periods: {
                     total: allTimePeriods + 1,
                     completed: allTimePeriods
                 },
+                // NOTE: votes.total/current remain global across ALL categories,
+                // not just `category` — voting_periods.total_votes and
+                // period_archives.total_votes are recorded once per period
+                // across every category, not broken out per category. Only
+                // topPerformers/mostConsistent below are category-filtered.
                 votes: {
                     total: allTimeVotes,
                     avgPerPeriod: allTimePeriods > 0 ? Math.round(allTimeVotes / allTimePeriods) : 0,
@@ -331,7 +377,8 @@ router.get('/api/analytics/stats', async (req, res) => {
  */
 router.get('/api/analytics/predict', async (req, res) => {
     try {
-        const candidates = await getCandidates(req.pool);
+        const category = req.query.category || 'MCA';
+        const candidates = await getCandidates(req.pool, category, req.wardId);
         const archives = await getAllPeriodArchives(req.pool);
 
         const predictions = candidates.map(candidate => {
@@ -349,6 +396,7 @@ router.get('/api/analytics/predict', async (req, res) => {
         res.json({
             success: true,
             data: {
+                category,
                 predictions,
                 methodology: 'linear_regression_with_trend',
                 basedOnPeriods: archives.length
@@ -381,17 +429,20 @@ router.get('/api/analytics/compare', async (req, res) => {
 
         const id1 = parseInt(c1);
         const id2 = parseInt(c2);
+        const category = req.query.category || 'MCA';
 
-        if (id1 < 0 || id1 > 6 || id2 < 0 || id2 > 6) {
+        // Phase 2.6D Task 4 fix: same hardcoded 0-6 bound issue as
+        // /api/analytics/candidate/:id above — removed for the same reason.
+        if (isNaN(id1) || isNaN(id2) || id1 < 0 || id2 < 0) {
             return res.status(400).json({
                 success: false,
                 error: 'Invalid candidate IDs'
             });
         }
 
-        const candidates = await getCandidates(req.pool);
+        const candidates = await getCandidates(req.pool, category, req.wardId);
         const archives = await getAllPeriodArchives(req.pool);
-        const currentVotes = await getCurrentPeriodVotes(req.pool);
+        const currentVotes = await getCurrentPeriodVotes(req.pool, req.wardId);
 
         const stats1 = analyticsEngine.calculateCandidateStats(id1, archives, currentVotes);
         const stats2 = analyticsEngine.calculateCandidateStats(id2, archives, currentVotes);
@@ -461,12 +512,12 @@ router.post('/api/analytics/export', async (req, res) => {
             });
         }
 
-        const { format = 'csv' } = req.body;
+        const { format = 'csv', category = 'MCA' } = req.body;
 
         if (format === 'csv') {
-            const candidates = await getCandidates(req.pool);
+            const candidates = await getCandidates(req.pool, category, req.wardId);
             const archives = await getAllPeriodArchives(req.pool);
-            const currentVotes = await getCurrentPeriodVotes(req.pool);
+            const currentVotes = await getCurrentPeriodVotes(req.pool, req.wardId);
 
             let csv = 'Candidate,Total Votes,Average Votes,Consistency,Trend\n';
             
@@ -480,9 +531,9 @@ router.post('/api/analytics/export', async (req, res) => {
             res.send(csv);
 
         } else if (format === 'json') {
-            const candidates = await getCandidates(req.pool);
+            const candidates = await getCandidates(req.pool, category, req.wardId);
             const archives = await getAllPeriodArchives(req.pool);
-            const currentVotes = await getCurrentPeriodVotes(req.pool);
+            const currentVotes = await getCurrentPeriodVotes(req.pool, req.wardId);
 
             const data = candidates.map(candidate => {
                 const stats = analyticsEngine.calculateCandidateStats(candidate.id, archives, currentVotes);
@@ -526,8 +577,10 @@ const analyticsRouter = require('./routes/analytics');
 app.use(analyticsRouter);
 
 // 3. Add frontend routes
-app.get('/advanced-leaderboard', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'advanced-leaderboard.html'));
+// 'advanced-leaderboard.html' was an improved version of leaderboard.html
+// that has now superseded it — deployed as public/leaderboard.html itself.
+app.get('/leaderboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'leaderboard.html'));
 });
 
 app.get('/candidate/:id', (req, res) => {

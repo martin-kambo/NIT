@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Leaderboard - Analytics</title>
+    <title>Leaderboard - Analytics</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <style>
         * {
@@ -61,6 +61,31 @@
         .subtitle {
             color: var(--text-light);
             font-size: 16px;
+        }
+
+        /* CATEGORY SELECTOR */
+        .category-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 18px;
+        }
+        .cat-btn {
+            padding: 7px 16px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: white;
+            color: var(--text-light);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .cat-btn:hover { border-color: var(--primary); color: var(--text); }
+        .cat-btn.active {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: white;
         }
 
         /* TABS */
@@ -366,12 +391,16 @@
 <body>
     <!-- HEADER -->
     <header class="container">
-        <h1>📊 Advanced Leaderboard</h1>
+        <h1>📊 Leaderboard</h1>
         <p class="subtitle">Comprehensive analytics and historical rankings</p>
 
         <div class="live-row">
             <div class="live-dot"></div>
             <span class="live-label" id="lastUpdated">Loading…</span>
+        </div>
+
+        <div id="categorySelector" class="category-selector">
+            <!-- Rendered by JS -->
         </div>
 
         <div class="tabs">
@@ -462,7 +491,11 @@
 
     <!-- SCRIPTS -->
     <script>
+        const CATEGORIES = ['MCA', 'WomenRep', 'MP', 'Senator', 'Governor', 'President'];
+        const CATEGORY_LABELS = { MCA: 'MCA', WomenRep: 'Women Rep', MP: 'MP', Senator: 'Senator', Governor: 'Governor', President: 'President' };
+
         const state = {
+            category: 'MCA', // Phase 2.6D: this page had no category awareness at all before
             // ── phase-3 original ──
             leaders: null,
             trends: null,
@@ -476,6 +509,52 @@
             eventSource: null,
             activeTab: 'current'
         };
+
+        // ─────────────────────────────────────────
+        // CATEGORY SWITCHING
+        // Phase 2.6D fix: every data source on this page (leaders, trends,
+        // stats, predictions, history, face-off) used to be permanently
+        // hardcoded to MCA on the backend, with absolutely no selector
+        // here to ask for anything else. Switching categories clears every
+        // cached tab so each one re-fetches for the newly selected category
+        // instead of silently keeping stale MCA data on screen.
+        // ─────────────────────────────────────────
+        function renderCategorySelector() {
+            const el = document.getElementById('categorySelector');
+            if (!el) return;
+            el.innerHTML = CATEGORIES.map(cat => `
+                <button class="cat-btn ${cat === state.category ? 'active' : ''}"
+                        onclick="selectCategory('${cat}')">${CATEGORY_LABELS[cat]}</button>
+            `).join('');
+        }
+
+        async function selectCategory(cat) {
+            if (cat === state.category) return;
+            state.category = cat;
+            renderCategorySelector();
+
+            // Clear every cached tab so lazy-load guards (e.g. `if (!state.trends)`)
+            // re-fetch for the new category instead of reusing stale data.
+            state.leaders = null;
+            state.trends = null;
+            state.stats = null;
+            state.predictions = null;
+            state.charts = {};
+            state.history = [];
+            state.bySublocation = {};
+            state.faceOff = null;
+
+            // Reload whatever's unconditionally loaded on every page view,
+            // plus whichever tab the user is currently looking at.
+            const reloads = [loadLeaders(), loadStats()];
+            if (state.activeTab === 'analytics')   reloads.push(loadTrends());
+            if (state.activeTab === 'predictions') reloads.push(loadPredictions());
+            if (state.activeTab === 'faceoff')     reloads.push(loadFaceOff());
+            if (state.activeTab === 'history')     reloads.push(loadHistory());
+            await Promise.all(reloads);
+
+            if (state.activeTab === 'analytics') renderCharts();
+        }
 
         // ─────────────────────────────────────────
         // TAB MANAGEMENT
@@ -502,7 +581,7 @@
 
         async function loadLeaders() {
             try {
-                const response = await fetch('/api/analytics/leaders');
+                const response = await fetch(`/api/analytics/leaders?category=${encodeURIComponent(state.category)}`);
                 const json = await response.json();
 
                 if (!json.success) throw new Error(json.error);
@@ -521,7 +600,7 @@
 
         async function loadTrends() {
             try {
-                const response = await fetch('/api/analytics/trends');
+                const response = await fetch(`/api/analytics/trends?category=${encodeURIComponent(state.category)}`);
                 const json = await response.json();
                 if (!json.success) throw new Error(json.error);
                 state.trends = json.data;
@@ -532,7 +611,7 @@
 
         async function loadStats() {
             try {
-                const response = await fetch('/api/analytics/stats');
+                const response = await fetch(`/api/analytics/stats?category=${encodeURIComponent(state.category)}`);
                 const json = await response.json();
                 if (!json.success) throw new Error(json.error);
                 state.stats = json.data;
@@ -544,7 +623,7 @@
 
         async function loadPredictions() {
             try {
-                const response = await fetch('/api/analytics/predict');
+                const response = await fetch(`/api/analytics/predict?category=${encodeURIComponent(state.category)}`);
                 const json = await response.json();
                 if (!json.success) throw new Error(json.error);
                 state.predictions = json.data.predictions;
@@ -560,7 +639,7 @@
 
         async function loadHistory() {
             try {
-                const res  = await fetch('/api/leaderboard');
+                const res  = await fetch(`/api/leaderboard?category=${encodeURIComponent(state.category)}`);
                 const json = await res.json();
                 if (!json.success) throw new Error(json.error);
                 state.history = json.data.previous;
@@ -584,7 +663,7 @@
 
         async function loadFaceOff() {
             try {
-                const res  = await fetch('/api/voting-results/face-off');
+                const res  = await fetch(`/api/voting-results/face-off?category=${encodeURIComponent(state.category)}`);
                 const json = await res.json();
                 if (!json.success) throw new Error(json.error);
                 state.faceOff = json.data;
@@ -915,6 +994,7 @@
         // ─────────────────────────────────────────
 
         document.addEventListener('DOMContentLoaded', () => {
+            renderCategorySelector();
             loadLeaders();
             loadStats();
             connectSSE();

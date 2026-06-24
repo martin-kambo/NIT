@@ -334,6 +334,14 @@ tr:hover td { background: var(--light-gray); }
         <button class="cat-btn"        data-cat="President" onclick="setModalCategory('President')">🏆 President</button>
       </div>
     </div>
+    <div style="margin-bottom:1rem;">
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--mid-gray);margin-bottom:0.4rem;">Ward Assignment</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.6rem;">
+        <select id="candCounty" style="width:100%;padding:0.7rem 0.9rem;border:1.5px solid #e5e7eb;border-radius:0.6rem;font-size:0.875rem;font-family:'Outfit',sans-serif;outline:none;"><option value="">County…</option></select>
+        <select id="candConstituency" disabled style="width:100%;padding:0.7rem 0.9rem;border:1.5px solid #e5e7eb;border-radius:0.6rem;font-size:0.875rem;font-family:'Outfit',sans-serif;outline:none;"><option value="">Constituency…</option></select>
+        <select id="candWard" disabled style="width:100%;padding:0.7rem 0.9rem;border:1.5px solid #e5e7eb;border-radius:0.6rem;font-size:0.875rem;font-family:'Outfit',sans-serif;outline:none;"><option value="">Ward…</option></select>
+      </div>
+    </div>
     <div class="cand-form-grid">
       <div class="full field">
         <label style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--mid-gray);display:block;margin-bottom:0.3rem;">Full Name *</label>
@@ -652,10 +660,109 @@ async function loadCandidatesAdmin() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 3A Task 8: County → Constituency → Ward cascading selector for the
+// candidate modal. Uses the existing GET /api/counties, /api/constituencies,
+// /api/wards endpoints — no new backend routes needed for this part.
+// ─────────────────────────────────────────────────────────────────────────
+let _candCountiesLoaded = false;
+function resetCandWardSelectors() {
+  document.getElementById('candConstituency').innerHTML = '<option value="">Constituency…</option>';
+  document.getElementById('candConstituency').disabled = true;
+  document.getElementById('candWard').innerHTML = '<option value="">Ward…</option>';
+  document.getElementById('candWard').disabled = true;
+}
+
+async function loadCandCounties() {
+  if (_candCountiesLoaded) return;
+  try {
+    const res = await fetch('/api/counties');
+    const data = await res.json();
+    const sel = document.getElementById('candCounty');
+    if (data.success) {
+      data.counties.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id; opt.textContent = c.name;
+        sel.appendChild(opt);
+      });
+      _candCountiesLoaded = true;
+    }
+  } catch (e) { console.error('Failed to load counties:', e); }
+}
+
+async function populateCandConstituencies(countyId) {
+  const sel = document.getElementById('candConstituency');
+  sel.innerHTML = '<option value="">Constituency…</option>';
+  if (!countyId) { sel.disabled = true; return; }
+  const res = await fetch(`/api/constituencies?county_id=${countyId}`);
+  const data = await res.json();
+  if (data.success) {
+    data.constituencies.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id; opt.textContent = c.name;
+      sel.appendChild(opt);
+    });
+    sel.disabled = false;
+  }
+}
+
+async function populateCandWards(constituencyId) {
+  const sel = document.getElementById('candWard');
+  sel.innerHTML = '<option value="">Ward…</option>';
+  if (!constituencyId) { sel.disabled = true; return; }
+  const res = await fetch(`/api/wards?constituency_id=${constituencyId}`);
+  const data = await res.json();
+  if (data.success) {
+    data.wards.forEach(w => {
+      const opt = document.createElement('option');
+      opt.value = w.id; opt.textContent = w.name;
+      sel.appendChild(opt);
+    });
+    sel.disabled = false;
+  }
+}
+
+document.getElementById('candCounty').addEventListener('change', function() {
+  document.getElementById('candWard').innerHTML = '<option value="">Ward…</option>';
+  document.getElementById('candWard').disabled = true;
+  populateCandConstituencies(this.value);
+});
+document.getElementById('candConstituency').addEventListener('change', function() {
+  populateCandWards(this.value);
+});
+
+// Deep-link resolution for editing: given an existing candidate's ward_id,
+// walk wards -> constituency_id -> county_id (via the unfiltered list
+// endpoints) and select all three dropdowns to match, in cascade order.
+async function prefillCandWard(wardId) {
+  if (!wardId) return;
+  try {
+    const wardsRes = await fetch('/api/wards');
+    const wardsData = await wardsRes.json();
+    if (!wardsData.success) return;
+    const ward = wardsData.wards.find(w => w.id === wardId || w.id === parseInt(wardId, 10));
+    if (!ward) return;
+
+    const constRes = await fetch('/api/constituencies');
+    const constData = await constRes.json();
+    if (!constData.success) return;
+    const constituency = constData.constituencies.find(c => c.id === ward.constituency_id);
+    if (!constituency) return;
+
+    document.getElementById('candCounty').value = constituency.county_id;
+    await populateCandConstituencies(constituency.county_id);
+    document.getElementById('candConstituency').value = ward.constituency_id;
+    await populateCandWards(ward.constituency_id);
+    document.getElementById('candWard').value = ward.id;
+  } catch (e) { console.error('Failed to prefill ward selectors:', e); }
+}
+
 function openAddCandidateModal() {
   document.getElementById('candModalTitle').textContent = 'Add Candidate';
   document.getElementById('candSaveBtnText').textContent = 'Save Candidate';
   document.getElementById('candEditId').value = '';
+  resetCandWardSelectors();
+  loadCandCounties();
   document.getElementById('candName').value = '';
   document.getElementById('candParty').value = '';
   document.getElementById('candBio').value = '';
@@ -698,6 +805,8 @@ function openEditCandidateModal(c) {
   }
 
   setModalCategory(c.category || 'MCA');
+  resetCandWardSelectors();
+  loadCandCounties().then(() => prefillCandWard(c.ward_id));
   document.getElementById('candidateModal').classList.add('open');
 }
 
@@ -795,13 +904,22 @@ async function saveCandidateModal() {
   const bio = document.getElementById('candBio').value.trim();
   const img = document.getElementById('candImg').value.trim();
   const incumbent = document.getElementById('candIncumbent').checked;
+  const wardId = document.getElementById('candWard').value;
   const category = document.querySelector('#modalCatSelector .cat-btn.active')?.dataset.cat || adminCurrentCategory;
   const errEl = document.getElementById('candModalError');
 
   if (!name) { errEl.textContent = 'Name is required.'; errEl.style.display = 'block'; return; }
   errEl.style.display = 'none';
 
-  const body = JSON.stringify({ name, party, bio, img, category, incumbent });
+  // Phase 3A Task 6/7/8: wardId included when a ward is selected. Omitted
+  // entirely (rather than sent as an empty string) when nothing is
+  // selected, so the backend's existing wardId-not-provided fallback path
+  // (NGOLIBA_WARD_ID on create, leave-untouched on edit) still applies —
+  // this mirrors how every other optional field on this form already works.
+  const body = JSON.stringify({
+    name, party, bio, img, category, incumbent,
+    ...(wardId ? { wardId: parseInt(wardId, 10) } : {})
+  });
   const method = id ? 'PUT' : 'POST';
   const url = id ? `/api/admin/candidates/${id}` : '/api/admin/candidates';
   const pwd = sessionStorage.getItem('adminPwd') || '';

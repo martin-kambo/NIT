@@ -328,6 +328,31 @@
 
         .cycle-notice.show { display: flex; align-items: center; gap: 10px; }
 
+        /* ── CATEGORY SELECTOR ───────────────────────────── */
+        .category-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .cat-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: white;
+            color: var(--text);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .cat-btn:hover { border-color: var(--primary); }
+        .cat-btn.active {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: white;
+        }
+
         /* ── RESPONSIVE ──────────────────────────────────── */
         @media (max-width: 480px) {
             h1 { font-size: 24px; }
@@ -386,7 +411,10 @@
 
             <!-- CANDIDATES -->
             <section>
-                <h2 style="color: white; margin-bottom: 24px;">Candidates</h2>
+                <h2 style="color: white; margin-bottom: 24px;">Candidates — <span id="categoryLabel">MCA</span></h2>
+                <div id="categorySelector" class="category-selector">
+                    <!-- Rendered by JS -->
+                </div>
                 <div id="candidatesContainer" class="candidates-grid">
                     <!-- Rendered by JS -->
                 </div>
@@ -449,7 +477,11 @@
     // ─────────────────────────────────────────────────────────────────────────
     // STATE
     // ─────────────────────────────────────────────────────────────────────────
+    const CATEGORIES = ['MCA', 'WomenRep', 'MP', 'Senator', 'Governor', 'President'];
+    const CATEGORY_LABELS = { MCA: 'MCA', WomenRep: 'Women Rep', MP: 'MP', Senator: 'Senator', Governor: 'Governor', President: 'President' };
+
     const state = {
+        category:         'MCA',  // Phase 2.6D: was permanently MCA-only with no selector at all
         period:           null,   // { periodId, endsAt, ... }
         candidates:       [],
         results:          [],     // cumulative results
@@ -474,6 +506,8 @@
             const meJson = await meRes.json();
             if (meJson.user?.sublocation) state.userSublocation = meJson.user.sublocation;
 
+            renderCategorySelector();
+
             await Promise.all([
                 loadCandidates(),
                 loadPeriod(),
@@ -494,7 +528,7 @@
     // DATA LOADING
     // ─────────────────────────────────────────────────────────────────────────
     async function loadCandidates() {
-        const res  = await fetch('/api/candidates', { credentials: 'include' });
+        const res  = await fetch(`/api/candidates?category=${encodeURIComponent(state.category)}`, { credentials: 'include' });
         const json = await res.json();
         if (!json.success) throw new Error(json.error);
         state.candidates = json.candidates;
@@ -505,14 +539,19 @@
         const res  = await fetch('/api/voting-period', { credentials: 'include' });
         const json = await res.json();
         if (!json.success) throw new Error(json.error);
-        state.period    = json.data;
-        state.userVoted = !!json.data.userHasVoted;
+        state.period = json.data;
+        // Backend already tracks votes per-category (json.data.votedCategories);
+        // userHasVoted is a backward-compat "voted in ANY category" flag that
+        // used to be the only thing read here, which locked every category's
+        // voting button as soon as the user voted in one — even ones they
+        // hadn't touched yet.
+        state.userVoted = !!(json.data.votedCategories && json.data.votedCategories[state.category]);
         document.getElementById('periodId').textContent = json.data.periodId;
         updateCycleNotice();
     }
 
     async function loadResults() {
-        const res  = await fetch('/api/voting-results', { credentials: 'include' });
+        const res  = await fetch(`/api/voting-results?category=${encodeURIComponent(state.category)}`, { credentials: 'include' });
         const json = await res.json();
         if (!json.success) throw new Error(json.error);
         state.results = json.data.results;
@@ -524,7 +563,7 @@
 
     async function loadFaceOff() {
         try {
-            const res  = await fetch('/api/faceoff', { credentials: 'include' });
+            const res  = await fetch(`/api/faceoff?category=${encodeURIComponent(state.category)}`, { credentials: 'include' });
             const json = await res.json();
             if (!json.success) return;
             // /api/faceoff returns json.candidates (top 2) with vote_count instead of votes.
@@ -535,6 +574,39 @@
             }));
             renderFaceOff(top2, json.totalVotes);
         } catch (_) {}
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CATEGORY SWITCHING
+    // Phase 2.6D fix: this page used to fetch ALL candidates across every
+    // category (no filter) while results/face-off were silently MCA-only —
+    // so a Governor or President candidate would show up in the voting list
+    // with no matching results behind them. Every load function above now
+    // shares one state.category, and switching categories reloads all three
+    // together so they can never drift out of sync with each other again.
+    // ─────────────────────────────────────────────────────────────────────────
+    function renderCategorySelector() {
+        const container = document.getElementById('categorySelector');
+        if (!container) return;
+        container.innerHTML = CATEGORIES.map(cat => `
+            <button class="cat-btn ${cat === state.category ? 'active' : ''}"
+                    onclick="selectCategory('${cat}')">${CATEGORY_LABELS[cat]}</button>
+        `).join('');
+        const label = document.getElementById('categoryLabel');
+        if (label) label.textContent = CATEGORY_LABELS[state.category];
+    }
+
+    async function selectCategory(cat) {
+        if (cat === state.category) return;
+        state.category = cat;
+        renderCategorySelector();
+        document.getElementById('candidatesContainer').innerHTML = '<p style="color:var(--text-light);">Loading…</p>';
+        try {
+            await Promise.all([loadCandidates(), loadPeriod(), loadResults()]);
+        } catch (err) {
+            console.error('Category switch error:', err);
+            showAlert('Failed to load this category', 'error');
+        }
     }
 
     async function loadVoteHistory() {
