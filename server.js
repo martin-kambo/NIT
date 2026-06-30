@@ -1088,16 +1088,32 @@ async function getNextVoterNumber() {
      ON CONFLICT (key) DO NOTHING`
   );
 
+  // Atomic increment (Task 1, Pre-Phase 3B hardening): the read AND the
+  // write now happen inside one SQL statement, so Postgres's row-level
+  // lock on the 'counters' row serializes concurrent calls — each UPDATE
+  // computes its increment from whatever value is currently committed at
+  // the moment it actually runs, not from a value read into JS memory
+  // earlier. This eliminates the prior read-then-write race (SELECT last
+  // -> compute next in JS -> UPDATE), where two concurrent registrations
+  // could read the same `last` and both compute the same `next`,
+  // producing a duplicate voter_number and a raw 500 error for whichever
+  // registration's INSERT lost the unique-constraint race.
+  //
+  // parseInt() is explicit and deliberate here: Postgres's bigint/int8
+  // type (OID 20) is returned by node-postgres as a STRING by default
+  // (no custom type parser is registered anywhere in this file) — the
+  // previous implementation's `last + 1` on that string was JS string
+  // concatenation, not arithmetic (confirmed by direct testing against
+  // pg-types' actual default OID-20 parser), which silently produced a
+  // digit-appending sequence (1, 11, 111, 1111, ...) instead of a real
+  // increment. parseInt() here ensures this exact bug class cannot recur.
   const res = await pool.query(
-    `SELECT (value->>'last_voter_number')::bigint as last FROM metadata WHERE key = 'counters'`
+    `UPDATE metadata
+        SET value = jsonb_set(value, '{last_voter_number}', to_jsonb(((value->>'last_voter_number')::bigint + 1)))
+      WHERE key = 'counters'
+      RETURNING (value->>'last_voter_number')::bigint AS next`
   );
-  const last = res.rows[0]?.last || 0;
-  const next = last + 1;
-  await pool.query(
-    `UPDATE metadata SET value = jsonb_set(value, '{last_voter_number}', to_jsonb($1::bigint)) WHERE key = 'counters'`,
-    [next]
-  );
-  return next;
+  return parseInt(res.rows[0].next, 10);
 }
 
 // ════════════════════════════════════════════════
