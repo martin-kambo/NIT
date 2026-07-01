@@ -41,6 +41,7 @@ const forumReplyLimiter = rateLimit({
   legacyHeaders: false,
 });
 const cors = require('cors');
+const compression = require('compression');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -485,6 +486,55 @@ async function testDBConnection() {
     console.error('   Make sure DATABASE_URL in .env is correct');
     console.error('   And that Render PostgreSQL instance is running');
     return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pre-Phase 3B Task 3: in-memory cache for rarely-changing reference data.
+// Used ONLY for: counties, constituencies, wards, candidate lists. NOT
+// used for votes, leaderboards, analytics, forum, notices, or anything
+// per-user — those remain fully live, unchanged by this task.
+//
+// A plain Map is sufficient and intentional here, not a placeholder for
+// something more sophisticated: this is a single Node.js process (no
+// clustering, confirmed elsewhere in this codebase), and Node is
+// single-threaded for JS execution, so there is no concurrent-write race
+// risk on this Map the way there would be with shared state across
+// multiple processes — that's also exactly why this does NOT reach for
+// Redis, which is explicitly out of scope for this phase.
+//
+// The TTL below is a safety net only, not the correctness mechanism — the
+// real guarantee against stale data is invalidateStaticCache(), called
+// synchronously right after each successful admin write (counties,
+// constituencies, wards, candidates create/update/delete), before that
+// write's response is sent. The TTL exists purely to bound staleness in
+// the hypothetical case an invalidation call is ever missed in a future
+// edit; it is not relied upon as the primary guarantee.
+const staticDataCache = new Map();
+const STATIC_CACHE_TTL_MS = 5 * 60 * 1000; // 5-minute safety net
+
+function getCached(key) {
+  const entry = staticDataCache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.time > STATIC_CACHE_TTL_MS) {
+    staticDataCache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+function setCached(key, value) {
+  staticDataCache.set(key, { value, time: Date.now() });
+}
+// Clears every cached entry whose key starts with any of the given
+// prefixes. Called after a successful admin write so the very next read —
+// even one racing in immediately after — sees fresh data. Coarse-grained
+// by design (clears the whole dataset's cache rather than computing
+// exactly which filtered sub-keys are affected): these admin writes are
+// infrequent, so the small extra cost of one cold cache repopulation per
+// write is the deliberately conservative, low-risk choice.
+function invalidateStaticCache(...prefixes) {
+  for (const key of staticDataCache.keys()) {
+    if (prefixes.some(p => key.startsWith(p))) staticDataCache.delete(key);
   }
 }
 
@@ -940,6 +990,30 @@ if (!process.env.ALLOWED_ORIGIN) {
   console.warn('[CORS] ALLOWED_ORIGIN env var not set — restricting to localhost only. Set it to your Render URL in production.');
 }
 
+// Pre-Phase 3B Task 2: HTTP response compression.
+// Placed first in this infrastructure group so it wraps every downstream
+// response — cors, json-parsed API responses, static assets, and the
+// votingRouter/analyticsRouter responses mounted later in this file —
+// since compression must patch res.write/res.end before any handler uses
+// them in order to apply.
+//
+// SSE is explicitly excluded. Verified, not assumed: the `compression`
+// package's default filter would otherwise compress text/event-stream
+// (confirmed directly against the `compressible` library it uses
+// internally), and the existing SSE implementation in routes/voting.js
+// (GET /api/votes/stream) never calls res.flush() — without that call,
+// individual SSE events could sit buffered inside compression's internal
+// zlib stream instead of reaching clients immediately, breaking the
+// real-time leaderboard/voting-page updates. filter() is confirmed (via
+// the package's own source) to run after the route handler sets headers,
+// so checking the request path here is reliable.
+app.use(compression({
+  filter: (req, res) => {
+    if (req.path === '/api/votes/stream') return false;
+    if (res.getHeader('Content-Type') === 'text/event-stream') return false;
+    return compression.filter(req, res);
+  }
+}));
 app.use(cors({
   origin: (incomingOrigin, callback) => {
     // Allow server-to-server requests (no Origin header, e.g. curl, Render health checks)
@@ -1127,9 +1201,16 @@ async function getNextVoterNumber() {
 app.get('/api/candidates', async (req, res) => {
   try {
     const { category } = req.query;
-    const candidates = category
-      ? await getCandidatesByCategory(pool, category, req.wardId)
-      : await getAllCandidates(pool, req.wardId);
+    const cacheKey = category
+      ? `candidates:cat:${category}:ward:${req.wardId}`
+      : `candidates:all:ward:${req.wardId}`;
+    let candidates = getCached(cacheKey);
+    if (candidates === undefined) {
+      candidates = category
+        ? await getCandidatesByCategory(pool, category, req.wardId)
+        : await getAllCandidates(pool, req.wardId);
+      setCached(cacheKey, candidates);
+    }
 
     return res.json({ success: true, candidates });
   } catch (e) {
@@ -2125,6 +2206,10 @@ app.post('/api/admin/candidates', async (req, res) => {
        RETURNING *`,
       [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', nextOrd, resolvedWardId]
     );
+    // Pre-Phase 3B Task 3: invalidate the candidates cache so the very
+    // next read (even one racing in immediately after this response)
+    // sees the newly-created candidate, not a stale cached list.
+    invalidateStaticCache('candidates');
     res.json({ success: true, candidate: result.rows[0] });
   } catch (err) {
     console.error('POST /api/admin/candidates error:', err.message);
@@ -2162,6 +2247,7 @@ app.put('/api/admin/candidates/:id', async (req, res) => {
           [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', req.params.id]
         );
     if (!result.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    invalidateStaticCache('candidates');
     res.json({ success: true, candidate: result.rows[0] });
   } catch (err) {
     console.error('PUT /api/admin/candidates/:id error:', err.message);
@@ -2178,6 +2264,7 @@ app.delete('/api/admin/candidates/:id', async (req, res) => {
       [req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    invalidateStaticCache('candidates');
     res.json({ success: true, deleted: result.rows[0] });
   } catch (err) {
     console.error('DELETE /api/admin/candidates/:id error:', err.message);
@@ -3684,6 +3771,7 @@ app.post('/api/admin/counties', async (req, res) => {
       'INSERT INTO counties (name) VALUES ($1) RETURNING id, name, created_at',
       [name]
     );
+    invalidateStaticCache('counties');
     return res.status(201).json({ success: true, county: result.rows[0] });
   } catch (e) {
     if (e.code === '23505') { // unique_violation — race with the pre-check above
@@ -3724,6 +3812,7 @@ app.post('/api/admin/constituencies', async (req, res) => {
       'INSERT INTO constituencies (county_id, name) VALUES ($1, $2) RETURNING id, county_id, name, created_at',
       [countyId, name]
     );
+    invalidateStaticCache('constituencies');
     return res.status(201).json({ success: true, constituency: result.rows[0] });
   } catch (e) {
     if (e.code === '23505') {
@@ -3764,6 +3853,7 @@ app.post('/api/admin/wards', async (req, res) => {
       'INSERT INTO wards (constituency_id, name) VALUES ($1, $2) RETURNING id, constituency_id, name, created_at',
       [constituencyId, name]
     );
+    invalidateStaticCache('wards');
     return res.status(201).json({ success: true, ward: result.rows[0] });
   } catch (e) {
     if (e.code === '23505') {
@@ -3776,10 +3866,16 @@ app.post('/api/admin/wards', async (req, res) => {
 
 app.get('/api/counties', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT id, name, created_at FROM counties ORDER BY name ASC'
-    );
-    return res.json({ success: true, counties: result.rows });
+    const cacheKey = 'counties:all';
+    let counties = getCached(cacheKey);
+    if (counties === undefined) {
+      const result = await pool.query(
+        'SELECT id, name, created_at FROM counties ORDER BY name ASC'
+      );
+      counties = result.rows;
+      setCached(cacheKey, counties);
+    }
+    return res.json({ success: true, counties });
   } catch (e) {
     console.error('[/api/counties] ERROR:', e.message);
     return res.status(500).json({ success: false, error: 'Failed to fetch counties' });
@@ -3792,15 +3888,21 @@ app.get('/api/counties', async (req, res) => {
 app.get('/api/constituencies', async (req, res) => {
   try {
     const { county_id } = req.query;
-    const result = county_id
-      ? await pool.query(
-          'SELECT id, county_id, name, created_at FROM constituencies WHERE county_id = $1 ORDER BY name ASC',
-          [parseInt(county_id, 10)]
-        )
-      : await pool.query(
-          'SELECT id, county_id, name, created_at FROM constituencies ORDER BY name ASC'
-        );
-    return res.json({ success: true, constituencies: result.rows });
+    const cacheKey = county_id ? `constituencies:county:${county_id}` : 'constituencies:all';
+    let constituencies = getCached(cacheKey);
+    if (constituencies === undefined) {
+      const result = county_id
+        ? await pool.query(
+            'SELECT id, county_id, name, created_at FROM constituencies WHERE county_id = $1 ORDER BY name ASC',
+            [parseInt(county_id, 10)]
+          )
+        : await pool.query(
+            'SELECT id, county_id, name, created_at FROM constituencies ORDER BY name ASC'
+          );
+      constituencies = result.rows;
+      setCached(cacheKey, constituencies);
+    }
+    return res.json({ success: true, constituencies });
   } catch (e) {
     console.error('[/api/constituencies] ERROR:', e.message);
     return res.status(500).json({ success: false, error: 'Failed to fetch constituencies' });
@@ -3813,15 +3915,21 @@ app.get('/api/constituencies', async (req, res) => {
 app.get('/api/wards', async (req, res) => {
   try {
     const { constituency_id } = req.query;
-    const result = constituency_id
-      ? await pool.query(
-          'SELECT id, constituency_id, name, created_at FROM wards WHERE constituency_id = $1 ORDER BY name ASC',
-          [parseInt(constituency_id, 10)]
-        )
-      : await pool.query(
-          'SELECT id, constituency_id, name, created_at FROM wards ORDER BY name ASC'
-        );
-    return res.json({ success: true, wards: result.rows });
+    const cacheKey = constituency_id ? `wards:constituency:${constituency_id}` : 'wards:all';
+    let wards = getCached(cacheKey);
+    if (wards === undefined) {
+      const result = constituency_id
+        ? await pool.query(
+            'SELECT id, constituency_id, name, created_at FROM wards WHERE constituency_id = $1 ORDER BY name ASC',
+            [parseInt(constituency_id, 10)]
+          )
+        : await pool.query(
+            'SELECT id, constituency_id, name, created_at FROM wards ORDER BY name ASC'
+          );
+      wards = result.rows;
+      setCached(cacheKey, wards);
+    }
+    return res.json({ success: true, wards });
   } catch (e) {
     console.error('[/api/wards] ERROR:', e.message);
     return res.status(500).json({ success: false, error: 'Failed to fetch wards' });
