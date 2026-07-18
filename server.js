@@ -271,53 +271,56 @@ CREATE INDEX IF NOT EXISTS idx_notices_expires ON notices(expires_at);
       CREATE INDEX IF NOT EXISTS idx_notices_archived ON notices(is_archived);
     `);
     
-    // ✅ FIX 3: Insert sample notices data for testing
-    console.log('📋 Seeding sample notices...');
+    // Stage 3B.1: seed notices are Ngoliba-specific content. They are only
+    // seeded when (a) the notices table is empty AND (b) this is the Ngoliba
+    // founding deployment, identified by FOUNDING_WARD_NAME env var.
+    // A new deployment for a different ward starts with an empty noticeboard
+    // rather than receiving Ngoliba's sample content.
+    console.log('📋 Checking notices seed...');
     const noticeCount = await pool.query('SELECT COUNT(*) FROM notices');
-    if (parseInt(noticeCount.rows[0].count) === 0) {
+    const foundingWardName = process.env.FOUNDING_WARD_NAME || 'Ngoliba';
+    if (parseInt(noticeCount.rows[0].count) === 0 && foundingWardName === 'Ngoliba') {
+      // Resolve the founding ward_id for the seed rows — notices now carry
+      // ward_id, so orphaned (null ward) seed rows must be avoided.
+      const seedWardRes = await pool.query(`
+        SELECT w.id FROM wards w
+        JOIN constituencies con ON con.id = w.constituency_id
+        JOIN counties cty ON cty.id = con.county_id
+        WHERE cty.name = $1 AND con.name = $2 AND w.name = $3 LIMIT 1
+      `, [
+        process.env.FOUNDING_COUNTY_NAME       || 'Kiambu',
+        process.env.FOUNDING_CONSTITUENCY_NAME || 'Thika Town',
+        foundingWardName
+      ]);
+      const seedWardId = seedWardRes.rows[0]?.id || null;
       await pool.query(`
-        INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
+        INSERT INTO notices (title, content, category, priority, expires_at, created_by, ward_id) VALUES
         (
           'Ngoliba Farmers Market - Every Saturday',
           'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at the Ngoliba Market grounds. Bulk orders welcome. Contact: 0712 111 222',
-          'business',
-          'normal',
-          NOW() + INTERVAL '90 days',
-          'system'
+          'business', 'normal', NOW() + INTERVAL '90 days', 'system', $1
         ),
         (
           'Water Rationing Notice - Kilimambogo',
           'Kenya Water Authority advises that Kilimambogo sublocation will experience reduced water supply Mon-Wed for 30 days due to pipeline maintenance. Residents should store water accordingly. Helpline: 0800 723 232',
-          'public',
-          'high',
-          NOW() + INTERVAL '30 days',
-          'system'
+          'public', 'high', NOW() + INTERVAL '30 days', 'system', $1
         ),
         (
           'Boda Boda Riders Wanted - Ngoliba Express',
           'Ngoliba Express Logistics is recruiting 10 boda boda riders for parcel delivery. Must have valid licence. Earn KES 800-1,500 daily. Apply in person at Ngoliba Town Centre. Contact: 0798 456 789',
-          'jobs',
-          'normal',
-          NOW() + INTERVAL '60 days',
-          'system'
+          'jobs', 'normal', NOW() + INTERVAL '60 days', 'system', $1
         ),
         (
           'Community Health Camp - Mwea Ward',
           'Free health screening and vaccination services. Dates: First Saturday of every month. Location: Mwea Ward Market. Services: Blood pressure check, BMI assessment, Immunizations. Bring ID. Contact: 0789 654 321',
-          'health',
-          'normal',
-          NOW() + INTERVAL '120 days',
-          'system'
+          'health', 'normal', NOW() + INTERVAL '120 days', 'system', $1
         ),
         (
           'Road Maintenance - Ngoliba-Ruiru Highway',
           'Notice: The Ngoliba-Ruiru main highway will be under maintenance from June 15-22, 2024. Expect delays. Alternative routes recommended. Updates: www.krb.go.ke',
-          'public',
-          'high',
-          NOW() + INTERVAL '45 days',
-          'system'
-        );
-      `);
+          'public', 'high', NOW() + INTERVAL '45 days', 'system', $1
+        )
+      `, [seedWardId]);
       console.log('✅ Sample notices inserted');
     }
     
@@ -404,27 +407,40 @@ async function ensureNoticesTable() {
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS category VARCHAR(20) DEFAULT 'general'`);
 
-    // Seed sample notices only if table is empty
+    // Stage 3B.1: same founding-ward guard as the notices seed in initDB().
+    // Only seeds Ngoliba-specific content when this is the founding deployment.
     const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
-    if (parseInt(rows[0].count) === 0) {
+    const _foundingWard = process.env.FOUNDING_WARD_NAME || 'Ngoliba';
+    if (parseInt(rows[0].count) === 0 && _foundingWard === 'Ngoliba') {
+      const _seedWardRes = await pool.query(`
+        SELECT w.id FROM wards w
+        JOIN constituencies con ON con.id = w.constituency_id
+        JOIN counties cty ON cty.id = con.county_id
+        WHERE cty.name = $1 AND con.name = $2 AND w.name = $3 LIMIT 1
+      `, [
+        process.env.FOUNDING_COUNTY_NAME       || 'Kiambu',
+        process.env.FOUNDING_CONSTITUENCY_NAME || 'Thika Town',
+        _foundingWard
+      ]);
+      const _seedWardId = _seedWardRes.rows[0]?.id || null;
       await pool.query(`
-        INSERT INTO notices (title, content, category, priority, expires_at, created_by) VALUES
+        INSERT INTO notices (title, content, category, priority, expires_at, created_by, ward_id) VALUES
         ('Ngoliba Farmers Market - Every Saturday',
          'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at the Ngoliba Market grounds.',
-         'business', 'normal', NOW() + INTERVAL '90 days', 'system'),
+         'business', 'normal', NOW() + INTERVAL '90 days', 'system', $1),
         ('Water Rationing Notice - Kilimambogo',
          'Kenya Water Authority advises reduced supply Mon-Wed for 30 days due to pipeline maintenance. Store water accordingly. Helpline: 0800 723 232',
-         'public', 'high', NOW() + INTERVAL '30 days', 'system'),
+         'public', 'high', NOW() + INTERVAL '30 days', 'system', $1),
         ('Boda Boda Riders Wanted - Ngoliba Express',
          'Ngoliba Express Logistics recruiting 10 boda boda riders for parcel delivery. Must have valid licence. Earn KES 800-1,500 daily. Apply: Ngoliba Town Centre.',
-         'jobs', 'normal', NOW() + INTERVAL '60 days', 'system'),
+         'jobs', 'normal', NOW() + INTERVAL '60 days', 'system', $1),
         ('Community Health Camp - Mwea Ward',
          'Free health screening and vaccination. First Saturday of every month, Mwea Ward Market. Bring ID.',
-         'health', 'normal', NOW() + INTERVAL '120 days', 'system'),
+         'health', 'normal', NOW() + INTERVAL '120 days', 'system', $1),
         ('Road Maintenance - Ngoliba-Ruiru Highway',
          'The Ngoliba-Ruiru highway will be under maintenance June 15-22. Expect delays. Use alternative routes.',
-         'public', 'high', NOW() + INTERVAL '45 days', 'system')
-      `);
+         'public', 'high', NOW() + INTERVAL '45 days', 'system', $1)
+      `, [_seedWardId]);
       console.log('✅ notices table seeded with sample data');
     }
     console.log('✅ notices table ready');
@@ -538,13 +554,46 @@ function invalidateStaticCache(...prefixes) {
   }
 }
 
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   req.pool = pool;
-  // Phase 2.6D Group 3: every route gets the current ward via req.wardId,
-  // the same pattern req.pool already uses. NGOLIBA_WARD_ID is resolved
-  // once in ensurePhase2Migrations() before app.listen() runs (line ~509
-  // above), so it is never null by the time a real request is served.
-  req.wardId = NGOLIBA_WARD_ID;
+
+  // Stage 3B.1 — user-derived req.wardId.
+  // Previously this always set req.wardId = NGOLIBA_WARD_ID (the global
+  // startup-resolved singleton), meaning every read path — leaderboard,
+  // candidates, notices, forum — returned only the founding ward's data
+  // regardless of which user was asking. For multi-ward correctness,
+  // req.wardId must reflect the *requesting user's* own ward.
+  //
+  // Trust chain (matches the forum-post and vote-INSERT patterns):
+  //   session cookie (HMAC-verified, cannot be spoofed)
+  //   → session.userId
+  //   → server-side DB lookup on users.id (PK, indexed, sub-millisecond)
+  //   → user.ward_id written to req.wardId
+  //
+  // For unauthenticated requests (no valid session cookie), falls back to
+  // NGOLIBA_WARD_ID so public routes that don't require login continue
+  // working exactly as before. This backward-compat path will become
+  // less relevant as multi-ward onboarding progresses (a user from Ward B
+  // visiting the site will always have a session cookie once logged in).
+  const session = verifySession(req.headers.cookie);
+  if (session?.userId) {
+    try {
+      const result = await pool.query(
+        'SELECT ward_id FROM users WHERE id = $1',
+        [session.userId]
+      );
+      const userWardId = result.rows[0]?.ward_id;
+      req.wardId = userWardId || NGOLIBA_WARD_ID;
+    } catch (_) {
+      // DB error during ward resolution — fall back to the founding ward
+      // rather than failing the whole request. Logged for observability.
+      console.error('[middleware] ward_id lookup failed, using NGOLIBA_WARD_ID fallback:', _.message);
+      req.wardId = NGOLIBA_WARD_ID;
+    }
+  } else {
+    req.wardId = NGOLIBA_WARD_ID;
+  }
+
   next();
 });
 
@@ -860,34 +909,41 @@ async function ensureGeographyTables() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_constituencies_county_id ON constituencies(county_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_wards_constituency_id    ON wards(constituency_id)`);
 
-    // ── Seed: Kiambu County → Thika Town Constituency → Ngoliba Ward ──
+    // ── Seed: Founding geographic hierarchy ──────────────────────────────
+    // Stage 3B.1: was hardcoded to 'Kiambu → Thika Town → Ngoliba'. Now
+    // read from environment variables with those values as defaults, so
+    // existing deployments continue working with zero configuration change,
+    // while a new deployment for a different ward supplies its own values.
     // ON CONFLICT ensures running startup multiple times never creates duplicates.
+    const FOUNDING_COUNTY       = process.env.FOUNDING_COUNTY_NAME       || 'Kiambu';
+    const FOUNDING_CONSTITUENCY = process.env.FOUNDING_CONSTITUENCY_NAME || 'Thika Town';
+    const FOUNDING_WARD         = process.env.FOUNDING_WARD_NAME         || 'Ngoliba';
 
     await pool.query(`
       INSERT INTO counties (name)
-      VALUES ('Kiambu')
+      VALUES ($1)
       ON CONFLICT ON CONSTRAINT counties_name_unique DO NOTHING
-    `);
+    `, [FOUNDING_COUNTY]);
 
     await pool.query(`
       INSERT INTO constituencies (county_id, name)
-      SELECT id, 'Thika Town'
+      SELECT id, $1
         FROM counties
-       WHERE name = 'Kiambu'
+       WHERE name = $2
       ON CONFLICT ON CONSTRAINT constituencies_county_name DO NOTHING
-    `);
+    `, [FOUNDING_CONSTITUENCY, FOUNDING_COUNTY]);
 
     await pool.query(`
       INSERT INTO wards (constituency_id, name)
-      SELECT con.id, 'Ngoliba'
+      SELECT con.id, $1
         FROM constituencies con
         JOIN counties       cty ON cty.id = con.county_id
-       WHERE cty.name = 'Kiambu'
-         AND con.name = 'Thika Town'
+       WHERE cty.name = $2
+         AND con.name = $3
       ON CONFLICT ON CONSTRAINT wards_constituency_name DO NOTHING
-    `);
+    `, [FOUNDING_WARD, FOUNDING_COUNTY, FOUNDING_CONSTITUENCY]);
 
-    console.log('✅ geography tables ready (counties / constituencies / wards)');
+    console.log(`✅ geography tables ready — founding hierarchy: ${FOUNDING_COUNTY} → ${FOUNDING_CONSTITUENCY} → ${FOUNDING_WARD}`);
   } catch (e) {
     console.error('❌ ensureGeographyTables error:', e.message);
     // Non-fatal: geography tables are Phase 1 foundation only.
@@ -936,26 +992,32 @@ async function ensurePhase2Migrations() {
       );
     }
 
-    // ── Step 2: Resolve the Ngoliba ward_id ──
-    // Depends on Phase 1 seed (Kiambu → Thika Town → Ngoliba) being present.
+    // ── Step 2: Resolve the founding ward_id ──────────────────────────────
+    // Stage 3B.1: was hardcoded to 'Kiambu → Thika Town → Ngoliba'. Now
+    // reads the same env vars used by the seed above, so both sides of
+    // startup always resolve the same founding ward regardless of environment.
+    const FOUNDING_COUNTY       = process.env.FOUNDING_COUNTY_NAME       || 'Kiambu';
+    const FOUNDING_CONSTITUENCY = process.env.FOUNDING_CONSTITUENCY_NAME || 'Thika Town';
+    const FOUNDING_WARD         = process.env.FOUNDING_WARD_NAME         || 'Ngoliba';
+
     const wardRes = await pool.query(`
       SELECT w.id
         FROM wards        w
         JOIN constituencies con ON con.id = w.constituency_id
         JOIN counties       cty ON cty.id = con.county_id
-       WHERE cty.name = 'Kiambu'
-         AND con.name = 'Thika Town'
-         AND w.name   = 'Ngoliba'
+       WHERE cty.name = $1
+         AND con.name = $2
+         AND w.name   = $3
        LIMIT 1
-    `);
+    `, [FOUNDING_COUNTY, FOUNDING_CONSTITUENCY, FOUNDING_WARD]);
 
     if (!wardRes.rows.length) {
-      console.warn('⚠️  [Phase 2] Ngoliba ward row not found — backfill skipped. Ensure ensureGeographyTables() ran successfully first.');
+      console.warn(`⚠️  [Phase 2] Founding ward '${FOUNDING_WARD}' not found — backfill skipped. Ensure ensureGeographyTables() ran successfully first.`);
       return;
     }
 
     const wardId = wardRes.rows[0].id;
-    NGOLIBA_WARD_ID = wardId; // cache for all new-record creation flows
+    NGOLIBA_WARD_ID = wardId; // module-level cache — resolved from config, not hardcoded to Ngoliba
 
     // ── Step 3: Backfill all existing records ──
     // WHERE ward_id IS NULL guarantees full idempotency:
@@ -972,7 +1034,7 @@ async function ensurePhase2Migrations() {
       }
     }
 
-    console.log(`✅ Phase 2 complete — NGOLIBA_WARD_ID=${wardId}`);
+    console.log(`✅ Phase 2 complete — founding ward '${FOUNDING_WARD}' resolved (id=${wardId})`);
   } catch (e) {
     console.error('❌ ensurePhase2Migrations error:', e.message);
     console.error(e.stack);
@@ -1232,16 +1294,37 @@ app.get('/api/me', async (req, res) => {
     }
     
     const result = await pool.query(
-      'SELECT id, phone, first_name, surname, dob, sublocation, email, national_id, language, voter_number, profile_photo, created_at, updated_at FROM users WHERE phone = $1',
+      `SELECT u.id, u.phone, u.first_name, u.surname, u.dob, u.sublocation,
+              u.email, u.national_id, u.language, u.voter_number,
+              u.profile_photo, u.created_at, u.updated_at, u.ward_id,
+              w.name   AS ward_name,
+              con.name AS constituency_name,
+              cty.name AS county_name
+         FROM users u
+         LEFT JOIN wards         w   ON w.id   = u.ward_id
+         LEFT JOIN constituencies con ON con.id = w.constituency_id
+         LEFT JOIN counties      cty ON cty.id  = con.county_id
+        WHERE u.phone = $1`,
       [session.phone]
     );
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     const user = result.rows[0];
-    res.json({ success: true, user: sanitizeUser(user) });
+    const sanitized = sanitizeUser(user);
+    // Include geography fields alongside the sanitized user record
+    res.json({
+      success: true,
+      user: {
+        ...sanitized,
+        wardId:           user.ward_id,
+        wardName:         user.ward_name         || null,
+        constituencyName: user.constituency_name || null,
+        countyName:       user.county_name       || null
+      }
+    });
     
   } catch (e) {
     console.error('/api/me error:', e);
@@ -1596,11 +1679,24 @@ app.post('/api/vote', async (req, res) => {
     // Phase 3 migration will replace sublocation-based analytics with ward_id joins.
     // This read and the write below are retained for backward compatibility only.
     // ────────────────────────────────────────────────────────────────────────
+    //
+    // Stage 3B.1 — ward_id data-integrity correction:
+    // Extending the existing user lookup (which was already SELECT sublocation)
+    // to also fetch ward_id. The trust chain is:
+    //   session.userId (HMAC-verified, cannot be spoofed by client)
+    //   → server-side DB lookup using only that verified userId
+    //   → user.ward_id used in INSERT
+    // No client request parameter is accepted for ward — identical pattern
+    // to forum posts (Phase 3A: authorWardId = u.ward_id || NGOLIBA_WARD_ID).
     const userResult = await pool.query(
-      'SELECT sublocation FROM users WHERE id = $1',
+      'SELECT sublocation, ward_id FROM users WHERE id = $1',
       [session.userId]
     );
     const user = userResult.rows[0];
+    // Null-safety fallback: only fires for users who pre-date the ward
+    // backfill (ward_id IS NULL). For all users created after Phase 2.6,
+    // user.ward_id is always set.
+    const voteWardId = user?.ward_id || NGOLIBA_WARD_ID;
 
     const rawIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     const ipHash = crypto.createHash('sha256').update(rawIp).digest('hex').slice(0, 16);
@@ -1612,7 +1708,7 @@ app.post('/api/vote', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (user_id, period_id, category) DO NOTHING
        RETURNING id`,
-      [session.userId, candidateId, periodId, voteCategory, user?.sublocation || null, ipHash, Date.now(), NGOLIBA_WARD_ID]
+      [session.userId, candidateId, periodId, voteCategory, user?.sublocation || null, ipHash, Date.now(), voteWardId]
     );
 
     // If no row was inserted, a concurrent request already recorded a vote (race condition)

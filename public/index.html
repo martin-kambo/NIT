@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ngoliba InfoTrack · Ward Opinion Poll</title>
+<title>InfoTrack · Ward Opinion Poll</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -2297,8 +2297,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="logo-block">
         <div class="logo-mark">🗳️</div>
         <div>
-          <div class="logo-text">Ngoliba InfoTrack</div>
-          <div class="logo-sub">Kiambu County · Ward Poll</div>
+          <div class="logo-text">InfoTrack</div>
+          <div class="logo-sub" id="logoWardSub">Ward Opinion Poll</div>
         </div>
       </div>
       <nav class="header-nav hidden" id="headerNav">
@@ -2315,7 +2315,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <img id="avatarDdPhoto" src="" alt="Profile" onerror="this.src=getAvatarSrc(window.currentUser||{})">
               <div>
                 <div class="avatar-dd-name" id="avatarDdName">—</div>
-                <div class="avatar-dd-sub" id="avatarDdSub">Ngoliba Ward · Voter</div>
+                <div class="avatar-dd-sub" id="avatarDdSub">Ward · Voter</div>
               </div>
             </div>
             <div class="avatar-dd-menu">
@@ -2355,7 +2355,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 <!-- HERO BAND (logged in) -->
 <div class="hero-band hidden" id="heroBand">
   <div class="container hero-band-inner">
-    <div class="ward-chip"><span>📍</span> Kiambu County · Ngoliba Ward</div>
+    <div class="ward-chip" id="wardChip"><span>📍</span> <span id="wardChipText">Loading ward…</span></div>
     <h1 class="hero-title">Opinion Poll <span class="accent">Live</span><br>Tracking</h1>
     <p class="hero-sub">Real-time ward polling · Every vote shapes the future</p>
     <div class="cycle-badge">
@@ -2439,7 +2439,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           <!-- REGISTER PANEL -->
           <div class="auth-form-panel register-panel" style="overflow-y:auto;justify-content:flex-start;padding-top:1.75rem;">
             <div class="anim-item" style="--i:0">
-              <div class="auth-form-title">Join Ngoliba</div>
+              <div class="auth-form-title">Join Your Ward</div>
               <div class="auth-form-sub">Create your voter account &#8212; takes 60 seconds</div>
             </div>
             <div class="error-msg anim-item" id="regErrorMsg" style="--i:1"></div>
@@ -2459,7 +2459,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
               <div class="field-group"><label class="field-label">Ward *</label><select id="regWard" class="field-input no-icon" disabled><option value="">Select constituency first&hellip;</option></select></div>
             </div>
             <div class="field-grid anim-item" style="--i:4">
-              <div class="field-group"><label class="field-label">Sublocation</label><select id="regSublocation" class="field-input no-icon"><option value="">Select&hellip;</option><option>Ngoliba</option><option>Gatiiguru</option><option>Kilimambogo</option><option>Magogoni</option></select></div>
+              <div class="field-group"><label class="field-label">Sublocation</label><input type="text" id="regSublocation" class="field-input no-icon" placeholder="e.g. Ngoliba, Gatiiguru…"></div>
               <div class="field-group"><label class="field-label">Email (optional)</label><input type="email" id="regEmail" class="field-input no-icon" placeholder="you@example.com"></div>
             </div>
             <div class="field-grid anim-item" style="--i:5">
@@ -2692,7 +2692,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           <div class="panel-title" style="justify-content:space-between;flex-wrap:wrap;gap:0.5rem;">
             <span style="display:flex;align-items:center;gap:0.5rem;"><div class="icon icon-green"><i class="fas fa-map-marker-alt"></i></div> Sublocation Ranking</span>
             <select id="sublocationFilter" class="field-input" style="width:auto;padding:0.4rem 2rem 0.4rem 0.75rem;font-size:0.8rem;">
-              <option>Ngoliba</option><option>Gatiiguru</option><option>Kilimambogo</option><option>Magogoni</option>
+              <option value="">All sublocations</option>
             </select>
           </div>
           <div id="sublocationRanking"></div>
@@ -2762,7 +2762,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         <div class="notice-header scroll-reveal">
           <div style="position:relative;z-index:1;">
             <div class="notice-header-kicker">📌 Community &amp; Business Notices</div>
-            <div class="notice-header-title">Ngoliba Noticeboard</div>
+            <div class="notice-header-title" id="noticeboardTitle">Ward Noticeboard</div>
             <div class="notice-header-sub">Local announcements, business listings, events &amp; public notices for Ngoliba Ward residents.</div>
           </div>
           <div style="position:relative;z-index:1;">
@@ -2953,7 +2953,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           </div>
           <div class="profile-hero-info">
             <div class="profile-hero-name" id="profileName">Your Name</div>
-            <div class="profile-hero-sub" id="profileSub">Ngoliba Ward · Voter</div>
+            <div class="profile-hero-sub" id="profileSub">Ward · Voter</div>
             <div class="profile-hero-chips">
               <span class="profile-chip" id="profileVoterNum">Voter #—</span>
               <span class="profile-chip" id="profileSublocationChip">—</span>
@@ -2974,7 +2974,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           <div class="field-group"><label class="field-label">Surname</label><input type="text" id="profSurname" class="field-input" placeholder="Surname"></div>
           <div class="field-group"><label class="field-label">Phone (read-only)</label><input type="tel" id="profPhone" class="field-input" readonly disabled style="background:#f9fafb;"></div>
           <div class="field-group"><label class="field-label">Date of Birth</label><input type="date" id="profDob" class="field-input" readonly disabled style="background:#f9fafb;"></div>
-          <div class="field-group"><label class="field-label">Sublocation</label><select id="profSublocation" class="field-input"><option>Ngoliba</option><option>Gatiiguru</option><option>Kilimambogo</option><option>Magogoni</option></select></div>
+          <div class="field-group"><label class="field-label">Sublocation</label><input type="text" id="profSublocation" class="field-input" placeholder="e.g. Ngoliba, Gatiiguru…"></div>
           <div class="field-group"><label class="field-label">Language</label><select id="profLanguage" class="field-input"><option value="en">English</option><option value="sw">Kiswahili</option></select></div>
           <div class="field-group"><label class="field-label">Email</label><input type="email" id="profEmail" class="field-input" placeholder="you@example.com"></div>
           <div class="field-group"><label class="field-label">National ID</label><input type="text" id="profNationalId" class="field-input" placeholder="12345678"></div>
@@ -3267,7 +3267,12 @@ const CANDIDATES_DEFAULT = [
 ];
 // Mutable — updated when user switches poll category tab
 let CANDIDATES = CANDIDATES_DEFAULT.slice();
-const SUBLOCATIONS = ["Ngoliba","Gatiiguru","Kilimambogo","Magogoni"];
+// Stage 3B.1: was a hardcoded array of Ngoliba's 4 sublocations.
+// Now initialized empty and populated from the real votersBySubLocation
+// keys returned by /api/stats after login, so the heatmap, KPI cards,
+// chart datasets, and AI prompt all reflect the actual ward's sublocations
+// rather than hardcoded Ngoliba-specific names.
+let SUBLOCATIONS = [];
 
 // Poll category state — tracks which election position the user is viewing
 let activePollCategory = 'MCA';
@@ -4008,7 +4013,27 @@ function updateHeaderAvatar(){
   const ddName = document.getElementById("avatarDdName");
   if (ddName) ddName.textContent = `${currentUser.firstName||""} ${currentUser.surname||""}`.trim() || "—";
   const ddSub = document.getElementById("avatarDdSub");
-  if (ddSub) ddSub.textContent = `${currentUser.sublocation||"Ngoliba Ward"} · Voter #${currentUser.voterNumber||"—"}`;
+  if (ddSub) ddSub.textContent = `${currentUser.wardName||currentUser.sublocation||"Ward"} · Voter #${currentUser.voterNumber||"—"}`;
+
+  // Stage 3B.1: populate all geography-display elements from /api/me response.
+  // Previously every one of these was a hardcoded "Ngoliba …" string.
+  const wardLabel = currentUser.wardName || "Ward";
+  const geoLabel  = [currentUser.countyName, currentUser.wardName].filter(Boolean).join(" · ") || wardLabel;
+
+  const wardChipText = document.getElementById("wardChipText");
+  if (wardChipText) wardChipText.textContent = geoLabel;
+
+  const logoSub = document.getElementById("logoWardSub");
+  if (logoSub) logoSub.textContent = `${wardLabel} Opinion Poll`;
+
+  const noticeTitle = document.getElementById("noticeboardTitle");
+  if (noticeTitle) noticeTitle.textContent = `${wardLabel} Noticeboard`;
+
+  const profSub = document.getElementById("profileSub");
+  if (profSub) profSub.textContent = `${wardLabel} · Voter`;
+
+  // Update page title to reflect the actual ward
+  document.title = `${wardLabel} InfoTrack · Ward Opinion Poll`;
 }
 function updateHeaderBadge(){ const b=document.getElementById("headerBadge"); const badge=getUserVoterBadge(currentUser?.phone); if(badge){b.classList.remove("hidden");b.innerText=badge==="1st"?"🥇":badge==="2nd"?"🥈":"🥉";b.style.background={"1st":"#e9c46a","2nd":"#9ca3af","3rd":"#cd7f32"}[badge]||"#666";}else b.classList.add("hidden"); }
 
@@ -5149,7 +5174,10 @@ async function handleAIAsk(){
     const agg=getCurrentPeriodAggregated();
     const votesSummary=CANDIDATES.map(c=>`${c.name} (${c.party}): ${agg[c.id]?.total||0} votes`).join(", ");
     const users=DB.getUsers();
-    const context=`You are the AI analyst for Ngoliba InfoTrack, a ward-level opinion poll platform in Ngoliba Ward, Kiambu County, Kenya. The poll tracks 7 MCA candidates. Current cycle vote totals: ${votesSummary}. Total registered voters: ${users.length}. Sublocations: Ngoliba, Gatiiguru, Kilimambogo, Magogoni. Top ward issues from community: Water Access (43%), Roads (28%), Health (19%), Youth (10%). Answer the user's question concisely and insightfully in 2-4 sentences. Be specific to Ngoliba Ward context.`;
+    const wardLabel  = (typeof currentUser!=='undefined'&&currentUser?.wardName)  || 'this ward';
+    const countyLabel= (typeof currentUser!=='undefined'&&currentUser?.countyName) || 'Kenya';
+    const subLabel   = SUBLOCATIONS.length>0 ? SUBLOCATIONS.join(', ') : 'various sublocations';
+    const context=`You are the AI analyst for InfoTrack, a ward-level opinion poll platform in ${wardLabel}, ${countyLabel}. The poll tracks ${CANDIDATES.length} MCA candidates. Current cycle vote totals: ${votesSummary}. Total registered voters: ${users.length}. Sublocations: ${subLabel}. Answer the user's question concisely and insightfully in 2-4 sentences. Be specific to ${wardLabel} context.`;
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,system:context,messages:[{role:"user",content:input}]})});
     const data=await res.json();
     const reply=data.content?.[0]?.text||"I could not generate a response. Please try again.";
@@ -5602,7 +5630,7 @@ document.getElementById("navDashboard").onclick=()=>showPane("dashboardContent")
         const ddName  = document.getElementById("avatarDdName");
         if (ddName)  ddName.textContent  = `${currentUser.firstName||""} ${currentUser.surname||""}`.trim() || "—";
         const ddSub   = document.getElementById("avatarDdSub");
-        if (ddSub)   ddSub.textContent   = `${currentUser.sublocation||"Ngoliba Ward"} · Voter #${currentUser.voterNumber||"—"}`;
+        if (ddSub)   ddSub.textContent   = `${currentUser.wardName||currentUser.sublocation||"Ward"} · Voter #${currentUser.voterNumber||"—"}`;
         // Mirror unread badge count into dropdown
         const srcCount = document.getElementById("notifCount");
         const tgtCount = document.getElementById("avatarDdNotifCount");
@@ -5959,6 +5987,20 @@ async function refreshDashboardStats(){
     }
     
     if (data.votersBySubLocation) {
+      // Stage 3B.1: derive SUBLOCATIONS dynamically from the actual keys
+      // returned by /api/stats rather than the previously hardcoded Ngoliba
+      // list. Every downstream consumer (heatmap, turnout grid, chart
+      // datasets, AI prompt) now reflects the real ward's sublocations.
+      const realSubs = Object.keys(data.votersBySubLocation);
+      if (realSubs.length > 0) {
+        SUBLOCATIONS = realSubs;
+        // Sync the sublocation filter dropdown to the real options
+        const filterSel = document.getElementById('sublocationFilter');
+        if (filterSel) {
+          filterSel.innerHTML = '<option value="">All sublocations</option>' +
+            realSubs.map(s => `<option value="${s}">${s}</option>`).join('');
+        }
+      }
       const container = document.getElementById("vrSubsContainer");
       if (container) {
         container.innerHTML = SUBLOCATIONS
@@ -6464,8 +6506,10 @@ window.renderVoterRegistry = async function(){
     
     const container = document.getElementById("vrSubsContainer");
     if (container) {
-      const SUBLOCATIONS = ['Ngoliba', 'Gatiiguru', 'Kilimambogo', 'Magogoni'];
-      container.innerHTML = SUBLOCATIONS
+      // Stage 3B.1: derive sublocations from real data keys, not hardcoded Ngoliba list
+      const subKeys = Object.keys(data.votersBySubLocation || {});
+      const activeSubs = subKeys.length > 0 ? subKeys : SUBLOCATIONS;
+      container.innerHTML = activeSubs
         .map(s => `<div class="vr-sub-item"><div class="vr-sub-num">${(data.votersBySubLocation || {})[s] || 0}</div><div class="vr-sub-label">${s}</div></div>`)
         .join("");
     }
