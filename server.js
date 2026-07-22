@@ -610,6 +610,7 @@ app.use(async (req, res, next) => {
     await ensureActivePeriod();        // now a no-op alias for backward compat
     await ensureCandidatesTable();     // multi-category candidates (preserves MCA IDs 0-6)
     await ensureGeographyTables();     // Phase 1: additive geographic foundation — no existing behaviour changes
+    await seedKiambuHierarchy();       // Phase 3B: complete Kiambu County administrative reference data
     await ensurePhase2Migrations();    // Phase 2: add ward_id columns, backfill existing rows, cache NGOLIBA_WARD_ID
   } else {
     console.warn('⚠️  Continuing without database. Some features may not work.');
@@ -948,6 +949,118 @@ async function ensureGeographyTables() {
     console.error('❌ ensureGeographyTables error:', e.message);
     // Non-fatal: geography tables are Phase 1 foundation only.
     // Existing functionality is unaffected if this fails.
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PHASE 3B — KIAMBU COUNTY COMPLETE REFERENCE DATA SEED
+// Idempotent: ON CONFLICT DO NOTHING on every insert.
+// Safe to run on every server startup — creates only what is missing.
+// Does NOT delete, truncate, or renumber any existing rows.
+// Does NOT touch users, votes, candidates, forum_posts, or notices.
+// Source: official IEBC administrative hierarchy for Kiambu County.
+// ══════════════════════════════════════════════════════════════════
+async function seedKiambuHierarchy() {
+  try {
+    console.log('🗺️  Seeding Kiambu County administrative hierarchy...');
+
+    // ── 1. Ensure Kiambu County exists ──────────────────────────────────
+    await pool.query(`
+      INSERT INTO counties (name)
+      VALUES ('Kiambu')
+      ON CONFLICT ON CONSTRAINT counties_name_unique DO NOTHING
+    `);
+
+    const countyRes = await pool.query(
+      `SELECT id FROM counties WHERE name = 'Kiambu' LIMIT 1`
+    );
+    if (!countyRes.rows.length) {
+      console.warn('⚠️  seedKiambuHierarchy: Kiambu county row not found after insert — skipping.');
+      return;
+    }
+    const countyId = countyRes.rows[0].id;
+
+    // ── 2. Constituency + ward data (official IEBC mapping) ─────────────
+    // Format: [ constituencyName, [ ward, ward, … ] ]
+    const KIAMBU_HIERARCHY = [
+      ['Gatundu South', [
+        'Kiganjo', 'Mutarakwa', 'Kinoo', 'Gituamba', 'Githobokoni'
+      ]],
+      ['Gatundu North', [
+        'Githiga', 'Kiamwangi', 'Kigoro', 'Gatuanyaga', 'Chania'
+      ]],
+      ['Juja', [
+        'Theta', 'Juja Farm', 'Witeithie', 'Kalimoni', 'Murera'
+      ]],
+      ['Thika Town', [
+        'Township', 'Kamenu', 'Hospital', 'Gatuanyaga', 'Ngoliba'
+      ]],
+      ['Ruiru', [
+        'Gitothua', 'Biashara', 'Gatongora', 'Kahawa Sukari',
+        'Kahawa Wendani', 'Mwiki', 'Mwihoko'
+      ]],
+      ['Githunguri', [
+        'Githunguri', 'Githiga', 'Ikinu', 'Ngewa', 'Komothai'
+      ]],
+      ['Kiambu', [
+        'Kiambu', "Ting'ang'a", 'Ndenderu', 'Kinoo', 'Kabete'
+      ]],
+      ['Kiambaa', [
+        'Cianda', 'Karuri', 'Ndumberi', 'Tinganga', 'Kihara'
+      ]],
+      ['Kabete', [
+        'Gitaru', 'Muguga', 'Nyadhuna', 'Kabete', 'Uthiru/Ruthimitu'
+      ]],
+      ['Kikuyu', [
+        'Karai', 'Nachu', 'Sigona', 'Kikuyu', 'Kinoo'
+      ]],
+      ['Limuru', [
+        'Ndeiya', 'Limuru Central', 'Ngecha/Tigoni', 'Kamirithu', 'Kinale'
+      ]],
+      ['Lari', [
+        'Kijabe', 'Nyanduma', 'Kirenga', "Lari/Kirenga", 'Kinale'
+      ]]
+    ];
+
+    // ── 3. Insert each constituency then its wards ───────────────────────
+    let consInserted = 0, wardInserted = 0;
+    for (const [consName, wards] of KIAMBU_HIERARCHY) {
+      // Insert constituency if missing
+      const consInsert = await pool.query(`
+        INSERT INTO constituencies (county_id, name)
+        VALUES ($1, $2)
+        ON CONFLICT ON CONSTRAINT constituencies_county_name DO NOTHING
+        RETURNING id
+      `, [countyId, consName]);
+      if (consInsert.rows.length > 0) consInserted++;
+
+      // Always resolve the constituency id (whether just inserted or pre-existing)
+      const consRes = await pool.query(
+        `SELECT id FROM constituencies WHERE county_id = $1 AND name = $2 LIMIT 1`,
+        [countyId, consName]
+      );
+      if (!consRes.rows.length) {
+        console.warn(`⚠️  seedKiambuHierarchy: constituency '${consName}' not found after insert — skipping its wards.`);
+        continue;
+      }
+      const consId = consRes.rows[0].id;
+
+      // Insert each ward if missing
+      for (const wardName of wards) {
+        const wardInsert = await pool.query(`
+          INSERT INTO wards (constituency_id, name)
+          VALUES ($1, $2)
+          ON CONFLICT ON CONSTRAINT wards_constituency_name DO NOTHING
+          RETURNING id
+        `, [consId, wardName]);
+        if (wardInsert.rows.length > 0) wardInserted++;
+      }
+    }
+
+    console.log(`✅ Kiambu hierarchy seeded — ${consInserted} new constituency(ies), ${wardInserted} new ward(s) added.`);
+  } catch (err) {
+    // Non-fatal: log and continue startup. Existing data is unaffected.
+    console.error('❌ seedKiambuHierarchy error (non-fatal):', err.message);
   }
 }
 
