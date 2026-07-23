@@ -5070,94 +5070,39 @@ function resetAdForm(){
   lastAdRequestId = null;
 }
 
-const PROMISES=[
-  {candidateId:0,text:"Construct 5km water pipeline to serve Ngoliba and Gatiiguru households",category:"Water",status:"progress",date:"Mar 2024"},
-  {candidateId:0,text:"Build 3 new ECD classrooms in Ngoliba Primary",category:"Education",status:"done",date:"Jan 2024"},
-  {candidateId:0,text:"Tarmac the Ngoliba-Murang'a link road",category:"Roads",status:"pending",date:"Jun 2024"},
-  {candidateId:0,text:"Establish youth bursary fund of KES 500,000",category:"Youth",status:"done",date:"Feb 2024"},
-  {candidateId:1,text:"Open a digital skills hub in Gatiiguru with free Wi-Fi",category:"Youth",status:"pending",date:"Apr 2024"},
-  {candidateId:1,text:"Launch women's micro-enterprise loan programme",category:"Women",status:"progress",date:"May 2024"},
-  {candidateId:1,text:"Distribute clean water purification tablets to 500 households",category:"Water",status:"done",date:"Jan 2024"},
-  {candidateId:2,text:"Construct modern abattoir in Kilimambogo",category:"Agriculture",status:"pending",date:"Aug 2024"},
-  {candidateId:2,text:"Facilitate cooperative loan of KES 2M for 100 farmers",category:"Agriculture",status:"done",date:"Feb 2024"},
-  {candidateId:2,text:"Tarmac the Kilimambogo market access road",category:"Roads",status:"progress",date:"Jul 2024"},
-  {candidateId:3,text:"Equip Magogoni dispensary with 24hr emergency services",category:"Health",status:"pending",date:"Jun 2024"},
-  {candidateId:3,text:"Conduct free vaccination drive for 2,000 residents",category:"Health",status:"done",date:"Jan 2024"},
-  {candidateId:3,text:"Install waste management bins across all market centres",category:"Environment",status:"progress",date:"Apr 2024"},
-  {candidateId:4,text:"Negotiate fertilizer subsidy for all ward farmers",category:"Agriculture",status:"done",date:"Mar 2024"},
-  {candidateId:4,text:"Build milk cooling plant in Ngoliba",category:"Agriculture",status:"pending",date:"Sep 2024"},
-  {candidateId:5,text:"Install 10 public Wi-Fi hotspots across the ward",category:"ICT",status:"pending",date:"Jul 2024"},
-  {candidateId:5,text:"Train 80 youth in phone repair and ICT skills",category:"Youth",status:"done",date:"Feb 2024"},
-  {candidateId:6,text:"Organize 10 public budget forums for residents",category:"Governance",status:"done",date:"Jan 2024"},
-  {candidateId:6,text:"Petition for road safety measures on Ngoliba road",category:"Roads",status:"progress",date:"Mar 2024"},
-];
+// Phase 3B Polish: PROMISES previously held 20 hardcoded, fabricated
+// candidate pledges (Ngoliba-specific text with fake statuses/dates) and
+// there is no backend, database, or API behind this feature. Rather than
+// inventing one, the fake data has been removed and the tab below now
+// renders an honest "Coming Soon" placeholder instead. (Note: no HTML
+// elements with ids promiseCandTabs/promiseSummaryBar/promisesList exist
+// in this page's markup and nothing currently calls this function, so
+// this tab isn't reachable through the UI today either way — but if a
+// nav entry for it is added back later, it will show the placeholder
+// below rather than fake promises.)
+const PROMISES=[];
 
 function renderPromisesTab(){
   const candTabs=document.getElementById("promiseCandTabs");
-  candTabs.innerHTML=CANDIDATES.map(c=>`<button class="promise-cand-tab ${c.id===activePromiseCandidate?"active":""}" data-cid="${c.id}"><img src="${c.img}" alt="${c.name}" loading="lazy"><span>${c.name.split(" ")[0]}</span></button>`).join("");
-  candTabs.querySelectorAll(".promise-cand-tab").forEach(btn=>{
-    btn.addEventListener("click",()=>{activePromiseCandidate=parseInt(btn.dataset.cid);renderPromisesTab();});
-  });
-  const myPromises=PROMISES.filter(p=>p.candidateId===activePromiseCandidate);
-  const done=myPromises.filter(p=>p.status==="done").length;
-  const progress=myPromises.filter(p=>p.status==="progress").length;
-  const pending=myPromises.filter(p=>p.status==="pending").length;
-  document.getElementById("promiseSummaryBar").innerHTML=`
-    <div class="promise-summary-stat"><div class="promise-summary-num">${myPromises.length}</div><div class="promise-summary-label">Total Promises</div></div>
-    <div class="promise-summary-stat"><div class="promise-summary-num" style="color:#5ddb96;">${done}</div><div class="promise-summary-label">Fulfilled</div></div>
-    <div class="promise-summary-stat"><div class="promise-summary-num" style="color:#60a5fa;">${progress}</div><div class="promise-summary-label">In Progress</div></div>
-    <div class="promise-summary-stat"><div class="promise-summary-num" style="color:#fbbf24;">${pending}</div><div class="promise-summary-label">Pending</div></div>
-    <div class="promise-summary-stat"><div class="promise-summary-num">${myPromises.length?Math.round((done/myPromises.length)*100):0}%</div><div class="promise-summary-label">Delivery Rate</div></div>`;
-  const ratings=JSON.parse(localStorage.getItem(`${DB_NS}:ratings:${currentUser.phone}`)||"{}");
-  document.getElementById("promisesList").innerHTML=myPromises.map((p,i)=>{
-    const statusMap={done:{cls:"psb-done",dot:"ps-done",label:"✅ Fulfilled"},progress:{cls:"psb-progress",dot:"ps-progress",label:"🔵 In Progress"},pending:{cls:"psb-pending",dot:"ps-pending",label:"🟡 Pending"},broken:{cls:"psb-broken",dot:"ps-broken",label:"❌ Broken"}};
-    const s=statusMap[p.status]||statusMap.pending;
-    const key=`${p.candidateId}:${i}`, userRating=ratings[key]||0;
-    return `<div class="promise-item"><div class="promise-status-dot ${s.dot}"></div><div class="promise-body"><div class="promise-text">${p.text}</div><div class="promise-cat">${p.category} · ${p.date}</div><div class="promise-rating">${[1,2,3,4,5].map(star=>`<span class="promise-star ${star<=userRating?"text-yellow-400":""}" data-key="${key}" data-star="${star}" style="color:${star<=userRating?"#f59e0b":"#d1d5db"};cursor:pointer;">${star<=userRating?"★":"☆"}</span>`).join("")}</div><div class="promise-meta"><span class="promise-status-badge ${s.cls}">${s.label}</span></div></div></div>`;
-  }).join("")||"<div style='text-align:center;color:var(--mid-gray);padding:2rem;'>No promises recorded yet.</div>";
-  // Bind star ratings
-  document.querySelectorAll(".promise-star").forEach(star=>{
-    star.addEventListener("click",()=>{
-      const key=star.dataset.key, rating=parseInt(star.dataset.star);
-      const r=JSON.parse(localStorage.getItem(`${DB_NS}:ratings:${currentUser.phone}`)||"{}");
-      r[key]=rating; localStorage.setItem(`${DB_NS}:ratings:${currentUser.phone}`,JSON.stringify(r));
-      const meta=DB.getVoterMeta(currentUser.phone); meta.ratingsGiven=(meta.ratingsGiven||0)+1; DB.saveVoterMeta(currentUser.phone,meta);
-      showToast("⭐ Rating saved","success"); renderPromisesTab();
-    });
-  });
-  initScrollReveal();
+  if(candTabs) candTabs.innerHTML="";
+  const summaryBar=document.getElementById("promiseSummaryBar");
+  if(summaryBar) summaryBar.innerHTML="";
+  const list=document.getElementById("promisesList");
+  if(list) list.innerHTML="<div style='text-align:center;color:var(--mid-gray);padding:2rem;'>📋 Promise Tracker — Coming Soon</div>";
 }
 
 // ═══ AI INSIGHTS TAB ═══
-const AI_INSIGHTS=[
-  {type:"trend",tag:"📈 TREND",title:"Grace Wanjiku gaining momentum in Gatiiguru",body:"Vote velocity analysis shows Grace Wanjiku has increased her share in Gatiiguru by an estimated 18% over the last 3 cycles. Her messaging on women's loans is resonating with the sublocation's dominant demographic."},
-  {type:"alert",tag:"⚠️ ALERT",title:"Low turnout detected in Kilimambogo",body:"Kilimambogo is showing turnout significantly below the ward average. Community mobilization in this sublocation could be decisive — it represents 28% of the ward's registered voter base."},
-  {type:"insight",tag:"💡 INSIGHT",title:"Water emerges as the #1 ward issue",body:"Analysis of forum posts and candidate interaction patterns shows 'water access' is mentioned in 43% of all community posts — significantly ahead of roads (28%), health (19%), and youth (10%)."},
-  {type:"predict",tag:"🔮 PREDICTION",title:"Current cycle winner likely to be decided by Ngoliba sublocation",body:"With Ngoliba sublocation contributing 35% of all votes cast and showing the highest turnout velocity, the leading candidate's margin in this sublocation is the strongest predictor of the cycle outcome."},
-  {type:"insight",tag:"💡 INSIGHT",title:"Incumbent advantage holding but shrinking",body:"Hon. James Mwangi maintains a name recognition advantage, but his vote share has declined across the last 4 cycles. New challengers are consolidating opposition vote. The race is tightening."},
-];
-const AI_ISSUES=[
-  {icon:"💧",name:"Water Access",count:43,color:"#3b82f6"},
-  {icon:"🛣️",name:"Roads",count:28,color:"#f59e0b"},
-  {icon:"🏥",name:"Health",count:19,color:"#ef4444"},
-  {icon:"🎓",name:"Youth",count:10,color:"#8b5cf6"},
-];
+// Cleanup: AI_INSIGHTS and AI_ISSUES previously held fabricated,
+// ward-specific trends/alerts/predictions and invented issue percentages
+// (fake candidate names, fake sublocations, fake %s). There is no real
+// backend insights endpoint, so rather than inventing data this tab now
+// honestly states that live insights aren't available.
 
 function renderAIInsightsTab(){
-  document.getElementById("aiIssueGrid").innerHTML=AI_ISSUES.map(issue=>`
-    <div class="ai-issue-card"><div class="ai-issue-icon">${issue.icon}</div><div class="ai-issue-name">${issue.name}</div><div class="ai-issue-count">${issue.count}% of posts</div><div class="ai-issue-bar"><div class="ai-issue-fill" style="width:${issue.count}%;background:${issue.color};height:4px;border-radius:2px;"></div></div></div>`).join("");
-  const agg=getCurrentPeriodAggregated();
-  const sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
-  const dynamicInsights=[...AI_INSIGHTS];
-  if(sorted[0].votes>0){
-    dynamicInsights.unshift({type:"trend",tag:"📊 LIVE DATA",title:`${sorted[0].name} leads with ${sorted[0].votes} votes this cycle`,body:`Current cycle data shows ${sorted[0].name} (${sorted[0].party}) leading with ${sorted[0].votes} votes. ${sorted[1]?.name} is in second with ${sorted[1]?.votes||0} votes — a gap of ${sorted[0].votes-(sorted[1]?.votes||0)}.`});
-  }
-  document.getElementById("aiInsightCards").innerHTML=dynamicInsights.map(ins=>`
-    <div class="ai-insight-card ai-card-${ins.type} scroll-reveal">
-      <div class="ai-insight-tag ai-tag-${ins.type}"><i class="fas ${ins.type==="trend"?"fa-arrow-trend-up":ins.type==="alert"?"fa-triangle-exclamation":ins.type==="predict"?"fa-crystal-ball":"fa-lightbulb"}"></i> ${ins.tag}</div>
-      <div class="ai-insight-title">${ins.title}</div>
-      <div class="ai-insight-body">${ins.body}</div>
-    </div>`).join("");
+  const grid=document.getElementById("aiIssueGrid");
+  if(grid) grid.innerHTML="";
+  const cards=document.getElementById("aiInsightCards");
+  if(cards) cards.innerHTML="<div style='text-align:center;color:var(--mid-gray);padding:2rem;'>Live insights are currently unavailable.</div>";
   initScrollReveal();
 }
 
@@ -5190,16 +5135,12 @@ async function handleAIAsk(){
 }
 
 function generateLocalAIResponse(query){
-  const agg=getCurrentPeriodAggregated();
-  const sorted=CANDIDATES.map(c=>({...c,votes:agg[c.id]?.total||0})).sort((a,b)=>b.votes-a.votes);
-  const q=query.toLowerCase();
-  if(q.includes("lead")||q.includes("win")||q.includes("ahead")){
-    return sorted[0].votes>0?`Based on current data, <strong>${sorted[0].name}</strong> (${sorted[0].party}) is leading with <strong>${sorted[0].votes} votes</strong> this cycle. ${sorted[1]?.name} is in second place with ${sorted[1]?.votes||0} votes. The margin could shift significantly with Kilimambogo turnout still low.`:`No votes have been cast yet this cycle. The race is wide open — register and vote to shape the outcome!`;
-  }
-  if(q.includes("water")){return "Water access is the #1 issue in Ngoliba Ward, mentioned in 43% of community forum posts. Magogoni and Ngoliba sublocations are most affected. Candidates Sarah Nduati and Grace Wanjiku have the most detailed water policy commitments.";}
-  if(q.includes("road")){return "Roads rank as the second most discussed issue (28% of posts). The Ngoliba-Kilimambogo road and Kilimambogo market access road are the most cited problem areas. Peter Kimani and David Kiprotich have made road infrastructure central to their campaigns.";}
-  if(q.includes("turnout")||q.includes("voter")){const t=DB.getUsers().length;return `Ngoliba Ward has ${t} registered voters across 4 sublocations. Current cycle turnout is ${JSON.parse(localStorage.getItem(KEYS.CURRENT_PERIOD)||'{"votes":[]}').votes.length} votes. Kilimambogo consistently shows below-average turnout — a key swing factor in cycle results.`;}
-  return `Based on current Ngoliba InfoTrack data: <strong>${sorted[0].votes>0?sorted[0].name:"No clear leader yet"}</strong> is in the lead. The top ward issues are water access (43%) and roads (28%). Kilimambogo sublocation turnout is the key variable to watch this cycle.`;
+  // Phase 3B Polish: this fallback previously invented ward-specific
+  // statistics, percentages, and candidate claims whenever the live AI
+  // request failed. It no longer fabricates any data — it just tells the
+  // user live analysis isn't available right now, regardless of what they
+  // asked.
+  return "Live AI analysis is currently unavailable. Please try again in a moment — in the meantime, the Leaderboard and Notice Board tabs have up-to-date information.";
 }
 
 function getTimeToReset(){
@@ -6085,31 +6026,42 @@ window.renderLeaderboardTab = async function(){
         .join("");
     }
     
-    // Simple leaderboard (would come from server)
+    // Phase 3B Polish: this used to be a hardcoded mockLeaderboard array
+    // with fake Ngoliba-specific voter names. It now reuses the same
+    // /api/analytics/leaders endpoint that powers the standalone
+    // leaderboard.html page — already ward-aware server-side, so this
+    // widget automatically shows the right ward's real candidate ranking
+    // with no changes needed here as more wards come online.
     const leaderboardList = document.getElementById("leaderboardList");
     if (leaderboardList) {
-      const mockLeaderboard = [
-        {rank: 1, name: 'John Mutua', sublocation: 'Ngoliba', score: 850, streak: 5, icon: '🥇'},
-        {rank: 2, name: 'Mary Wanjiru', sublocation: 'Kilimambogo', score: 720, streak: 3, icon: '🥈'},
-        {rank: 3, name: 'Peter Omondi', sublocation: 'Magogoni', score: 650, streak: 2, icon: '🥉'},
-        {rank: 4, name: 'Grace Kipchoge', sublocation: 'Gatiiguru', score: 580, streak: 1, icon: '#4'},
-        {rank: 5, name: currentUser?.firstName || 'You', sublocation: currentUser?.sublocation || 'Ngoliba', score: 50, streak: 0, icon: '⭐'}
-      ];
-      
-      leaderboardList.innerHTML = mockLeaderboard
-        .map((u, i) => `
-          <div class="lb-row ${u.name === (currentUser?.firstName) ? 'me' : ''}">
-            <div class="lb-rank">${u.icon}</div>
-            <img class="lb-avatar" src="https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=44&bold=true&name=${encodeURIComponent(u.name)}" alt="${u.name}">
-            <div class="lb-info">
-              <div class="lb-name">${u.name}${u.name === (currentUser?.firstName) ? '<span style="font-size:0.7rem;background:var(--gold);color:var(--forest);padding:0.1rem 0.4rem;border-radius:50px;font-weight:800;">YOU</span>' : ''}</div>
-              <div class="lb-meta">${u.sublocation} · 🔥 ${u.streak} streak</div>
-              <div class="lb-badges">⭐⭐⭐</div>
-            </div>
-            <div class="lb-score">${u.score}</div>
-          </div>
-        `)
-        .join("") || '<div style="text-align:center;color:var(--mid-gray);padding:2rem;">Loading leaderboard...</div>';
+      leaderboardList.innerHTML = '<div style="text-align:center;color:var(--mid-gray);padding:2rem;">Loading leaderboard...</div>';
+      try {
+        const lbData = await apiCall('/api/analytics/leaders?category=MCA');
+        const leaders = (lbData.success && Array.isArray(lbData.data && lbData.data.current)) ? lbData.data.current : [];
+
+        if (leaders.length === 0) {
+          leaderboardList.innerHTML = '<div style="text-align:center;color:var(--mid-gray);padding:2rem;">No leaderboard data yet.</div>';
+        } else {
+          const medalIcons = ['🥇', '🥈', '🥉'];
+          leaderboardList.innerHTML = leaders
+            .map((c, i) => `
+              <div class="lb-row">
+                <div class="lb-rank">${medalIcons[i] || `#${c.rank}`}</div>
+                <img class="lb-avatar" src="https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=44&bold=true&name=${encodeURIComponent(c.name)}" alt="${c.name}">
+                <div class="lb-info">
+                  <div class="lb-name">${c.name}</div>
+                  <div class="lb-meta">${c.party || 'Independent'} · ${c.percentage}% of votes</div>
+                  <div class="lb-badges">⭐⭐⭐</div>
+                </div>
+                <div class="lb-score">${c.votes}</div>
+              </div>
+            `)
+            .join("");
+        }
+      } catch (lbError) {
+        console.error('Leaderboard fetch error:', lbError);
+        leaderboardList.innerHTML = '<div style="text-align:center;color:var(--mid-gray);padding:2rem;">Failed to load leaderboard.</div>';
+      }
     }
     
     if (typeof initScrollReveal === 'function') initScrollReveal();
@@ -6918,7 +6870,7 @@ window.showWelcomePopup = async function(){
     const facts = [
       `Welcome back! 👋`,
       `🔥 You're an active voter`,
-      `${registeredVoters} registered Ngoliba voters`
+      `${registeredVoters} registered voters in ${currentUser.wardName || 'this ward'}`
     ];
     
     const titleEl = document.getElementById("welcomePopupTitle");

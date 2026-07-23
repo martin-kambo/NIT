@@ -605,13 +605,18 @@ app.use(async (req, res, next) => {
   const connected = await testDBConnection();
   if (connected) {
     await initDB();
-    await ensureNoticesTable();
     await ensureVotingPeriodsTable();  // ← must run BEFORE ensureActivePeriod so schema is ready
     await ensureActivePeriod();        // now a no-op alias for backward compat
     await ensureCandidatesTable();     // multi-category candidates (preserves MCA IDs 0-6)
     await ensureGeographyTables();     // Phase 1: additive geographic foundation — no existing behaviour changes
     await seedKiambuHierarchy();       // Phase 3B: complete Kiambu County administrative reference data
     await ensurePhase2Migrations();    // Phase 2: add ward_id columns, backfill existing rows, cache NGOLIBA_WARD_ID
+    await ensureNoticesTable();        // Phase 3B Polish: moved after ensurePhase2Migrations() so the
+                                        // notices.ward_id column and NGOLIBA_WARD_ID already exist before
+                                        // this function's seed INSERT runs (was throwing “column ward_id
+                                        // does not exist” on a brand-new database, which silently skipped
+                                        // both the notice seed and the forum/avatar migrations later in
+                                        // this same function).
   } else {
     console.warn('⚠️  Continuing without database. Some features may not work.');
   }
@@ -1833,11 +1838,10 @@ app.post('/api/vote', async (req, res) => {
 
     // ── Count totals and per-candidate ────────────────────────────────────
     // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
-    // NOTE: this only fixes the query — the SSE broadcast below still fans
-    // out to every connected client regardless of ward (voteClients in
-    // routes/voting.js isn't partitioned by ward at the connection level).
-    // That's a separate, larger change than "filter the read query" and
-    // wasn't attempted here.
+    // Phase 2.6E: the SSE broadcast below is ward-partitioned too — each
+    // connected client's wardId is captured at connection time and
+    // broadcastVoteUpdate() only delivers to clients whose wardId matches
+    // (see routes/voting.js), so this stays correct as more wards are added.
     const totalParams = [periodId];
     let totalWardClause = '';
     if (req.wardId != null) {
