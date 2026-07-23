@@ -580,8 +580,8 @@ app.use(async (req, res, next) => {
   if (session?.userId) {
     try {
       // Phase 4A.1: same query now also selects role + admin-scope columns
-      // so req.userId/req.userRole/req.adminScope are available for future
-      // phases (see lib/rbac.js) — req.wardId's own logic below is unchanged.
+      // so req.user is available for future phases (see lib/rbac.js) —
+      // req.wardId's own logic below is unchanged.
       const result = await pool.query(
         'SELECT ward_id, role, admin_county_id, admin_constituency_id, admin_ward_id FROM users WHERE id = $1',
         [session.userId]
@@ -590,28 +590,33 @@ app.use(async (req, res, next) => {
       const userWardId = row?.ward_id;
       req.wardId = userWardId || NGOLIBA_WARD_ID;
 
-      // Phase 4A.1 — RBAC foundation. Not read or enforced anywhere yet.
-      req.userId = session.userId;
-      req.userRole = row?.role || null;
-      req.adminScope = {
-        countyId: row?.admin_county_id ?? null,
-        constituencyId: row?.admin_constituency_id ?? null,
-        wardId: row?.admin_ward_id ?? null,
+      // Phase 4A.1 (refined) — RBAC foundation, consolidated into a single
+      // req.user object (id, role, adminCountyId, adminConstituencyId,
+      // adminWardId) rather than separate req.userId/req.userRole/
+      // req.adminScope fields. The scope fields are prefixed admin* —
+      // deliberately NOT req.user.wardId — because req.wardId above is a
+      // different, already-everywhere-used concept (the ward this user
+      // votes in), and an admin's administered ward is not guaranteed to
+      // be the same ward. Reusing the bare name wardId here would invite
+      // exactly the kind of mix-up two similarly-named-but-different
+      // fields tend to cause. Not read or enforced anywhere yet.
+      req.user = {
+        id: session.userId,
+        role: row?.role || null,
+        adminCountyId: row?.admin_county_id ?? null,
+        adminConstituencyId: row?.admin_constituency_id ?? null,
+        adminWardId: row?.admin_ward_id ?? null,
       };
     } catch (_) {
       // DB error during ward resolution — fall back to the founding ward
       // rather than failing the whole request. Logged for observability.
       console.error('[middleware] ward_id lookup failed, using NGOLIBA_WARD_ID fallback:', _.message);
       req.wardId = NGOLIBA_WARD_ID;
-      req.userId = session.userId;
-      req.userRole = null;
-      req.adminScope = null;
+      req.user = null;
     }
   } else {
     req.wardId = NGOLIBA_WARD_ID;
-    req.userId = null;
-    req.userRole = null;
-    req.adminScope = null;
+    req.user = null;
   }
 
   next();
