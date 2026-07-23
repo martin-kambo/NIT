@@ -54,6 +54,7 @@ const axios = require('axios');
 const votingRouterModule = require('./routes/voting');
 const { getAllCandidates, getCandidatesByCategory, FALLBACK_CANDIDATES } = require('./lib/candidates');
 const { transitionPeriod } = require('./lib/period-engine');
+const RBAC = require('./lib/rbac'); // Phase 4A.1: role model + unattached authorization helpers
 const votingRouter          = votingRouterModule.router || votingRouterModule;
 const broadcastVoteUpdate   = votingRouterModule.broadcastVoteUpdate || function(){};
 
@@ -578,20 +579,39 @@ app.use(async (req, res, next) => {
   const session = verifySession(req.headers.cookie);
   if (session?.userId) {
     try {
+      // Phase 4A.1: same query now also selects role + admin-scope columns
+      // so req.userId/req.userRole/req.adminScope are available for future
+      // phases (see lib/rbac.js) — req.wardId's own logic below is unchanged.
       const result = await pool.query(
-        'SELECT ward_id FROM users WHERE id = $1',
+        'SELECT ward_id, role, admin_county_id, admin_constituency_id, admin_ward_id FROM users WHERE id = $1',
         [session.userId]
       );
-      const userWardId = result.rows[0]?.ward_id;
+      const row = result.rows[0];
+      const userWardId = row?.ward_id;
       req.wardId = userWardId || NGOLIBA_WARD_ID;
+
+      // Phase 4A.1 — RBAC foundation. Not read or enforced anywhere yet.
+      req.userId = session.userId;
+      req.userRole = row?.role || null;
+      req.adminScope = {
+        countyId: row?.admin_county_id ?? null,
+        constituencyId: row?.admin_constituency_id ?? null,
+        wardId: row?.admin_ward_id ?? null,
+      };
     } catch (_) {
       // DB error during ward resolution — fall back to the founding ward
       // rather than failing the whole request. Logged for observability.
       console.error('[middleware] ward_id lookup failed, using NGOLIBA_WARD_ID fallback:', _.message);
       req.wardId = NGOLIBA_WARD_ID;
+      req.userId = session.userId;
+      req.userRole = null;
+      req.adminScope = null;
     }
   } else {
     req.wardId = NGOLIBA_WARD_ID;
+    req.userId = null;
+    req.userRole = null;
+    req.adminScope = null;
   }
 
   next();
@@ -611,6 +631,7 @@ app.use(async (req, res, next) => {
     await ensureGeographyTables();     // Phase 1: additive geographic foundation — no existing behaviour changes
     await seedKiambuHierarchy();       // Phase 3B: complete Kiambu County administrative reference data
     await ensurePhase2Migrations();    // Phase 2: add ward_id columns, backfill existing rows, cache NGOLIBA_WARD_ID
+    await ensureRBACFoundation();      // Phase 4A.1: add role + admin-scope columns to users, default VOTER (foundation only, not enforced)
     await ensureNoticesTable();        // Phase 3B Polish: moved after ensurePhase2Migrations() so the
                                         // notices.ward_id column and NGOLIBA_WARD_ID already exist before
                                         // this function's seed INSERT runs (was throwing “column ward_id
@@ -1157,6 +1178,89 @@ async function ensurePhase2Migrations() {
     console.error('❌ ensurePhase2Migrations error:', e.message);
     console.error(e.stack);
     // Non-fatal: ward_id is nullable — all existing flows continue unchanged.
+  }
+}
+
+// ── Phase 4A.1: RBAC Foundation ──
+// Adds role + admin-scope columns to users. Foundation only — see
+// lib/rbac.js. Nothing in this function changes any existing behavior:
+// role defaults to VOTER for every row (new and existing), nothing reads
+// or enforces it yet, and no other table is touched. Fully idempotent —
+// safe to run on every startup. Runs after ensurePhase2Migrations() so
+// the counties/constituencies/wards tables it references already exist.
+//
+// Design note (role + 3 columns, no new table): a user holds exactly one
+// role at a time, so a single VARCHAR column is enough for the role
+// itself — a separate roles table would be unnecessary. COUNTY_ADMIN /
+// CONSTITUENCY_ADMIN / WARD_ADMIN are each scoped to exactly one
+// specific county / constituency / ward, so each gets its own nullable,
+// FK-constrained column — mirroring the named-FK style already used for
+// ward_id elsewhere in this file — rather than one polymorphic
+// "scope_id" column, which would lose referential integrity (a single
+// column can't have a real FK pointing at three different tables
+// depending on role). SUPER_ADMIN, MODERATOR, and VOTER leave all three
+// scope columns NULL.
+async function ensureRBACFoundation() {
+  try {
+    // ── Step 1: role column, defaulted to VOTER ──
+    // DEFAULT 'VOTER' backfills existing rows automatically when the
+    // column is added, and makes every future INSERT INTO users (which
+    // doesn't list `role`) get VOTER with zero changes to the
+    // registration code path.
+    await pool.query(
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(30) DEFAULT 'VOTER'`
+    );
+    // Defensive backfill in case the column already existed without a
+    // default from some earlier partial run — idempotent, no-op once done.
+    await pool.query(`UPDATE users SET role = 'VOTER' WHERE role IS NULL`);
+
+    // Constrain to the known role set (idempotent — duplicate_object is
+    // swallowed the same way the ward_id FK constraints do it above).
+    await pool.query(`
+      DO $$
+      BEGIN
+        ALTER TABLE users
+          ADD CONSTRAINT users_role_check
+          CHECK (role IN ('SUPER_ADMIN','COUNTY_ADMIN','CONSTITUENCY_ADMIN','WARD_ADMIN','MODERATOR','VOTER'));
+      EXCEPTION WHEN duplicate_object THEN
+        NULL;
+      END $$
+    `);
+
+    // ── Step 2: geographic admin-scope columns ──
+    // Only populated for COUNTY_ADMIN / CONSTITUENCY_ADMIN / WARD_ADMIN
+    // respectively; NULL for SUPER_ADMIN, MODERATOR, and VOTER.
+    const SCOPE_COLUMNS = [
+      { column: 'admin_county_id',       table: 'counties',       fkName: 'users_admin_county_id_fk'       },
+      { column: 'admin_constituency_id', table: 'constituencies', fkName: 'users_admin_constituency_id_fk' },
+      { column: 'admin_ward_id',         table: 'wards',          fkName: 'users_admin_ward_id_fk'         },
+    ];
+
+    for (const { column, table, fkName } of SCOPE_COLUMNS) {
+      await pool.query(
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS ${column} INT`
+      );
+      await pool.query(`
+        DO $$
+        BEGIN
+          ALTER TABLE users
+            ADD CONSTRAINT ${fkName} FOREIGN KEY (${column}) REFERENCES ${table}(id);
+        EXCEPTION WHEN duplicate_object THEN
+          NULL;
+        END $$
+      `);
+      await pool.query(
+        `CREATE INDEX IF NOT EXISTS idx_users_${column} ON users(${column})`
+      );
+    }
+
+    console.log('✅ RBAC foundation ready (role + admin-scope columns on users, default VOTER)');
+  } catch (e) {
+    console.error('❌ ensureRBACFoundation error:', e.message);
+    console.error(e.stack);
+    // Non-fatal: role defaults to VOTER at the DB level regardless of
+    // whether this migration fully completes, so existing flows continue
+    // unchanged either way.
   }
 }
 
