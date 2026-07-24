@@ -637,6 +637,7 @@ app.use(async (req, res, next) => {
     await seedKiambuHierarchy();       // Phase 3B: complete Kiambu County administrative reference data
     await ensurePhase2Migrations();    // Phase 2: add ward_id columns, backfill existing rows, cache NGOLIBA_WARD_ID
     await ensureRBACFoundation();      // Phase 4A.1: add role + admin-scope columns to users, default VOTER (foundation only, not enforced)
+    await ensureSuperAdminBootstrap();  // Phase 4A.2: one-time VOTER->SUPER_ADMIN promotion via SUPER_ADMIN_PHONE, idempotent
     await ensureNoticesTable();        // Phase 3B Polish: moved after ensurePhase2Migrations() so the
                                         // notices.ward_id column and NGOLIBA_WARD_ID already exist before
                                         // this function's seed INSERT runs (was throwing “column ward_id
@@ -1270,6 +1271,45 @@ async function ensureRBACFoundation() {
 }
 
 // ── Middleware ──
+
+// ── Phase 4A.2: SUPER_ADMIN bootstrap ──
+// Bridges the legacy shared-secret admin system and the new per-user role
+// model: if SUPER_ADMIN_PHONE is set, promote that registered user from
+// VOTER to SUPER_ADMIN exactly once. Idempotent by construction — the
+// WHERE role='VOTER' clause means re-running this after the first
+// successful promotion matches zero rows and changes nothing, and it
+// never touches a user whose role isn't (or is no longer) VOTER, so a
+// manually-assigned or already-promoted role is never overwritten or
+// downgraded.
+async function ensureSuperAdminBootstrap() {
+  const phone = process.env.SUPER_ADMIN_PHONE;
+  if (!phone) return; // not configured — do nothing, as specified
+
+  try {
+    const result = await pool.query(
+      `UPDATE users SET role = 'SUPER_ADMIN' WHERE phone = $1 AND role = 'VOTER' RETURNING id`,
+      [phone]
+    );
+    if (result.rowCount > 0) {
+      console.log(`✅ SUPER_ADMIN bootstrap: promoted user id=${result.rows[0].id} (phone ${phone}) from VOTER to SUPER_ADMIN`);
+      return;
+    }
+    // No row updated — either the phone doesn't exist, or it exists but
+    // isn't VOTER anymore (already promoted in an earlier run, or manually
+    // reassigned to a different role since). Informational logging only,
+    // per spec — never treated as an error.
+    const existing = await pool.query(`SELECT id, role FROM users WHERE phone = $1`, [phone]);
+    if (existing.rows.length === 0) {
+      console.log(`ℹ️  SUPER_ADMIN bootstrap: no registered user found with phone ${phone} — nothing to do.`);
+    } else if (existing.rows[0].role !== 'SUPER_ADMIN') {
+      console.log(`ℹ️  SUPER_ADMIN bootstrap: user id=${existing.rows[0].id} (phone ${phone}) already has role '${existing.rows[0].role}', not VOTER — leaving unchanged.`);
+    }
+    // else: already SUPER_ADMIN from an earlier run — silently idempotent, nothing to log.
+  } catch (e) {
+    console.error('❌ ensureSuperAdminBootstrap error:', e.message);
+    // Non-fatal — startup continues regardless.
+  }
+}
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGIN || 'http://localhost:10000')
   .split(',')
   .map(o => o.trim())
@@ -1344,8 +1384,11 @@ const candidateUpload = multer({
 });
 
 // POST /api/admin/candidates/upload-photo — upload a candidate photo, return its public path
-app.post('/api/admin/candidates/upload-photo', (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: WARD_ADMIN+ (candidates are ward-managed content per the RBAC
+// role hierarchy). No wardId is available on this route to scope-check
+// against — it's a stateless file-upload utility, not tied to any specific
+// candidate record — so role-only gating is all that applies here.
+app.post('/api/admin/candidates/upload-photo', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), (req, res) => {
   candidateUpload.single('photo')(req, res, (err) => {
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ success: false, error: 'Image must be smaller than 5 MB' });
@@ -2486,8 +2529,11 @@ app.get('/api/my-votes', async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 
 // GET /api/admin/candidates?category=MCA — list candidates (optionally filtered)
-app.get('/api/admin/candidates', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: WARD_ADMIN+. Note: this route has no ward/geography filter to
+// scope-check against (returns all wards' candidates for any caller who
+// passes the role gate) — a pre-existing route-design limitation, not
+// something this phase adds filtering logic to invent a fix for.
+app.get('/api/admin/candidates', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
   const { category } = req.query;
   try {
     const result = category
@@ -2506,8 +2552,8 @@ app.get('/api/admin/candidates', async (req, res) => {
 });
 
 // POST /api/admin/candidates — add a new candidate
-app.post('/api/admin/candidates', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: WARD_ADMIN+, scope-checked against the target wardId.
+app.post('/api/admin/candidates', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
   const { name, party, bio, img, category, incumbent, wardId } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ success: false, error: 'name is required' });
   const cat = CANDIDATE_CATEGORIES.includes(category) ? category : 'MCA';
@@ -2515,6 +2561,9 @@ app.post('/api/admin/candidates', async (req, res) => {
   // body (sent by admin.html's new County→Constituency→Ward selector),
   // falling back so existing calls that don't send it keep working.
   const resolvedWardId = parseInt(wardId, 10) || NGOLIBA_WARD_ID;
+  // Phase 4A.2: caller must actually administer the ward they're creating
+  // this candidate in (SUPER_ADMIN bypasses via hasPermission's own check).
+  if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
   try {
     // display_order = 1 + current max within category
     const maxOrd = await pool.query(
@@ -2540,18 +2589,26 @@ app.post('/api/admin/candidates', async (req, res) => {
 });
 
 // PUT /api/admin/candidates/:id — edit an existing candidate
-app.put('/api/admin/candidates/:id', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: WARD_ADMIN+, scope-checked against the candidate's current
+// ward (so a WARD_ADMIN can't edit a candidate outside their own ward just
+// by omitting wardId from the request) and, if the request also reassigns
+// the candidate to a different ward, against that target ward too.
+app.put('/api/admin/candidates/:id', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
   const { name, party, bio, img, category, incumbent, wardId } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ success: false, error: 'name is required' });
   const cat = CANDIDATE_CATEGORIES.includes(category) ? category : 'MCA';
   try {
+    const current = await pool.query('SELECT ward_id FROM candidates WHERE id = $1', [req.params.id]);
+    if (!current.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    if (!requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+
     // Phase 3A Task 7: ward_id is only updated when wardId is supplied in
     // the request — omitting it (as every pre-existing caller does) leaves
     // the candidate's ward exactly as it was, so existing edits keep
     // working unchanged.
     const parsedWardId = parseInt(wardId, 10);
     const hasWardId = !isNaN(parsedWardId);
+    if (hasWardId && !requirePermission(req, res, { wardId: parsedWardId })) return;
 
     const result = hasWardId
       ? await pool.query(
@@ -2578,9 +2635,13 @@ app.put('/api/admin/candidates/:id', async (req, res) => {
 });
 
 // DELETE /api/admin/candidates/:id — remove a candidate
-app.delete('/api/admin/candidates/:id', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: WARD_ADMIN+, scope-checked against the candidate's current ward.
+app.delete('/api/admin/candidates/:id', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
   try {
+    const current = await pool.query('SELECT ward_id FROM candidates WHERE id = $1', [req.params.id]);
+    if (!current.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    if (!requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+
     const result = await pool.query(
       `DELETE FROM candidates WHERE id=$1 RETURNING id, name, category`,
       [req.params.id]
@@ -2972,10 +3033,22 @@ app.get('/api/forum', async (req, res) => {
 // explicit instruction not to invent new admin pages. A future
 // forum-moderation panel would consume this. Mirrors get_users' filter
 // priority (wardId > constituencyId > countyId) for consistency.
-app.get('/api/admin/forum-posts', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: MODERATOR+ (forum moderation). Scope-checked against
+// whichever geography filter was actually requested; a fully unfiltered
+// request (sees every ward at once) is restricted to SUPER_ADMIN.
+app.get('/api/admin/forum-posts', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     const { wardId, constituencyId, countyId } = req.query;
+    if (wardId != null) {
+      if (!requirePermission(req, res, { wardId: parseInt(wardId, 10) })) return;
+    } else if (constituencyId != null) {
+      if (!requirePermission(req, res, { constituencyId: parseInt(constituencyId, 10) })) return;
+    } else if (countyId != null) {
+      if (!requirePermission(req, res, { countyId: parseInt(countyId, 10) })) return;
+    } else if (!requirePermission(req, res, { role: RBAC.ROLES.SUPER_ADMIN })) {
+      return;
+    }
+
     const params = [];
     let whereClause = '';
     if (wardId != null) {
@@ -3376,20 +3449,18 @@ app.get('/api/notices', async (req, res) => {
 // ══════════════════════════════════════════════
 // POST /api/notices — admin: add a new notice
 // ══════════════════════════════════════════════
-app.post('/api/notices', async (req, res) => {
+// Phase 4A.2: MODERATOR+, scope-checked against the target ward. Replaces
+// the legacy body.adminSecret === process.env.ADMIN_SECRET check.
+app.post('/api/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
-    const { title, content, category, priority, days, adminSecret, wardId } = req.body;
-    const secret = process.env.ADMIN_SECRET;
-    if (!secret) return res.status(503).json({ success: false, error: 'Admin service not configured.' });
-    if (adminSecret !== secret) {
-      return res.status(403).json({ success: false, error: 'Unauthorized' });
-    }
+    const { title, content, category, priority, days, wardId } = req.body;
     if (!title || !content) {
       return res.status(400).json({ success: false, error: 'title and content are required' });
     }
     // Phase 3A Task 9: was hardcoded NGOLIBA_WARD_ID. wardId now read from
     // body, falling back so existing callers that don't send it keep working.
     const resolvedWardId = parseInt(wardId, 10) || NGOLIBA_WARD_ID;
+    if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
     const result = await pool.query(
       `INSERT INTO notices (title, content, category, priority, expires_at, created_by, ward_id)
        VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL, 'admin', $6)
@@ -3404,14 +3475,15 @@ app.post('/api/notices', async (req, res) => {
 });
 
 // DELETE /api/notices/:id — admin: remove a notice
-app.delete('/api/notices/:id', async (req, res) => {
+// Phase 4A.2: MODERATOR+, scope-checked against the notice's current ward
+// when it exists. If it doesn't exist, there's nothing to scope-check —
+// falls through to the original no-op-delete-then-success behavior so the
+// response contract for that case is unchanged from before this phase.
+app.delete('/api/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
-    const { adminSecret } = req.body;
-    const secret = process.env.ADMIN_SECRET;
-    if (!secret) return res.status(503).json({ success: false, error: 'Admin service not configured.' });
-    if (adminSecret !== secret) {
-      return res.status(403).json({ success: false, error: 'Unauthorized' });
-    }
+    const current = await pool.query('SELECT ward_id FROM notices WHERE id = $1', [req.params.id]);
+    if (current.rows.length && !requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+
     await pool.query('DELETE FROM notices WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (error) {
@@ -3446,6 +3518,29 @@ function checkNoticeAdminAuth(req, res) {
   return false;
 }
 
+// Phase 4A.2: checkNoticeAdminAuth() above is the legacy shared-secret
+// check. It has been superseded by lib/rbac.js for every route that used
+// to call it (see the RBAC.requireMinRole/requireRole middleware attached
+// to those routes below, and requirePermission() for the ones that also
+// need a per-request geographic scope check). It's left defined, unused,
+// rather than deleted, since deleting it isn't necessary to enforce RBAC
+// and touching more than the auth checks themselves isn't this phase's job.
+
+// Thin wrapper around the centralized RBAC.hasPermission() for route
+// handlers that need a scope check on data only available once the
+// request body/params/query have been parsed (so it can't be expressed as
+// route-level Express middleware the way requireRole/requireAnyRole/
+// requireMinRole can). The authorization DECISION still lives entirely in
+// RBAC.hasPermission — this only adapts its boolean return into the same
+// “check, auto-respond, tell the caller whether to continue” shape every
+// route handler below already uses (matches the existing
+// checkNoticeAdminAuth(req,res) calling convention it replaces).
+function requirePermission(req, res, opts) {
+  if (RBAC.hasPermission(req, opts)) return true;
+  res.status(403).json({ success: false, error: 'Forbidden' });
+  return false;
+}
+
 app.post('/api/admin/notices/verify', (req, res) => {
   // Accept JWT Bearer token (preferred) or legacy x-admin-password
   const authHeader = req.headers['authorization'] || '';
@@ -3457,8 +3552,10 @@ app.post('/api/admin/notices/verify', (req, res) => {
   return res.status(401).json({ success: false, error: 'Invalid password' });
 });
 
-app.get('/api/admin/notices', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: MODERATOR+. No ward filter exists on this route (returns all
+// wards' notices for any caller who passes the role gate) — same
+// pre-existing route-design limitation as GET /api/admin/candidates.
+app.get('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM notices ORDER BY created_at DESC');
     res.json({ success: true, data: { notices: result.rows } });
@@ -3468,13 +3565,14 @@ app.get('/api/admin/notices', async (req, res) => {
   }
 });
 
-app.post('/api/admin/notices', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: MODERATOR+, scope-checked against the target ward.
+app.post('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   const { title, content, category, priority, expiresAt, wardId } = req.body;
   if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
   // Phase 3A Task 9: was hardcoded NGOLIBA_WARD_ID. wardId now read from
   // body, falling back so existing callers that don't send it keep working.
   const resolvedWardId = parseInt(wardId, 10) || NGOLIBA_WARD_ID;
+  if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
   try {
     const result = await pool.query(
       'INSERT INTO notices (title,content,category,priority,expires_at,created_by,ward_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
@@ -3487,11 +3585,17 @@ app.post('/api/admin/notices', async (req, res) => {
   }
 });
 
-app.put('/api/admin/notices/:id', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: MODERATOR+, scope-checked against the notice's current ward
+// (this route doesn't accept wardId in the body at all, so the only way to
+// scope-check is against the existing record).
+app.put('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   const { title, content, category, priority, expiresAt } = req.body;
   if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
   try {
+    const current = await pool.query('SELECT ward_id FROM notices WHERE id = $1', [req.params.id]);
+    if (!current.rows.length) return res.status(404).json({ success: false, error: 'Notice not found' });
+    if (!requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+
     const result = await pool.query(
       'UPDATE notices SET title=$1,content=$2,category=$3,priority=$4,expires_at=$5,updated_at=NOW() WHERE id=$6 RETURNING *',
       [title, content, category||'general', priority||'normal', expiresAt||null, req.params.id]
@@ -3504,9 +3608,14 @@ app.put('/api/admin/notices/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/admin/notices/:id', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: MODERATOR+, scope-checked against the notice's current ward
+// when it exists (falls through to the original no-op-then-success
+// behavior when it doesn't, matching the pre-existing response contract).
+app.delete('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
+    const current = await pool.query('SELECT ward_id FROM notices WHERE id = $1', [req.params.id]);
+    if (current.rows.length && !requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+
     await pool.query('DELETE FROM notices WHERE id=$1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
@@ -3533,11 +3642,13 @@ app.post('/api/admin', async (req, res) => {
     return res.json({ success: true, token: `${payloadB64}.${sig}` });
   }
 
-  // ✅ For other actions, accept token from body or Authorization header
-  const authToken = token || (req.headers.authorization || '').replace('Bearer ', '');
-  if (!authToken) {
-    return res.status(401).json({ success: false, error: 'No token provided' });
-  }
+  // Phase 4A.2: the token-presence check this replaced never actually
+  // validated the token's signature (verifyAdminToken() was never called
+  // here) — any non-empty string passed. Replaced with a real RBAC check:
+  // every action below except admin_login (a legacy credential exchange,
+  // left untouched — see the comment on it above) now requires at least
+  // WARD_ADMIN, with per-action tightening below where warranted.
+  if (!requirePermission(req, res, { role: RBAC.ROLES.WARD_ADMIN })) return;
 
   // ✅ GET STATS - Fixed column names (period_start, period_end instead of created_at, ends_at)
 if (action === 'get_stats') {
@@ -3584,6 +3695,17 @@ if (action === 'get_users') {
     // since admin.html doesn't send any yet) reproduces the exact same
     // unfiltered result set as before, just with 3 extra columns appended.
     const { wardId, constituencyId, countyId } = req.body;
+    // Phase 4A.2: scope-checked against whichever filter was requested; a
+    // fully unfiltered request (every user, every ward) is SUPER_ADMIN-only.
+    if (wardId != null) {
+      if (!requirePermission(req, res, { wardId: parseInt(wardId, 10) })) return;
+    } else if (constituencyId != null) {
+      if (!requirePermission(req, res, { constituencyId: parseInt(constituencyId, 10) })) return;
+    } else if (countyId != null) {
+      if (!requirePermission(req, res, { countyId: parseInt(countyId, 10) })) return;
+    } else if (!requirePermission(req, res, { role: RBAC.ROLES.SUPER_ADMIN })) {
+      return;
+    }
     const params = [];
     let whereClause = '';
     if (wardId != null) {
@@ -3624,6 +3746,9 @@ if (action === 'get_users') {
   // control function as every other trigger, so the closing period (if any)
   // is always archived before the new one opens.
 if (action === 'add_period') {
+  // Phase 4A.2: voting periods are global, not ward-scoped, so this is
+  // SUPER_ADMIN-only regardless of the WARD_ADMIN+ gate already passed above.
+  if (!requirePermission(req, res, { role: RBAC.ROLES.SUPER_ADMIN })) return;
   const durationMinutes = req.body.durationMinutes ?? req.body.durationDays; // legacy field name accepted, always treated as minutes
   try {
     const result = await transitionPeriod(pool, broadcastVoteUpdate, {
@@ -3653,6 +3778,8 @@ if (action === 'add_period') {
 // before closing, and refuses to act if the given periodId isn't actually
 // the live active period (boundary guard against stale admin UI state).
 if (action === 'end_period') {
+  // Phase 4A.2: same reasoning as add_period — global, SUPER_ADMIN-only.
+  if (!requirePermission(req, res, { role: RBAC.ROLES.SUPER_ADMIN })) return;
   const { periodId } = req.body;
   if (!periodId) return res.status(400).json({ success: false, error: 'Period ID required' });
   try {
@@ -3673,8 +3800,11 @@ if (action === 'end_period') {
     return res.status(500).json({ success: false, error: error.message });
   }
 }
-  // ✅ DELETE USER - with token auth (already verified above) + cascade votes
+  // Phase 4A.2: destructive + system-wide (cascades vote deletion for any
+  // user in any ward) — SUPER_ADMIN-only regardless of the WARD_ADMIN+
+  // gate already passed above.
 if (action === 'delete_user') {
+  if (!requirePermission(req, res, { role: RBAC.ROLES.SUPER_ADMIN })) return;
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
   try {
@@ -3745,8 +3875,8 @@ app.get('/api/my-ad-requests', async (req, res) => {
 });
 
 // GET /api/admin/ad-requests — admin: list all ad requests (hidden excluded by default)
-app.get('/api/admin/ad-requests', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: MODERATOR+ (ad requests have no ward concept in the schema, so role-only gating applies).
+app.get('/api/admin/ad-requests', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     const showHidden = req.query.showHidden === 'true';
     const result = await pool.query(
@@ -3762,8 +3892,7 @@ app.get('/api/admin/ad-requests', async (req, res) => {
 });
 
 // PATCH /api/admin/ad-requests/:id/hide — toggle is_hidden
-app.patch('/api/admin/ad-requests/:id/hide', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+app.patch('/api/admin/ad-requests/:id/hide', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   const { hidden } = req.body; // true = hide, false = unhide
   try {
     const result = await pool.query(
@@ -3779,8 +3908,7 @@ app.patch('/api/admin/ad-requests/:id/hide', async (req, res) => {
 });
 
 // DELETE /api/admin/ad-requests/:id — permanently delete an ad request
-app.delete('/api/admin/ad-requests/:id', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+app.delete('/api/admin/ad-requests/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     const result = await pool.query(
       `DELETE FROM ad_requests WHERE id = $1 RETURNING id`,
@@ -3795,8 +3923,7 @@ app.delete('/api/admin/ad-requests/:id', async (req, res) => {
 });
 
 // PATCH /api/admin/ad-requests/:id — admin: update status + notes + optional fee
-app.patch('/api/admin/ad-requests/:id', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+app.patch('/api/admin/ad-requests/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   const { status, notes, fee } = req.body;
   const allowed = ['pending', 'payment_pending', 'approved', 'rejected', 'completed'];
   if (!status || !allowed.includes(status)) {
@@ -3867,8 +3994,8 @@ app.post('/api/ad-requests/:id/pay', async (req, res) => {
 // behavioral difference between this trigger and the automatic ones, now
 // expressed as a parameter rather than a second copy of the logic.
 // ════════════════════════════════════════════════
-app.post('/api/period/next', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: SUPER_ADMIN-only — global period control, not ward-scoped.
+app.post('/api/period/next', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (req, res) => {
 
   const { durationMinutes } = req.body;
 
@@ -4076,8 +4203,8 @@ app.get('/admin-voting', (req, res) => {
 // ════════════════════════════════════════════════
 
 // POST /api/admin/counties  { name }
-app.post('/api/admin/counties', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: SUPER_ADMIN-only — top of the geography hierarchy, no parent scope to check against.
+app.post('/api/admin/counties', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (req, res) => {
   try {
     const name = (req.body.name || '').trim();
     if (!name) {
@@ -4105,8 +4232,8 @@ app.post('/api/admin/counties', async (req, res) => {
 });
 
 // POST /api/admin/constituencies  { name, countyId }
-app.post('/api/admin/constituencies', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: COUNTY_ADMIN+, scope-checked against the target county.
+app.post('/api/admin/constituencies', RBAC.requireMinRole(RBAC.ROLES.COUNTY_ADMIN), async (req, res) => {
   try {
     const name = (req.body.name || '').trim();
     const countyId = parseInt(req.body.countyId, 10);
@@ -4116,6 +4243,7 @@ app.post('/api/admin/constituencies', async (req, res) => {
     if (!countyId || isNaN(countyId)) {
       return res.status(400).json({ success: false, error: 'countyId is required' });
     }
+    if (!requirePermission(req, res, { countyId })) return;
 
     const county = await pool.query('SELECT id FROM counties WHERE id = $1', [countyId]);
     if (county.rows.length === 0) {
@@ -4146,8 +4274,8 @@ app.post('/api/admin/constituencies', async (req, res) => {
 });
 
 // POST /api/admin/wards  { name, constituencyId }
-app.post('/api/admin/wards', async (req, res) => {
-  if (!checkNoticeAdminAuth(req, res)) return;
+// Phase 4A.2: CONSTITUENCY_ADMIN+, scope-checked against the target constituency.
+app.post('/api/admin/wards', RBAC.requireMinRole(RBAC.ROLES.CONSTITUENCY_ADMIN), async (req, res) => {
   try {
     const name = (req.body.name || '').trim();
     const constituencyId = parseInt(req.body.constituencyId, 10);
@@ -4157,6 +4285,7 @@ app.post('/api/admin/wards', async (req, res) => {
     if (!constituencyId || isNaN(constituencyId)) {
       return res.status(400).json({ success: false, error: 'constituencyId is required' });
     }
+    if (!requirePermission(req, res, { constituencyId })) return;
 
     const constituency = await pool.query('SELECT id FROM constituencies WHERE id = $1', [constituencyId]);
     if (constituency.rows.length === 0) {
@@ -4183,6 +4312,253 @@ app.post('/api/admin/wards', async (req, res) => {
     }
     console.error('[POST /api/admin/wards] ERROR:', e.message);
     return res.status(500).json({ success: false, error: 'Failed to create ward' });
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════
+// PHASE 4A.3 — ADMINISTRATOR IDENTITY MANAGEMENT (SUPER_ADMIN only)
+// New standalone endpoints, not part of the legacy /api/admin dispatcher.
+// All five routes below are gated with RBAC.requireRole(SUPER_ADMIN) —
+// exact match, not requireMinRole, since nothing outranks SUPER_ADMIN and
+// the task requires these specific actions to be SUPER_ADMIN-only, not
+// "SUPER_ADMIN and up".
+// ══════════════════════════════════════════════════════════
+
+// Validates a requested role + geographic scope against the DB, per the
+// hierarchy rules: SUPER_ADMIN/MODERATOR carry no geographic assignment;
+// COUNTY_ADMIN needs exactly a countyId; CONSTITUENCY_ADMIN needs exactly
+// a constituencyId; WARD_ADMIN needs exactly a wardId. If more than one
+// geography id is supplied together, the parent/child relationship
+// between them is cross-checked against the actual geography tables
+// (never trusts client-supplied hierarchy). Shared by both the promote
+// and update-scope endpoints so the validation logic lives in one place.
+async function validateAdminScope(role, { countyId, constituencyId, wardId }) {
+  countyId = countyId != null && countyId !== '' ? parseInt(countyId, 10) : null;
+  constituencyId = constituencyId != null && constituencyId !== '' ? parseInt(constituencyId, 10) : null;
+  wardId = wardId != null && wardId !== '' ? parseInt(wardId, 10) : null;
+
+  if (role === RBAC.ROLES.SUPER_ADMIN || role === RBAC.ROLES.MODERATOR) {
+    if (countyId != null || constituencyId != null || wardId != null) {
+      return { ok: false, error: `${role} must not have a geographic assignment` };
+    }
+    return { ok: true, scope: { admin_county_id: null, admin_constituency_id: null, admin_ward_id: null } };
+  }
+
+  if (role === RBAC.ROLES.COUNTY_ADMIN) {
+    if (countyId == null) return { ok: false, error: 'COUNTY_ADMIN requires countyId' };
+    if (constituencyId != null || wardId != null) {
+      return { ok: false, error: 'COUNTY_ADMIN must not have constituencyId or wardId' };
+    }
+    const county = await pool.query('SELECT id FROM counties WHERE id = $1', [countyId]);
+    if (!county.rows.length) return { ok: false, error: `County ${countyId} does not exist` };
+    return { ok: true, scope: { admin_county_id: countyId, admin_constituency_id: null, admin_ward_id: null } };
+  }
+
+  if (role === RBAC.ROLES.CONSTITUENCY_ADMIN) {
+    if (constituencyId == null) return { ok: false, error: 'CONSTITUENCY_ADMIN requires constituencyId' };
+    if (wardId != null) return { ok: false, error: 'CONSTITUENCY_ADMIN must not have wardId' };
+    const con = await pool.query('SELECT id, county_id FROM constituencies WHERE id = $1', [constituencyId]);
+    if (!con.rows.length) return { ok: false, error: `Constituency ${constituencyId} does not exist` };
+    if (countyId != null && con.rows[0].county_id !== countyId) {
+      return { ok: false, error: `Constituency ${constituencyId} does not belong to county ${countyId}` };
+    }
+    return { ok: true, scope: { admin_county_id: null, admin_constituency_id: constituencyId, admin_ward_id: null } };
+  }
+
+  if (role === RBAC.ROLES.WARD_ADMIN) {
+    if (wardId == null) return { ok: false, error: 'WARD_ADMIN requires wardId' };
+    const ward = await pool.query('SELECT id, constituency_id FROM wards WHERE id = $1', [wardId]);
+    if (!ward.rows.length) return { ok: false, error: `Ward ${wardId} does not exist` };
+    if (constituencyId != null && ward.rows[0].constituency_id !== constituencyId) {
+      return { ok: false, error: `Ward ${wardId} does not belong to constituency ${constituencyId}` };
+    }
+    if (countyId != null) {
+      const con = await pool.query('SELECT county_id FROM constituencies WHERE id = $1', [ward.rows[0].constituency_id]);
+      if (con.rows.length && con.rows[0].county_id !== countyId) {
+        return { ok: false, error: `Ward ${wardId} does not belong to county ${countyId}` };
+      }
+    }
+    return { ok: true, scope: { admin_county_id: null, admin_constituency_id: null, admin_ward_id: wardId } };
+  }
+
+  return { ok: false, error: `Unknown role '${role}'` };
+}
+
+// Console-only audit trail, matching the existing bracket-prefixed log
+// style used elsewhere (e.g. [add_period], [checkNoticeAdminAuth]). No
+// audit table yet — explicitly out of scope for this phase.
+function logAdminIdentityAction(req, action, targetUserId, details) {
+  console.log(
+    `[admin-identity] ${new Date().toISOString()} actor=${req.user.id} action=${action} target=${targetUserId} ${JSON.stringify(details)}`
+  );
+}
+
+// GET /api/admin/administrators — list every non-VOTER user with their
+// geographic assignment names resolved for display.
+app.get('/api/admin/administrators', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT u.id, u.first_name, u.surname, u.phone, u.role,
+             u.admin_county_id, cty.name AS admin_county_name,
+             u.admin_constituency_id, con.name AS admin_constituency_name,
+             u.admin_ward_id, w.name AS admin_ward_name
+        FROM users u
+        LEFT JOIN counties cty ON cty.id = u.admin_county_id
+        LEFT JOIN constituencies con ON con.id = u.admin_constituency_id
+        LEFT JOIN wards w ON w.id = u.admin_ward_id
+       WHERE u.role IS NOT NULL AND u.role != 'VOTER'
+       ORDER BY u.role, u.first_name
+    `);
+    res.json({ success: true, administrators: result.rows });
+  } catch (err) {
+    console.error('GET /api/admin/administrators error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/admin/administrators/search?q=... — search ANY user (not just
+// current administrators) by phone or name, so a SUPER_ADMIN can find a
+// plain VOTER to promote. Needed by the promote UI — the promote endpoint
+// below requires a userId, and this is how the caller finds one.
+app.get('/api/admin/administrators/search', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json({ success: true, users: [] });
+    const result = await pool.query(
+      `SELECT id, first_name, surname, phone, role FROM users
+        WHERE phone ILIKE $1 OR first_name ILIKE $1 OR surname ILIKE $1
+        ORDER BY created_at DESC LIMIT 20`,
+      [`%${q}%`]
+    );
+    res.json({ success: true, users: result.rows });
+  } catch (err) {
+    console.error('GET /api/admin/administrators/search error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/admin/administrators/promote  { userId, role, countyId?, constituencyId?, wardId? }
+app.post('/api/admin/administrators/promote', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (req, res) => {
+  try {
+    const { userId, role, countyId, constituencyId, wardId } = req.body;
+    if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+    if (!role || !RBAC.isValidRole(role)) {
+      return res.status(400).json({ success: false, error: 'role must be one of: ' + RBAC.VALID_ROLES.join(', ') });
+    }
+    if (role === RBAC.ROLES.VOTER) {
+      return res.status(400).json({ success: false, error: 'Use the demote endpoint to set a user back to VOTER' });
+    }
+    // Prevent dangerous operations: no self-service role changes.
+    if (String(userId) === String(req.user.id)) {
+      return res.status(403).json({ success: false, error: 'You cannot change your own role' });
+    }
+
+    const target = await pool.query('SELECT id, role, admin_county_id, admin_constituency_id, admin_ward_id FROM users WHERE id = $1', [userId]);
+    if (!target.rows.length) {
+      // Covers both "never existed" and "deleted" — this app hard-deletes users, so there's no separate soft-delete state to distinguish.
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const validation = await validateAdminScope(role, { countyId, constituencyId, wardId });
+    if (!validation.ok) return res.status(400).json({ success: false, error: validation.error });
+    const { scope } = validation;
+
+    const existing = target.rows[0];
+    if (
+      existing.role === role &&
+      existing.admin_county_id === scope.admin_county_id &&
+      existing.admin_constituency_id === scope.admin_constituency_id &&
+      existing.admin_ward_id === scope.admin_ward_id
+    ) {
+      return res.status(409).json({ success: false, error: 'User already has this exact role and scope' });
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET role = $1, admin_county_id = $2, admin_constituency_id = $3, admin_ward_id = $4
+        WHERE id = $5
+        RETURNING id, first_name, surname, phone, role, admin_county_id, admin_constituency_id, admin_ward_id`,
+      [role, scope.admin_county_id, scope.admin_constituency_id, scope.admin_ward_id, userId]
+    );
+
+    logAdminIdentityAction(req, 'promote', userId, { newRole: role, scope });
+    res.json({ success: true, administrator: result.rows[0] });
+  } catch (err) {
+    console.error('POST /api/admin/administrators/promote error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/admin/administrators/demote  { userId }
+app.post('/api/admin/administrators/demote', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+    // Prevent dangerous operations: no self-service role changes.
+    if (String(userId) === String(req.user.id)) {
+      return res.status(403).json({ success: false, error: 'You cannot change your own role' });
+    }
+
+    const target = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    if (!target.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+
+    if (target.rows[0].role === RBAC.ROLES.VOTER) {
+      return res.status(409).json({ success: false, error: 'User is already a VOTER' });
+    }
+
+    if (target.rows[0].role === RBAC.ROLES.SUPER_ADMIN) {
+      const count = await pool.query(`SELECT COUNT(*)::int AS n FROM users WHERE role = 'SUPER_ADMIN'`);
+      if (count.rows[0].n <= 1) {
+        return res.status(403).json({ success: false, error: 'Cannot remove the last SUPER_ADMIN' });
+      }
+    }
+
+    const result = await pool.query(
+      `UPDATE users SET role = 'VOTER', admin_county_id = NULL, admin_constituency_id = NULL, admin_ward_id = NULL
+        WHERE id = $1
+        RETURNING id, first_name, surname, phone, role`,
+      [userId]
+    );
+
+    logAdminIdentityAction(req, 'demote', userId, { newRole: 'VOTER', scope: null });
+    res.json({ success: true, administrator: result.rows[0] });
+  } catch (err) {
+    console.error('POST /api/admin/administrators/demote error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/administrators/:id/scope  { countyId?, constituencyId?, wardId? }
+// Changes an existing administrator's geographic assignment without
+// changing their role — re-validates the new scope against their current
+// role's requirements using the same validateAdminScope() used by promote.
+app.patch('/api/admin/administrators/:id/scope', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { countyId, constituencyId, wardId } = req.body;
+
+    const target = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    if (!target.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+    if (target.rows[0].role === RBAC.ROLES.VOTER) {
+      return res.status(400).json({ success: false, error: 'User is not an administrator — promote them first' });
+    }
+
+    const validation = await validateAdminScope(target.rows[0].role, { countyId, constituencyId, wardId });
+    if (!validation.ok) return res.status(400).json({ success: false, error: validation.error });
+    const { scope } = validation;
+
+    const result = await pool.query(
+      `UPDATE users SET admin_county_id = $1, admin_constituency_id = $2, admin_ward_id = $3
+        WHERE id = $4
+        RETURNING id, first_name, surname, phone, role, admin_county_id, admin_constituency_id, admin_ward_id`,
+      [scope.admin_county_id, scope.admin_constituency_id, scope.admin_ward_id, userId]
+    );
+
+    logAdminIdentityAction(req, 'update_scope', userId, { role: target.rows[0].role, scope });
+    res.json({ success: true, administrator: result.rows[0] });
+  } catch (err) {
+    console.error('PATCH /api/admin/administrators/:id/scope error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
