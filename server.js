@@ -1464,26 +1464,13 @@ function sanitizeUser(user) {
   return safe;
 }
 
-function createAdminToken() {
-  const payload = { role: 'admin', exp: Date.now() + 4 * 60 * 60 * 1000 };
-  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64');
-  const sig = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(payloadB64).digest('base64');
-  return `${payloadB64}.${sig}`;
-}
-
-function verifyAdminToken(authHeader) {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-  const token = authHeader.slice(7);
-  try {
-    const [payloadB64, sig] = token.split('.');
-    const expected = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(payloadB64).digest('base64');
-    if (sig !== expected) return false;
-    const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
-    if (payload.role !== 'admin') return false;
-    if (payload.exp < Date.now()) return false;
-    return true;
-  } catch { return false; }
-}
+// Phase 4A.3C: createAdminToken() removed — provably dead code (confirmed
+// zero callers anywhere in the project; it was defined but never invoked,
+// even before this phase's migration work).
+// Phase 4A.3D: verifyAdminToken() also removed — its one remaining caller,
+// POST /api/admin/notices/verify, was just removed too (admin-notices.html
+// now logs in via /api/auth like every other page). Re-confirmed zero
+// callers project-wide before deleting.
 
 async function getNextVoterNumber() {
   // Guarantee the counters row exists even when initDB() early-exited because
@@ -3493,38 +3480,21 @@ app.delete('/api/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async 
 // ══════════════════════════════════════════════════════
 // /api/admin/notices — notice management endpoints
 // ══════════════════════════════════════════════════════
-function checkNoticeAdminAuth(req, res) {
-  // ── PRIMARY PATH: JWT Bearer token (same credential the admin panel already holds) ──
-  // This fixes the two-headed auth mismatch where ADMIN_PASSWORD_HASH (login) and
-  // ADMIN_SECRET (candidate/notice routes) were independent env vars that could diverge.
-  const authHeader = req.headers['authorization'] || '';
-  if (authHeader.startsWith('Bearer ') && verifyAdminToken(authHeader)) {
-    return true;
-  }
+// Phase 4A.3C: checkNoticeAdminAuth() removed — provably dead code.
+// Confirmed zero callers anywhere in the project: every route that used
+// to call it was migrated to RBAC.requireMinRole/requireRole in Phase
+// 4A.2 (candidates, notices, forum-posts, ad-requests, period/next,
+// geography creation) and this session (routes/voting.js,
+// routes/analytics.js). Its ADMIN_SECRET fallback and Bearer-token check
+// used the same mechanism POST /api/admin/notices/verify used — that
+// route and verifyAdminToken() were both removed in Phase 4A.3D once
+// admin-notices.html (the route's last caller) migrated to /api/auth.
 
-  // ── FALLBACK PATH: legacy x-admin-password header (keeps direct API access working) ──
-  const secret   = process.env.ADMIN_SECRET;
-  if (!secret) {
-    console.error('[checkNoticeAdminAuth] ADMIN_SECRET environment variable is not set.');
-    res.status(503).json({ success: false, error: 'Admin service not configured.' });
-    return false;
-  }
-  const provided = req.headers['x-admin-password'];
-  if (provided && provided === secret) {
-    return true;
-  }
-
-  res.status(401).json({ success: false, error: 'Unauthorized' });
-  return false;
-}
-
-// Phase 4A.2: checkNoticeAdminAuth() above is the legacy shared-secret
-// check. It has been superseded by lib/rbac.js for every route that used
-// to call it (see the RBAC.requireMinRole/requireRole middleware attached
-// to those routes below, and requirePermission() for the ones that also
-// need a per-request geographic scope check). It's left defined, unused,
-// rather than deleted, since deleting it isn't necessary to enforce RBAC
-// and touching more than the auth checks themselves isn't this phase's job.
+// (Historical note, Phase 4A.2: checkNoticeAdminAuth() used to sit here as
+// the legacy shared-secret check, superseded by lib/rbac.js for every
+// route that called it. It was left defined-but-unused at the time; Phase
+// 4A.3C removed it once its zero-callers status was reconfirmed — see the
+// comment above this one.)
 
 // Thin wrapper around the centralized RBAC.hasPermission() for route
 // handlers that need a scope check on data only available once the
@@ -3541,16 +3511,11 @@ function requirePermission(req, res, opts) {
   return false;
 }
 
-app.post('/api/admin/notices/verify', (req, res) => {
-  // Accept JWT Bearer token (preferred) or legacy x-admin-password
-  const authHeader = req.headers['authorization'] || '';
-  if (authHeader.startsWith('Bearer ') && verifyAdminToken(authHeader)) return res.json({ success: true });
-  const secret   = process.env.ADMIN_SECRET;
-  if (!secret) return res.status(503).json({ success: false, error: 'Admin service not configured.' });
-  const provided = req.headers['x-admin-password'];
-  if (provided && provided === secret) return res.json({ success: true });
-  return res.status(401).json({ success: false, error: 'Invalid password' });
-});
+// Phase 4A.3D: POST /api/admin/notices/verify removed. It was
+// admin-notices.html's login check — that page now calls POST /api/auth
+// like every other page in the app. Confirmed zero remaining callers
+// anywhere in the project (server.js, routes/, every mounted router, and
+// every .html file) before removing it.
 
 // Phase 4A.2: MODERATOR+. No ward filter exists on this route (returns all
 // wards' notices for any caller who passes the role gate) — same
@@ -3627,27 +3592,20 @@ app.delete('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), 
 app.post('/api/admin', async (req, res) => {
   const { action, password, token } = req.body;
 
-  // ✅ admin_login action
-  if (action === 'admin_login') {
-    const adminHash = process.env.ADMIN_PASSWORD_HASH;
-    const inputHash = crypto.createHash('sha256').update(password).digest('hex').toUpperCase();
-
-    if (!adminHash || inputHash !== adminHash.toUpperCase()) {
-      return res.status(401).json({ success: false, error: 'Invalid password' });
-    }
-
-    const payload = { role: 'admin', exp: Date.now() + 8 * 60 * 60 * 1000 };
-    const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64');
-    const sig = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(payloadB64).digest('base64');
-    return res.json({ success: true, token: `${payloadB64}.${sig}` });
-  }
+  // Phase 4A.3D: admin_login action removed. It issued a Bearer token
+  // that, as of this phase, is accepted by zero routes anywhere in the
+  // project — the last route that checked it (POST /api/admin/notices/
+  // verify) and the last frontend page that called it (admin-notices.html)
+  // were both removed/migrated in this same phase. Re-confirmed zero
+  // remaining callers (grepped every .html file) before removing it.
+  // Administrators now authenticate the same way every other user does:
+  // POST /api/auth -> session cookie -> req.user -> RBAC below.
 
   // Phase 4A.2: the token-presence check this replaced never actually
   // validated the token's signature (verifyAdminToken() was never called
   // here) — any non-empty string passed. Replaced with a real RBAC check:
-  // every action below except admin_login (a legacy credential exchange,
-  // left untouched — see the comment on it above) now requires at least
-  // WARD_ADMIN, with per-action tightening below where warranted.
+  // every action below now requires at least WARD_ADMIN, with per-action
+  // tightening below where warranted.
   if (!requirePermission(req, res, { role: RBAC.ROLES.WARD_ADMIN })) return;
 
   // ✅ GET STATS - Fixed column names (period_start, period_end instead of created_at, ends_at)

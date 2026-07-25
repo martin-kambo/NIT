@@ -7,6 +7,7 @@ const express = require('express');
 const crypto = require('crypto');
 const analyticsEngine = require('../lib/analytics-engine');
 const { getCandidatesByCategory } = require('../lib/candidates');
+const RBAC = require('../lib/rbac'); // Phase 4A.3C: migrating this file's last legacy-secret-gated route to RBAC
 
 const router = express.Router();
 
@@ -492,26 +493,12 @@ router.get('/api/analytics/compare', async (req, res) => {
 /**
  * POST /api/analytics/export (Admin)
  * Export analytics as CSV or PDF
+ * Phase 4A.3C: WARD_ADMIN+ — read-only export of otherwise-public
+ * analytics data, same minimum-role reasoning as the other read-only
+ * admin analytics/stats endpoints already migrated in server.js.
  */
-router.post('/api/analytics/export', async (req, res) => {
+router.post('/api/analytics/export', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
     try {
-        const adminPassword = req.headers['x-admin-password'];
-        
-        if (!adminPassword) {
-            return res.status(401).json({
-                success: false,
-                error: 'Admin password required'
-            });
-        }
-
-        const hash = crypto.createHash('sha256').update(adminPassword).digest('hex');
-        if (hash.toUpperCase() !== (process.env.ADMIN_PASSWORD_HASH || '').toUpperCase()) {
-            return res.status(401).json({
-                success: false,
-                error: 'Invalid admin password'
-            });
-        }
-
         const { format = 'csv', category = 'MCA' } = req.body;
 
         if (format === 'csv') {

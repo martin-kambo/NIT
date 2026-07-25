@@ -195,9 +195,14 @@
 
         <form onsubmit="handleLogin(event)">
             <div class="form-group">
-                <label for="password">Admin Password</label>
-                <input type="password" id="password" placeholder="Enter admin password"
-                       required autocomplete="off">
+                <label for="phone">Phone Number</label>
+                <input type="tel" id="phone" placeholder="Enter your registered phone number"
+                       required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Enter your password"
+                       required autocomplete="current-password">
             </div>
             <button type="submit" class="btn btn-primary">Login</button>
         </form>
@@ -291,9 +296,8 @@
     // STATE
     // ─────────────────────────────────────────
     const state = {
-        isAuthenticated: false,
-        adminToken:      '',   // Bearer token only — raw password is never stored
-        loginVerified:   false,
+        isAuthenticated: false,   // Phase 4A.3C: no more Bearer token in state — the
+        loginVerified:   false,   // credential is the browser's own session cookie now.
         period:          null,
         votes:           [],
         results:         [],
@@ -306,25 +310,34 @@
     // ─────────────────────────────────────────
     async function handleLogin(event) {
         event.preventDefault();
+        const phone = document.getElementById('phone').value.trim();
         const password = document.getElementById('password').value;
-        if (!password) { showAlert('loginAlert', 'Please enter a password', 'error'); return; }
+        if (!phone || !password) { showAlert('loginAlert', 'Please enter your phone number and password', 'error'); return; }
 
         try {
-            const res  = await fetch('/api/admin', {
+            const res  = await fetch('/api/auth', {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ action: 'admin_login', password })
+                body:    JSON.stringify({ action: 'login', phone, password })
             });
             const json = await res.json();
 
-            if (!res.ok || !json.success || !json.token) {
-                showAlert('loginAlert', 'Incorrect password. Please try again.', 'error');
+            if (!res.ok || !json.success) {
+                showAlert('loginAlert', json.error || 'Incorrect phone number or password. Please try again.', 'error');
                 document.getElementById('password').value = '';
                 return;
             }
 
-            // Store the Bearer token only — raw password is discarded immediately
-            state.adminToken      = json.token;
+            // Valid voter credentials don't necessarily mean admin access —
+            // confirm against an RBAC-protected endpoint before proceeding.
+            const probe = await fetch('/api/admin/votes', { credentials: 'include' });
+            if (probe.status === 401 || probe.status === 403) {
+                showAlert('loginAlert', 'This account does not have administrator access.', 'error');
+                document.getElementById('password').value = '';
+                await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) }).catch(() => {});
+                return;
+            }
+
             state.isAuthenticated = true;
             state.loginVerified   = true;
 
@@ -341,10 +354,13 @@
         loadData();
     }
 
-    function handleLogout() {
+    async function handleLogout() {
         state.isAuthenticated = false;
-        state.adminToken      = '';
         state.loginVerified   = false;
+
+        try {
+            await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) });
+        } catch (_) { /* best-effort — still reset the UI below even if this fails */ }
 
         document.getElementById('loginScreen').style.display = 'block';
         document.getElementById('adminScreen').classList.remove('active');
@@ -396,14 +412,12 @@
 
     async function loadVotes() {
         try {
-            const res = await fetch('/api/admin/votes', {
-                headers: { 'Authorization': 'Bearer ' + state.adminToken }
-            });
+            const res = await fetch('/api/admin/votes', { credentials: 'include' });
             const json = await res.json();
 
             if (!json.success) {
-                if (res.status === 401 && state.loginVerified) {
-                    console.warn('[admin] 401 from /api/admin/votes — forcing logout');
+                if ((res.status === 401 || res.status === 403) && state.loginVerified) {
+                    console.warn('[admin] ' + res.status + ' from /api/admin/votes — forcing logout');
                     handleLogout();
                 }
                 throw new Error(json.error);
@@ -425,7 +439,8 @@
 
             const res  = await fetch('/api/period/next', {
                 method:  'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.adminToken },
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body:    JSON.stringify({ durationMinutes: duration })
             });
 
@@ -446,7 +461,7 @@
         try {
             const res  = await fetch(`/api/vote/${voteId}`, {
                 method:  'DELETE',
-                headers: { 'Authorization': 'Bearer ' + state.adminToken }
+                credentials: 'include'
             });
             const json = await res.json();
             if (!json.success) throw new Error(json.error);

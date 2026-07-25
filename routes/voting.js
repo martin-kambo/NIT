@@ -7,6 +7,7 @@ const express = require('express');
 const crypto  = require('crypto');
 const { getCandidatesByCategory } = require('../lib/candidates');
 const { transitionPeriod } = require('../lib/period-engine');
+const RBAC = require('../lib/rbac'); // Phase 4A.3C: migrating this file's last two legacy-secret-gated routes to RBAC
 
 const router = express.Router();
 
@@ -352,16 +353,12 @@ router.get('/api/voting-results/face-off', async (req, res) => {
 /**
  * Admin: DELETE /api/vote/:id
  * Remove a single vote record.
+ * Phase 4A.3C: SUPER_ADMIN-only — destructive, and not ward-scoped (this
+ * mutates voting_periods.total_votes globally), matching the same
+ * minimum-role reasoning already applied to add_period/end_period/
+ * delete_user in server.js.
  */
-router.delete('/api/vote/:id', async (req, res) => {
-    const adminPassword = req.headers['x-admin-password'];
-    if (!adminPassword) return res.status(401).json({ success: false, error: 'Admin password required' });
-
-    const hash = crypto.createHash('sha256').update(adminPassword).digest('hex');
-    if (hash.toUpperCase() !== (process.env.ADMIN_PASSWORD_HASH || '').toUpperCase()) {
-        return res.status(401).json({ success: false, error: 'Invalid admin password' });
-    }
-
+router.delete('/api/vote/:id', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (req, res) => {
     try {
         const voteResult = await req.pool.query(
             `SELECT period_id, candidate_id FROM votes WHERE id = $1`, [req.params.id]
@@ -390,16 +387,14 @@ router.delete('/api/vote/:id', async (req, res) => {
 /**
  * Admin: GET /api/admin/votes
  * Recent votes for the current period with candidate names.
+ * Phase 4A.3C: WARD_ADMIN+, read-only — same minimum-role reasoning as
+ * get_stats/get_periods in server.js's /api/admin dispatcher. No ward
+ * filter exists on this route (returns the current period's votes
+ * across every ward for any caller who passes the role gate) — a
+ * pre-existing route-design limitation, not something this migration
+ * adds new filtering logic to fix.
  */
-router.get('/api/admin/votes', async (req, res) => {
-    const adminPassword = req.headers['x-admin-password'];
-    if (!adminPassword) return res.status(401).json({ success: false, error: 'Admin password required' });
-
-    const hash = crypto.createHash('sha256').update(adminPassword).digest('hex');
-    if (hash.toUpperCase() !== (process.env.ADMIN_PASSWORD_HASH || '').toUpperCase()) {
-        return res.status(401).json({ success: false, error: 'Invalid admin password' });
-    }
-
+router.get('/api/admin/votes', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
     try {
         const period = await getCurrentPeriod(req.pool);
         const result = await req.pool.query(`

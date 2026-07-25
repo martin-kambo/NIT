@@ -514,13 +514,23 @@
         
         <form onsubmit="handleLogin(event)">
             <div class="form-group">
-                <label for="password">Admin Password</label>
+                <label for="phone">Phone Number</label>
+                <input
+                    type="tel"
+                    id="phone"
+                    placeholder="Enter your registered phone number"
+                    required
+                    autocomplete="username"
+                >
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
                 <input 
                     type="password" 
                     id="password" 
-                    placeholder="Enter admin password"
+                    placeholder="Enter your password"
                     required
-                    autocomplete="off"
+                    autocomplete="current-password"
                 >
             </div>
             <button type="submit" class="btn btn-primary">
@@ -698,10 +708,9 @@
         // ─────────────────────────────────────────
 
         const state = {
-            isAuthenticated: false,
-            adminPassword: '',
-            notices: [],
-            editingId: null,
+            isAuthenticated: false,   // Phase 4A.3D: no more raw password held in
+            notices: [],              // memory — the credential is the browser's
+            editingId: null,          // own HttpOnly session cookie now.
             deleteId: null
         };
 
@@ -711,22 +720,32 @@
 
         async function handleLogin(event) {
             event.preventDefault();
+            const phone = document.getElementById('phone').value.trim();
             const password = document.getElementById('password').value;
 
-            if (!password) {
-                showAlert('loginAlert', 'Please enter a password', 'error');
+            if (!phone || !password) {
+                showAlert('loginAlert', 'Please enter your phone number and password', 'error');
                 return;
             }
 
-            // Verify password against server before granting access
             try {
-                const res = await fetch('/api/admin/notices/verify', {
+                const res = await fetch('/api/auth', {
                     method: 'POST',
-                    headers: { 'x-admin-password': password }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'login', phone, password })
                 });
                 const json = await res.json();
-                if (!json.success) {
-                    showAlert('loginAlert', 'Invalid password', 'error');
+                if (!res.ok || !json.success) {
+                    showAlert('loginAlert', json.error || 'Incorrect phone number or password. Please try again.', 'error');
+                    return;
+                }
+
+                // Valid voter credentials don't necessarily mean admin access —
+                // confirm against an RBAC-protected endpoint before proceeding.
+                const probe = await fetch('/api/admin/notices', { credentials: 'include' });
+                if (probe.status === 401 || probe.status === 403) {
+                    showAlert('loginAlert', 'This account does not have administrator access.', 'error');
+                    await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) }).catch(() => {});
                     return;
                 }
             } catch (err) {
@@ -734,17 +753,19 @@
                 return;
             }
 
-            state.adminPassword = password;
             state.isAuthenticated = true;
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('adminScreen').classList.add('active');
             loadNotices();
             loadAdRequests(); // ✅ load on login so pending badge shows
         }
-        function handleLogout() {
+        async function handleLogout() {
             state.isAuthenticated = false;
-            state.adminPassword = '';
             state.editingId = null;
+
+            try {
+                await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) });
+            } catch (_) { /* best-effort — still reset the UI below even if this fails */ }
 
             document.getElementById('loginScreen').style.display = 'block';
             document.getElementById('adminScreen').classList.remove('active');
@@ -758,17 +779,13 @@
 
         async function loadNotices() {
             try {
-                const response = await fetch('/api/admin/notices', {
-                    headers: {
-                        'x-admin-password': state.adminPassword
-                    }
-                });
+                const response = await fetch('/api/admin/notices', { credentials: 'include' });
 
                 const json = await response.json();
 
                 if (!json.success) {
-                    if (response.status === 401) {
-                        showAlert('adminAlert', 'Invalid password', 'error');
+                    if (response.status === 401 || response.status === 403) {
+                        showAlert('adminAlert', 'Session expired or insufficient permissions', 'error');
                         handleLogout();
                         return;
                     }
@@ -810,9 +827,9 @@
                 const response = await fetch(url, {
                     method,
                     headers: {
-                        'Content-Type': 'application/json',
-                        'x-admin-password': state.adminPassword
+                        'Content-Type': 'application/json'
                     },
+                    credentials: 'include',
                     body: JSON.stringify({
                         title,
                         content,
@@ -845,9 +862,7 @@
             try {
                 const response = await fetch(`/api/admin/notices/${id}`, {
                     method: 'DELETE',
-                    headers: {
-                        'x-admin-password': state.adminPassword
-                    }
+                    credentials: 'include'
                 });
 
                 const json = await response.json();
@@ -1006,7 +1021,7 @@
             container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⏳</div><p>Loading...</p></div>';
             try {
                 const res = await fetch(`/api/admin/ad-requests?showHidden=${showingHidden}`, {
-                    headers: { 'x-admin-password': state.adminPassword }
+                    credentials: 'include'
                 });
                 const json = await res.json();
                 if (!json.success) throw new Error(json.error);
@@ -1170,7 +1185,8 @@
             try {
                 const res = await fetch(`/api/admin/ad-requests/${id}`, {
                     method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json', 'x-admin-password': state.adminPassword },
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
                     body: JSON.stringify({ status, notes, fee })
                 });
                 const json = await res.json();
@@ -1207,7 +1223,8 @@
             try {
                 const res = await fetch(`/api/admin/ad-requests/${id}/hide`, {
                     method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json', 'x-admin-password': state.adminPassword },
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
                     body: JSON.stringify({ hidden: hide })
                 });
                 const json = await res.json();
@@ -1225,7 +1242,7 @@
             try {
                 const res = await fetch(`/api/admin/ad-requests/${id}`, {
                     method: 'DELETE',
-                    headers: { 'x-admin-password': state.adminPassword }
+                    credentials: 'include'
                 });
                 const json = await res.json();
                 if (!json.success) throw new Error(json.error);

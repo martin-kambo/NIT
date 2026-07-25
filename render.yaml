@@ -27,14 +27,6 @@ services:
       - key: CRON_SECRET
         generateValue: true
       
-      # Admin Password (must set manually in Render Dashboard)
-      - key: ADMIN_PASSWORD_HASH
-        sync: false
-      
-      # Admin secret for notice management
-      - key: ADMIN_SECRET
-        sync: false  # Set manually in Render Dashboard
-
       # Optional - Africa's Talking
       - key: AFRICASTALKING_USERNAME
         sync: false
@@ -83,8 +75,6 @@ services:
           name: ngoliba-db
           property: connectionString
       - key: SESSION_SECRET
-        sync: false
-      - key: ADMIN_PASSWORD_HASH
         sync: false
 
 databases:

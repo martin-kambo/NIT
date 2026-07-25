@@ -147,8 +147,12 @@ tr:hover td { background: var(--light-gray); }
     </div>
     <div class="error-msg" id="loginError"></div>
     <div class="field">
-      <label>Admin Password</label>
-      <input type="password" id="adminPassword" placeholder="Enter admin password" autocomplete="current-password">
+      <label>Phone Number</label>
+      <input type="tel" id="adminPhone" placeholder="Enter your registered phone number" autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="adminPassword" placeholder="Enter your password" autocomplete="current-password">
     </div>
     <button class="btn-primary" id="loginBtn">Sign In <i class="fas fa-arrow-right"></i></button>
   </div>
@@ -411,44 +415,67 @@ const CANDIDATES = [
   { id:4, name:'John Otieno' }, { id:5, name:'Mary Wambui' },
   { id:6, name:'David Kiprotich' }
 ];
-let adminToken = sessionStorage.getItem('adminToken') || null;
+// Phase 4A.3C: no more Bearer token / sessionStorage — authentication is
+// now the same browser session cookie every other page in this app uses.
+// isAdminSession just tracks UI state (whether we've shown the shell),
+// not a credential — the actual credential is the HttpOnly cookie the
+// browser already holds and sends automatically.
+let isAdminSession = false;
 let timerInterval = null;
 let currentPeriodEnd = null;
 let currentPeriodId = null;
 
 // ── AUTH ──
 async function login() {
+  const phone = document.getElementById('adminPhone').value.trim();
   const pwd = document.getElementById('adminPassword').value;
   const errEl = document.getElementById('loginError');
-  if (!pwd) { showError(errEl, 'Password required'); return; }
+  if (!phone || !pwd) { showError(errEl, 'Phone and password are required'); return; }
   const btn = document.getElementById('loginBtn');
   btn.disabled = true; btn.textContent = 'Signing in…';
   try {
-    const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_login', password: pwd }) });
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'login', phone, password: pwd })
+    });
     const data = await res.json();
-    if (!res.ok) { showError(errEl, data.error || 'Login failed'); btn.disabled = false; btn.innerHTML = 'Sign In <i class="fas fa-arrow-right"></i>'; return; }
-    adminToken = data.token;
-    sessionStorage.setItem('adminToken', adminToken);
-    sessionStorage.setItem('adminPwd', pwd);   // stored for x-admin-password header (candidate CRUD)
+    if (!res.ok || !data.success) { showError(errEl, data.error || 'Login failed'); btn.disabled = false; btn.innerHTML = 'Sign In <i class="fas fa-arrow-right"></i>'; return; }
+    // Login succeeded, but that only proves valid voter credentials — it
+    // doesn't mean this account holds an admin role. Confirm that against
+    // an RBAC-protected endpoint before showing the admin shell, same as
+    // the reload-time check below.
+    const check = await adminFetch({ action: 'get_stats' });
+    if (!check) { showError(errEl, 'This account does not have administrator access.'); btn.disabled = false; btn.innerHTML = 'Sign In <i class="fas fa-arrow-right"></i>'; return; }
+    isAdminSession = true;
     document.getElementById('loginWrap').style.display = 'none';
     document.getElementById('adminShell').classList.add('visible');
     loadDashboard();
   } catch { showError(errEl, 'Network error'); btn.disabled = false; btn.innerHTML = 'Sign In <i class="fas fa-arrow-right"></i>'; }
 }
 
-function adminLogout() {
-  adminToken = null;
-  sessionStorage.removeItem('adminToken');
-  sessionStorage.removeItem('adminPwd');
+async function adminLogout() {
+  isAdminSession = false;
+  try {
+    await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'logout' })
+    });
+  } catch (_) { /* best-effort — still reset the UI below even if this fails */ }
   document.getElementById('adminShell').classList.remove('visible');
   document.getElementById('loginWrap').style.display = 'flex';
+  document.getElementById('adminPhone').value = '';
   document.getElementById('adminPassword').value = '';
   if (timerInterval) clearInterval(timerInterval);
 }
 
 async function adminFetch(body) {
-  const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` }, body: JSON.stringify(body) });
-  if (res.status === 401) { adminLogout(); return null; }
+  const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body) });
+  // RBAC middleware returns 403 for both "not logged in" and "logged in
+  // but insufficient role" — treat either the same as the old 401 check
+  // did: bounce back to the login screen.
+  if (res.status === 401 || res.status === 403) { adminLogout(); return null; }
   return res.json();
 }
 
@@ -600,7 +627,6 @@ function showToast(msg, type = 'success') {
 function showError(el, msg) { el.textContent = msg; el.classList.add('show'); }
 
 // ── CANDIDATE MANAGEMENT ──
-const ADMIN_PASSWORD = () => sessionStorage.getItem('adminToken') ? null : null; // token used via header
 const CAT_LABELS = { MCA: 'MCA Aspirants', WomenRep: 'Women Rep Candidates', MP: 'MP Candidates', Senator: 'Senator Candidates', Governor: 'Governor Candidates', President: 'Presidential Candidates' };
 let adminCurrentCategory = 'MCA';
 
@@ -621,22 +647,8 @@ async function loadCandidatesAdmin() {
   tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--mid-gray);padding:2rem;">Loading…</td></tr>';
   try {
     const url = `/api/admin/candidates?category=${adminCurrentCategory}`;
-    // ── DEBUG: trace auth state for every candidate fetch ──
-    console.log('[Admin Candidates] Category:', adminCurrentCategory);
-    console.log('[Admin Candidates] Request URL:', url);
-    console.log('[Admin Candidates] Token present:', !!adminToken);
-    console.log('[Admin Candidates] Password present:', !!(sessionStorage.getItem('adminPwd')));
-    const res = await fetch(url, {
-      headers: {
-        // PRIMARY: JWT Bearer token — fixes the ADMIN_PASSWORD_HASH vs ADMIN_SECRET mismatch
-        'Authorization': `Bearer ${adminToken || ''}`,
-        // FALLBACK: keep x-admin-password for backward compat with direct API callers
-        'x-admin-password': sessionStorage.getItem('adminPwd') || ''
-      }
-    });
-    console.log('[Admin Candidates] Response status:', res.status);
+    const res = await fetch(url, { credentials: 'include' });
     const data = await res.json();
-    console.log('[Admin Candidates] Response body:', data);
     if (!data.success) { tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red);padding:1.5rem;">${data.error || 'Failed to load'}</td></tr>`; return; }
     const cands = data.candidates;
     if (!cands.length) {
@@ -856,15 +868,11 @@ async function handleCandPhotoUpload(input) {
 
   const formData = new FormData();
   formData.append('photo', file);
-  const pwd = sessionStorage.getItem('adminPwd') || '';
 
   try {
     const res = await fetch('/api/admin/candidates/upload-photo', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${adminToken || ''}`,
-        'x-admin-password': pwd
-      },
+      credentials: 'include',
       body: formData
     });
     const data = await res.json();
@@ -922,21 +930,12 @@ async function saveCandidateModal() {
   });
   const method = id ? 'PUT' : 'POST';
   const url = id ? `/api/admin/candidates/${id}` : '/api/admin/candidates';
-  const pwd = sessionStorage.getItem('adminPwd') || '';
 
   try {
-    // ── DEBUG ──
-    console.log('[Admin Save Candidate] Method:', method, 'URL:', url);
-    console.log('[Admin Save Candidate] Token present:', !!adminToken, '| Category:', category);
     const res = await fetch(url, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        // PRIMARY: JWT Bearer token
-        'Authorization': `Bearer ${adminToken || ''}`,
-        // FALLBACK: legacy password header
-        'x-admin-password': pwd
-      },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body
     });
     const data = await res.json();
@@ -964,12 +963,7 @@ function confirmDeleteCandidate(id, name) {
     try {
       const res = await fetch(`/api/admin/candidates/${id}`, {
         method: 'DELETE',
-        headers: {
-          // PRIMARY: JWT Bearer token
-          'Authorization': `Bearer ${adminToken || ''}`,
-          // FALLBACK: legacy password header
-          'x-admin-password': sessionStorage.getItem('adminPwd') || ''
-        }
+        credentials: 'include'
       });
       const data = await res.json();
       if (data.success) { showToast('✅ Candidate deleted', 'success'); loadCandidatesAdmin(); }
@@ -987,12 +981,20 @@ document.getElementById('loginBtn').onclick = login;
 document.getElementById('confirmModal').addEventListener('click', e => { if (e.target === document.getElementById('confirmModal')) closeModal(); });
 document.getElementById('candidateModal').addEventListener('click', e => { if (e.target === document.getElementById('candidateModal')) closeCandModal(); });
 
-// Auto-check existing session
-if (adminToken) {
-  document.getElementById('loginWrap').style.display = 'none';
-  document.getElementById('adminShell').classList.add('visible');
-  loadDashboard();
-}
+// Auto-check existing session — there's no local token to inspect anymore,
+// so this now asks the server directly: if the browser's existing session
+// cookie is valid AND holds sufficient role, get_stats succeeds and we can
+// skip straight to the dashboard; otherwise adminFetch's own 401/403
+// handling leaves the login screen showing.
+(async () => {
+  const check = await adminFetch({ action: 'get_stats' });
+  if (check) {
+    isAdminSession = true;
+    document.getElementById('loginWrap').style.display = 'none';
+    document.getElementById('adminShell').classList.add('visible');
+    loadDashboard();
+  }
+})();
 
 // Auto-refresh dashboard every 30s
 setInterval(() => {
