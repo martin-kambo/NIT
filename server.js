@@ -3,6 +3,9 @@
 // Production-ready for Render
 require('dotenv').config();
 const analyticsRouter = require('./routes/analytics');
+const candidatesRouter = require('./routes/candidates'); // Phase 4B.2B
+const noticesRouter = require('./routes/notices'); // Phase 4B.2C
+const forumRouter = require('./routes/forum'); // Phase 4B.2D
 const express = require('express');
 const { rateLimit } = require('express-rate-limit');
 
@@ -32,14 +35,8 @@ const forumPostLimiter = rateLimit({
 });
 
 // 30 replies per 15 minutes per IP
-const forumReplyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
-  statusCode: 429,
-  message: { success: false, message: 'Too many forum submissions. Please wait before posting again.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// forumReplyLimiter moved to routes/forum.js (Phase 4B.2D) — its only
+// consumer, POST /api/forum/replies, moved there too.
 const cors = require('cors');
 const compression = require('compression');
 const crypto = require('crypto');
@@ -52,7 +49,9 @@ const axios = require('axios');
 
 // ── PHASE 2: Voting Router ──
 const votingRouterModule = require('./routes/voting');
-const { getAllCandidates, getCandidatesByCategory, FALLBACK_CANDIDATES } = require('./lib/candidates');
+const { getAllCandidates, getCandidatesByCategory, FALLBACK_CANDIDATES, getCandidateWard, createCandidate, updateCandidate, deleteCandidate } = require('./lib/candidates');
+const { createNoticeWithDays, createNoticeWithExpiresAt, getNoticeWard, updateNotice, deleteNotice } = require('./lib/notices');
+const { getAdminForumPosts, createForumPost, toggleLikePost, listForumPosts } = require('./lib/forum');
 const { transitionPeriod } = require('./lib/period-engine');
 const RBAC = require('./lib/rbac'); // Phase 4A.1: role model + unattached authorization helpers
 const votingRouter          = votingRouterModule.router || votingRouterModule;
@@ -63,17 +62,7 @@ const PORT = process.env.PORT || 10000;
 
 // ── PostgreSQL Connection Pool ──
 // Increased timeout for Render's free tier (which hibernates)
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 60000, // ✅ INCREASED FROM 15s to 60s
-  statement_timeout: 30000,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
+const { pool, testDBConnection } = require('./bootstrap/database'); // Phase 4B.1: extracted verbatim
 pool.on('error', (err) => {
   console.error('Database error:', err);
 });
@@ -88,424 +77,11 @@ let NGOLIBA_WARD_ID = null;
 
 // ── Initialize Database Tables ──
 // ✅ NOW WITH BETTER ERROR HANDLING & SKIP IF TABLES EXIST
-async function initDB() {
-  try {
-    // First, check if tables already exist
-    const checkResult = await pool.query(
-      `SELECT EXISTS (
-        SELECT 1 FROM information_schema.tables 
-        WHERE table_schema = 'public' AND table_name = 'users'
-      )`
-    );
-    
-    if (checkResult.rows[0].exists) {
-      console.log('✅ Database tables already exist - skipping initialization');
-      return;
-    }
-    
-    console.log('📝 Creating database tables...');
-    
-    // Create UUID extension
-    await pool.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
-    
-    // Create tables
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        phone VARCHAR(20) UNIQUE NOT NULL,
-        first_name VARCHAR(50),
-        surname VARCHAR(50),
-        dob DATE,
-        sublocation VARCHAR(100),
-        email VARCHAR(255),
-        national_id VARCHAR(20),
-        language VARCHAR(10) DEFAULT 'en',
-        voter_number BIGINT UNIQUE,
-        password_hash VARCHAR(64),
-        salt VARCHAR(32),
-        profile_photo BYTEA,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS metadata (
-        key VARCHAR(50) PRIMARY KEY,
-        value JSONB NOT NULL
-      );
-      
-      CREATE TABLE IF NOT EXISTS voters_by_sublocation (
-        sublocation VARCHAR(100) PRIMARY KEY,
-        voter_count INT DEFAULT 0
-      );
-
-      CREATE TABLE IF NOT EXISTS voting_periods (
-        id INT PRIMARY KEY,
-        period_start TIMESTAMP,
-        period_end TIMESTAMP,
-        is_active BOOLEAN DEFAULT true,
-        total_votes INT DEFAULT 0
-      );
-
-      CREATE TABLE IF NOT EXISTS votes (
-        id SERIAL PRIMARY KEY,
-        user_id UUID,
-        candidate_id INT,
-        period_id INT,
-        category VARCHAR(50) DEFAULT 'MCA',
-        sublocation VARCHAR(100),
-        ip_hash VARCHAR(16),
-        timestamp BIGINT,
-        UNIQUE (user_id, period_id, category)
-      );
-
-      CREATE TABLE IF NOT EXISTS period_archives (
-        id INT PRIMARY KEY,
-        period_data JSONB,
-        archived_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS otps (
-        phone VARCHAR(20) PRIMARY KEY,
-        code VARCHAR(6),
-        expires_at TIMESTAMP,
-        attempts INT DEFAULT 0
-      );
-
-      CREATE TABLE IF NOT EXISTS forum_posts (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        title VARCHAR(200),
-        content TEXT,
-        author_id UUID,
-        author_name VARCHAR(100),
-        author_phone VARCHAR(20),
-        like_count INT DEFAULT 0,
-        reply_count INT DEFAULT 0,
-        last_activity_at TIMESTAMP DEFAULT NOW(),
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS forum_replies (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        post_id UUID,
-        content TEXT,
-        author_id UUID,
-        author_name VARCHAR(100),
-        author_phone VARCHAR(20),
-        like_count INT DEFAULT 0,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS post_likes (
-        post_id UUID,
-        user_id UUID,
-        PRIMARY KEY (post_id, user_id)
-      );
-
-      CREATE TABLE IF NOT EXISTS reply_likes (
-        reply_id UUID,
-        user_id UUID,
-        PRIMARY KEY (reply_id, user_id)
-      );
-
- CREATE TABLE IF NOT EXISTS notices (
-  id SERIAL PRIMARY KEY,
-  title VARCHAR(200) NOT NULL,
-  content TEXT NOT NULL,
-  category VARCHAR(20) DEFAULT 'general',
-  priority VARCHAR(10) DEFAULT 'normal',
-  created_by VARCHAR(100),
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW(),
-  expires_at TIMESTAMP,
-  is_archived BOOLEAN DEFAULT false
-);
-
-CREATE INDEX IF NOT EXISTS idx_notices_archived ON notices(is_archived);
-CREATE INDEX IF NOT EXISTS idx_notices_expires ON notices(expires_at);
-      CREATE TABLE IF NOT EXISTS ad_requests (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        business_name VARCHAR(100),
-        ad_content TEXT,
-        contact_phone VARCHAR(20),
-        contact_email VARCHAR(255),
-        budget VARCHAR(50),
-        duration VARCHAR(50) DEFAULT '7 days',
-        status VARCHAR(20) DEFAULT 'pending',
-        submitted_at TIMESTAMP DEFAULT NOW(),
-        reviewed_at TIMESTAMP,
-        reviewed_by VARCHAR(50),
-        notes TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS mpesa_transactions (
-        id VARCHAR(100) PRIMARY KEY,
-        phone VARCHAR(20),
-        amount INT,
-        account_reference VARCHAR(50),
-        description TEXT,
-        status VARCHAR(20) DEFAULT 'pending',
-        respond_code VARCHAR(10),
-        respond_description TEXT,
-        mpesa_receipt_number VARCHAR(50),
-        callback_data JSONB,
-        callback_received_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS mpesa_callback_logs (
-        id SERIAL PRIMARY KEY,
-        transaction_id VARCHAR(100),
-        result_code INT,
-        result_desc TEXT,
-        raw_data JSONB,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    
-    // ✅ FIX 2: Create indexes for better query performance
-    console.log('📊 Creating database indexes...');
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_notices_category ON notices(category);
-      CREATE INDEX IF NOT EXISTS idx_notices_priority ON notices(priority);
-      CREATE INDEX IF NOT EXISTS idx_notices_expires ON notices(expires_at) WHERE expires_at IS NOT NULL;
-      CREATE INDEX IF NOT EXISTS idx_notices_created ON notices(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_notices_archived ON notices(is_archived);
-    `);
-    
-    // Stage 3B.1: seed notices are Ngoliba-specific content. They are only
-    // seeded when (a) the notices table is empty AND (b) this is the Ngoliba
-    // founding deployment, identified by FOUNDING_WARD_NAME env var.
-    // A new deployment for a different ward starts with an empty noticeboard
-    // rather than receiving Ngoliba's sample content.
-    console.log('📋 Checking notices seed...');
-    const noticeCount = await pool.query('SELECT COUNT(*) FROM notices');
-    const foundingWardName = process.env.FOUNDING_WARD_NAME || 'Ngoliba';
-    if (parseInt(noticeCount.rows[0].count) === 0 && foundingWardName === 'Ngoliba') {
-      // Resolve the founding ward_id for the seed rows — notices now carry
-      // ward_id, so orphaned (null ward) seed rows must be avoided.
-      const seedWardRes = await pool.query(`
-        SELECT w.id FROM wards w
-        JOIN constituencies con ON con.id = w.constituency_id
-        JOIN counties cty ON cty.id = con.county_id
-        WHERE cty.name = $1 AND con.name = $2 AND w.name = $3 LIMIT 1
-      `, [
-        process.env.FOUNDING_COUNTY_NAME       || 'Kiambu',
-        process.env.FOUNDING_CONSTITUENCY_NAME || 'Thika Town',
-        foundingWardName
-      ]);
-      const seedWardId = seedWardRes.rows[0]?.id || null;
-      await pool.query(`
-        INSERT INTO notices (title, content, category, priority, expires_at, created_by, ward_id) VALUES
-        (
-          'Ngoliba Farmers Market - Every Saturday',
-          'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at the Ngoliba Market grounds. Bulk orders welcome. Contact: 0712 111 222',
-          'business', 'normal', NOW() + INTERVAL '90 days', 'system', $1
-        ),
-        (
-          'Water Rationing Notice - Kilimambogo',
-          'Kenya Water Authority advises that Kilimambogo sublocation will experience reduced water supply Mon-Wed for 30 days due to pipeline maintenance. Residents should store water accordingly. Helpline: 0800 723 232',
-          'public', 'high', NOW() + INTERVAL '30 days', 'system', $1
-        ),
-        (
-          'Boda Boda Riders Wanted - Ngoliba Express',
-          'Ngoliba Express Logistics is recruiting 10 boda boda riders for parcel delivery. Must have valid licence. Earn KES 800-1,500 daily. Apply in person at Ngoliba Town Centre. Contact: 0798 456 789',
-          'jobs', 'normal', NOW() + INTERVAL '60 days', 'system', $1
-        ),
-        (
-          'Community Health Camp - Mwea Ward',
-          'Free health screening and vaccination services. Dates: First Saturday of every month. Location: Mwea Ward Market. Services: Blood pressure check, BMI assessment, Immunizations. Bring ID. Contact: 0789 654 321',
-          'health', 'normal', NOW() + INTERVAL '120 days', 'system', $1
-        ),
-        (
-          'Road Maintenance - Ngoliba-Ruiru Highway',
-          'Notice: The Ngoliba-Ruiru main highway will be under maintenance from June 15-22, 2024. Expect delays. Alternative routes recommended. Updates: www.krb.go.ke',
-          'public', 'high', NOW() + INTERVAL '45 days', 'system', $1
-        )
-      `, [seedWardId]);
-      console.log('✅ Sample notices inserted');
-    }
-    
-    // Initialize metadata
-    await pool.query(
-      `INSERT INTO metadata (key, value) VALUES ('counters', '{"last_voter_number": 0, "registered_voters": 0, "last_period_id": 0}')
-       ON CONFLICT (key) DO NOTHING`
-    );
-    
-    console.log('✅ All tables initialized');
-  } catch (err) {
-    console.error('❌ DB init error:', err.message);
-    // Don't exit - database might already exist
-    // Just log the error and continue
-  }
-}
-
+// initDB() moved to bootstrap/migrations.js (Phase 4B.1)
 // ── Ensure notices table exists (runs every startup, independent of initDB early-exit) ──
-async function ensureNoticesTable() {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS notices (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(200) NOT NULL,
-        content TEXT NOT NULL,
-        category VARCHAR(20) DEFAULT 'general',
-        priority VARCHAR(10) DEFAULT 'normal',
-        created_by VARCHAR(100),
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW(),
-        expires_at TIMESTAMP,
-        is_archived BOOLEAN DEFAULT false
-      )
-    `);
-    // ── Column migrations: idempotent, run every startup ──
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW()`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS created_by  VARCHAR(100)`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS priority    VARCHAR(10) DEFAULT 'normal'`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS category    VARCHAR(20) DEFAULT 'general'`);
-    await pool.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS expires_at  TIMESTAMP`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_archived  ON notices(is_archived)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_expires   ON notices(expires_at) WHERE expires_at IS NOT NULL`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_priority  ON notices(priority)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_created   ON notices(created_at DESC)`);
-
-    // ✅ Ensure ad_requests table exists with the correct UUID default (no uuid-ossp dependency)
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS ad_requests (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        business_name VARCHAR(100),
-        ad_content TEXT,
-        contact_phone VARCHAR(20),
-        contact_email VARCHAR(255),
-        budget VARCHAR(50),
-        duration VARCHAR(50) DEFAULT '7 days',
-        status VARCHAR(20) DEFAULT 'pending',
-        fee INTEGER DEFAULT 0,
-        submitted_by_phone VARCHAR(20),
-        submitted_at TIMESTAMP DEFAULT NOW(),
-        reviewed_at TIMESTAMP,
-        reviewed_by VARCHAR(50),
-        notes TEXT
-      )
-    `);
-    // Fix the default on existing deployments where uuid_generate_v4() was used
-    await pool.query(`
-      ALTER TABLE ad_requests
-        ALTER COLUMN id SET DEFAULT gen_random_uuid()
-    `);
-    // Same fix for forum tables (uuid-ossp extension not available on this deployment)
-    await pool.query(`
-      ALTER TABLE forum_posts
-        ALTER COLUMN id SET DEFAULT gen_random_uuid()
-    `);
-    await pool.query(`
-      ALTER TABLE forum_replies
-        ALTER COLUMN id SET DEFAULT gen_random_uuid()
-    `);
-    // Migrations for existing deployments
-    await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS fee INTEGER DEFAULT 0`);
-    await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS submitted_by_phone VARCHAR(20)`);
-    await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT false`);
-    await pool.query(`ALTER TABLE ad_requests ADD COLUMN IF NOT EXISTS category VARCHAR(20) DEFAULT 'general'`);
-
-    // Stage 3B.1: same founding-ward guard as the notices seed in initDB().
-    // Only seeds Ngoliba-specific content when this is the founding deployment.
-    const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notices');
-    const _foundingWard = process.env.FOUNDING_WARD_NAME || 'Ngoliba';
-    if (parseInt(rows[0].count) === 0 && _foundingWard === 'Ngoliba') {
-      const _seedWardRes = await pool.query(`
-        SELECT w.id FROM wards w
-        JOIN constituencies con ON con.id = w.constituency_id
-        JOIN counties cty ON cty.id = con.county_id
-        WHERE cty.name = $1 AND con.name = $2 AND w.name = $3 LIMIT 1
-      `, [
-        process.env.FOUNDING_COUNTY_NAME       || 'Kiambu',
-        process.env.FOUNDING_CONSTITUENCY_NAME || 'Thika Town',
-        _foundingWard
-      ]);
-      const _seedWardId = _seedWardRes.rows[0]?.id || null;
-      await pool.query(`
-        INSERT INTO notices (title, content, category, priority, expires_at, created_by, ward_id) VALUES
-        ('Ngoliba Farmers Market - Every Saturday',
-         'Fresh produce, dairy, and crafts from local farmers. Open 7AM-1PM at the Ngoliba Market grounds.',
-         'business', 'normal', NOW() + INTERVAL '90 days', 'system', $1),
-        ('Water Rationing Notice - Kilimambogo',
-         'Kenya Water Authority advises reduced supply Mon-Wed for 30 days due to pipeline maintenance. Store water accordingly. Helpline: 0800 723 232',
-         'public', 'high', NOW() + INTERVAL '30 days', 'system', $1),
-        ('Boda Boda Riders Wanted - Ngoliba Express',
-         'Ngoliba Express Logistics recruiting 10 boda boda riders for parcel delivery. Must have valid licence. Earn KES 800-1,500 daily. Apply: Ngoliba Town Centre.',
-         'jobs', 'normal', NOW() + INTERVAL '60 days', 'system', $1),
-        ('Community Health Camp - Mwea Ward',
-         'Free health screening and vaccination. First Saturday of every month, Mwea Ward Market. Bring ID.',
-         'health', 'normal', NOW() + INTERVAL '120 days', 'system', $1),
-        ('Road Maintenance - Ngoliba-Ruiru Highway',
-         'The Ngoliba-Ruiru highway will be under maintenance June 15-22. Expect delays. Use alternative routes.',
-         'public', 'high', NOW() + INTERVAL '45 days', 'system', $1)
-      `, [_seedWardId]);
-      console.log('✅ notices table seeded with sample data');
-    }
-    console.log('✅ notices table ready');
-
-    // ── FORUM SCHEMA MIGRATION ──
-    // Runs here so it is guaranteed to complete before the server accepts requests.
-    try {
-      await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS category  VARCHAR(30)  DEFAULT 'general'`);
-      await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS is_hidden  BOOLEAN      DEFAULT false`);
-      await pool.query(`ALTER TABLE forum_posts ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN      DEFAULT false`);
-      await pool.query(`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS is_hidden  BOOLEAN    DEFAULT false`);
-      await pool.query(`ALTER TABLE forum_replies ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN    DEFAULT false`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_posts_category ON forum_posts(category)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_posts_created  ON forum_posts(created_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_forum_replies_post   ON forum_replies(post_id)`);
-      console.log('✅ Forum schema ready');
-    } catch (forumMigErr) {
-      console.warn('⚠️  Forum schema migration (non-fatal):', forumMigErr.message);
-    }
-
-    // ── AVATAR COLUMN MIGRATION ──
-    // profile_photo may be BYTEA (original schema) or TEXT (already migrated).
-    // Query the actual column type first — never call convert_from on TEXT.
-    try {
-      const colType = await pool.query(`
-        SELECT data_type
-          FROM information_schema.columns
-         WHERE table_schema = 'public'
-           AND table_name   = 'users'
-           AND column_name  = 'profile_photo'
-      `);
-      const currentType = colType.rows[0]?.data_type || '';
-      if (currentType === 'bytea') {
-        await pool.query(`
-          ALTER TABLE users
-            ALTER COLUMN profile_photo TYPE TEXT
-            USING convert_from(profile_photo, 'UTF8')
-        `);
-        console.log('\u2705 profile_photo column migrated BYTEA \u2192 TEXT');
-      } else {
-        console.log(`\u2705 profile_photo column already ${currentType || 'unknown'} \u2014 no migration needed`);
-      }
-    } catch (migErr) {
-      console.warn('\u26a0\ufe0f  profile_photo migration skipped:', migErr.message);
-    }
-  } catch (err) {
-    console.error('❌ ensureNoticesTable error:', err.message);
-  }
-}
-
+// ensureNoticesTable() moved to bootstrap/migrations.js (Phase 4B.1)
 // Test database connection
-async function testDBConnection() {
-  try {
-    const res = await pool.query('SELECT NOW()');
-    console.log('✅ PostgreSQL connected at:', res.rows[0].now);
-    return true;
-  } catch (err) {
-    console.error('❌ Database connection failed:', err.message);
-    console.error('   Make sure DATABASE_URL in .env is correct');
-    console.error('   And that Render PostgreSQL instance is running');
-    return false;
-  }
-}
-
+// testDBConnection() moved to bootstrap/database.js (Phase 4B.1)
 // ─────────────────────────────────────────────────────────────────────────
 // Pre-Phase 3B Task 3: in-memory cache for rarely-changing reference data.
 // Used ONLY for: counties, constituencies, wards, candidate lists. NOT
@@ -626,364 +202,45 @@ app.use(async (req, res, next) => {
 
 
 // Initialize on startup — server only starts listening AFTER all migrations complete
-(async () => {
-  const connected = await testDBConnection();
-  if (connected) {
-    await initDB();
-    await ensureVotingPeriodsTable();  // ← must run BEFORE ensureActivePeriod so schema is ready
-    await ensureActivePeriod();        // now a no-op alias for backward compat
-    await ensureCandidatesTable();     // multi-category candidates (preserves MCA IDs 0-6)
-    await ensureGeographyTables();     // Phase 1: additive geographic foundation — no existing behaviour changes
-    await seedKiambuHierarchy();       // Phase 3B: complete Kiambu County administrative reference data
-    await ensurePhase2Migrations();    // Phase 2: add ward_id columns, backfill existing rows, cache NGOLIBA_WARD_ID
-    await ensureRBACFoundation();      // Phase 4A.1: add role + admin-scope columns to users, default VOTER (foundation only, not enforced)
-    await ensureSuperAdminBootstrap();  // Phase 4A.2: one-time VOTER->SUPER_ADMIN promotion via SUPER_ADMIN_PHONE, idempotent
-    await ensureNoticesTable();        // Phase 3B Polish: moved after ensurePhase2Migrations() so the
-                                        // notices.ward_id column and NGOLIBA_WARD_ID already exist before
-                                        // this function's seed INSERT runs (was throwing “column ward_id
-                                        // does not exist” on a brand-new database, which silently skipped
-                                        // both the notice seed and the forum/avatar migrations later in
-                                        // this same function).
-  } else {
-    console.warn('⚠️  Continuing without database. Some features may not work.');
-  }
-
-  // ── Start listening ONLY after all migrations are done ──
-  const server = app.listen(PORT, () => {
-    console.log(`✅ Ngoliba InfoTrack server running on port ${PORT}`);
-    console.log(`📚 Database: PostgreSQL (check connection above)`);
-    console.log(`🔐 Session Secret: ${process.env.SESSION_SECRET ? '✓ Configured' : '✗ Missing'}`);
-    console.log(`📱 M-Pesa: ${process.env.MPESA_CONSUMER_KEY ? '✓ Configured' : '✗ Not configured'}`);
-    console.log(`\n🌐 Access the app at: http://localhost:${PORT}`);
-  });
-
-  // ── AUTHORITATIVE TRIGGER: check every 30s for expired periods and roll over. ──
-  // This in-process timer is the system's primary, self-contained rollover
-  // mechanism — it has no dependency on any external service being reachable
-  // or correctly configured. /api/webhook and /api/period/next below are now
-  // thin wrappers around the exact same transitionPeriod() call.
-  setInterval(async () => {
-    try {
-      const result = await transitionPeriod(pool, broadcastVoteUpdate, { triggerSource: 'interval', mode: 'auto' });
-      if (result.transitioned) {
-        console.log(`[interval] Period ${result.completedPeriod} → archived (archive ${result.archiveId}); new period ${result.newPeriod}`);
-      }
-      // result.transitioned === false (not-expired / no-active-period) is the
-      // normal, silent case on most ticks — nothing to log.
-    } catch (e) {
-      console.error('[interval] ERROR:', e.message);
-    }
-  }, 30_000);
-
-  // Graceful shutdown
-  process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully...');
-    server.close(() => {
-      pool.end();
-      process.exit(0);
-    });
-  });
-})();
+// Startup orchestration moved to bootstrap/startup.js (Phase 4B.1).
+// ensurePhase2Migrations stays here (see the Phase 4B.1 report for why) and
+// is passed in explicitly, alongside the app/pool/PORT this file already
+// owns and the migration functions that did move — this avoids
+// bootstrap/startup.js ever needing to require server.js itself, so there
+// is no circular dependency. The sequence, every log line, the 30s
+// interval, and the SIGTERM handler are all unchanged from the original
+// inline IIFE — see bootstrap/startup.js.
+const migrations = require('./bootstrap/migrations');
+const { startServer } = require('./bootstrap/startup');
+startServer({
+  app,
+  PORT,
+  pool,
+  testDBConnection,
+  transitionPeriod,
+  broadcastVoteUpdate,
+  ...migrations,
+  ensurePhase2Migrations,
+});
 
 // ── Ensure voting_periods table exists with correct schema ──
-async function ensureVotingPeriodsTable() {
-  try {
-    // 1. Create with full schema if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS voting_periods (
-        id           INT PRIMARY KEY,
-        period_start TIMESTAMP,
-        period_end   TIMESTAMP,
-        is_active    BOOLEAN DEFAULT true,
-        total_votes  INT DEFAULT 0,
-        winner_id    INT,
-        winner_votes INT DEFAULT 0
-      )
-    `);
-
-    // 2. Idempotent column migrations — add anything that might be missing
-    const cols = [
-      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS winner_id    INT`,
-      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS winner_votes INT DEFAULT 0`,
-      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS total_votes  INT DEFAULT 0`,
-      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS is_active    BOOLEAN DEFAULT true`,
-      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS period_start TIMESTAMP`,
-      `ALTER TABLE voting_periods ADD COLUMN IF NOT EXISTS period_end   TIMESTAMP`,
-    ];
-    for (const sql of cols) {
-      try { await pool.query(sql); } catch (_) { /* already exists */ }
-    }
-
-    // 3. Also ensure votes table exists (may be absent on fresh DB after early-exit initDB)
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS votes (
-        id           SERIAL PRIMARY KEY,
-        user_id      UUID,
-        candidate_id INT,
-        period_id    INT,
-        category     VARCHAR(50) DEFAULT 'MCA',
-        sublocation  VARCHAR(100),
-        ip_hash      VARCHAR(32),
-        timestamp    BIGINT
-      )
-    `);
-    // Add category column to existing deployments that don't have it yet
-    try { await pool.query(`ALTER TABLE votes ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'MCA'`); } catch(_){}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_candidate ON votes (candidate_id)`); } catch(_){}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_user_period ON votes (user_id, period_id)`); } catch(_){}
-    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_votes_period ON votes (period_id)`); } catch(_){}
-    // Drop old one-vote-per-period constraint (too broad) and replace with per-category constraint
-    try { await pool.query(`ALTER TABLE votes DROP CONSTRAINT IF EXISTS votes_user_period_unique`); } catch(_){}
-    // Enforce one-vote-per-user-per-period-per-category at the DB level (safety net against races)
-    try { await pool.query(`ALTER TABLE votes ADD CONSTRAINT votes_user_period_category_unique UNIQUE (user_id, period_id, category)`); } catch(_){}
-
-    // 4. Also ensure period_archives table exists
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS period_archives (
-        id          INT PRIMARY KEY,
-        period_data JSONB,
-        archived_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
-    // 4a. Idempotent analytics columns on period_archives (required by analytics router)
-    try { await pool.query(`ALTER TABLE period_archives ADD COLUMN IF NOT EXISTS winner_id    INT`);           } catch(_){}
-    try { await pool.query(`ALTER TABLE period_archives ADD COLUMN IF NOT EXISTS winner_votes INT DEFAULT 0`); } catch(_){}
-    try { await pool.query(`ALTER TABLE period_archives ADD COLUMN IF NOT EXISTS total_votes  INT DEFAULT 0`); } catch(_){}
-
-    // 5. Index for fast active-period look-ups
-    try {
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_voting_periods_active
-          ON voting_periods (is_active)
-          WHERE is_active = true
-      `);
-    } catch (_) {}
-
-    console.log('\u2705 voting_periods table ready');
-
-    // 6. Ensure there is always exactly one active period
-    const existing = await pool.query(
-      'SELECT id, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
-    );
-
-    if (existing.rows.length === 0) {
-      console.log('\ud83d\udcdd No active voting period — creating one...');
-      const boot = await transitionPeriod(pool, broadcastVoteUpdate, { triggerSource: 'startup', mode: 'bootstrap' });
-      if (boot.transitioned) {
-        console.log(`\u2705 Active voting period created (id=${boot.newPeriod}, ends ${new Date(boot.endsAt).toISOString()})`);
-      } else {
-        // 'already-active' — a concurrent process won the bootstrap race; nothing to do.
-        console.log(`\u2139\ufe0f  Bootstrap skipped (${boot.reason}) — an active period already exists`);
-      }
-    } else {
-      const period = existing.rows[0];
-      const now = new Date();
-      const isExpired = new Date(period.period_end) < now;
-
-      // Detect abnormally long durations (> 60 min is invalid for this system)
-      const MAX_ALLOWED_MS = 60 * 60 * 1000; // 60-minute absolute ceiling
-      const periodLengthMs = new Date(period.period_end) - new Date(period.period_start || now);
-      const isTooLong = periodLengthMs > MAX_ALLOWED_MS;
-
-      if (isExpired || isTooLong) {
-        if (isTooLong && !isExpired) {
-          console.warn(`⚠️  Period ${period.id} has abnormal duration (${Math.round(periodLengthMs / 60000)} min — max 60) — replacing with fresh 5-min period`);
-        } else {
-          console.log(`⚠️  Period ${period.id} has expired — closing and creating new one`);
-        }
-        // force:true here because period age was determined by wall-clock
-        // comparison above (isExpired/isTooLong), not by re-checking inside
-        // the transaction — transitionPeriod still re-validates the row
-        // under its own lock before doing anything.
-        const startupRoll = await transitionPeriod(pool, broadcastVoteUpdate, { triggerSource: 'startup', mode: 'force', force: true });
-        if (startupRoll.transitioned) {
-          console.log(`✅ Fresh voting period created (id=${startupRoll.newPeriod}, archived stale period ${startupRoll.completedPeriod} as archive ${startupRoll.archiveId})`);
-        } else {
-          console.log(`\u2139\ufe0f  Startup rollover skipped (${startupRoll.reason})`);
-        }
-      } else {
-        console.log(`✅ Active voting period OK (id=${period.id}, ends ${new Date(period.period_end).toISOString()})`);
-      }
-    }
-
-  } catch (e) {
-    // Log the full stack so the real cause is visible in Render logs
-    console.error('\u274c ensureVotingPeriodsTable FAILED:', e.message);
-    console.error(e.stack);
-  }
-}
-
+// ensureVotingPeriodsTable() moved to bootstrap/migrations.js (Phase 4B.1)
 // ── Ensure Active Voting Period (legacy alias) ──
 // Superseded by ensureVotingPeriodsTable() — kept so the startup call still works.
-async function ensureActivePeriod() {
-  const existing = await pool.query(
-    'SELECT id FROM voting_periods WHERE is_active = true LIMIT 1'
-  );
-
-  if (existing.rows.length === 0) {
-    // create period
-  }
-}
-
+// ensureActivePeriod() moved to bootstrap/migrations.js (Phase 4B.1)
 // ══════════════════════════════════════════════════════════════════
 // CANDIDATES TABLE — multi-category support
 // Preserves all existing MCA candidate IDs (0-6) for vote backward-compat
 // ══════════════════════════════════════════════════════════════════
-const CANDIDATE_CATEGORIES = ['MCA', 'WomenRep', 'MP', 'Senator', 'Governor', 'President'];
+// CANDIDATE_CATEGORIES moved to lib/candidates.js (Phase 4B.2B), imported above
 
-async function ensureCandidatesTable() {
-  try {
-    // Create table with INT primary key so we control IDs (0-6 match existing votes)
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS candidates (
-        id         SERIAL  PRIMARY KEY,
-        name       VARCHAR(200) NOT NULL,
-        party      VARCHAR(100) DEFAULT '',
-        bio        TEXT         DEFAULT '',
-        img        VARCHAR(600) DEFAULT '',
-        category   VARCHAR(50)  DEFAULT 'MCA',
-        incumbent  BOOLEAN      DEFAULT false,
-        display_order INT       DEFAULT 0,
-        created_at TIMESTAMP    DEFAULT NOW()
-      )
-    `);
-
-    // Idempotent migrations
-    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS category      VARCHAR(50)  DEFAULT 'MCA'`);
-    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS incumbent     BOOLEAN      DEFAULT false`);
-    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS display_order INT          DEFAULT 0`);
-    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS bio           TEXT         DEFAULT ''`);
-    await pool.query(`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS img           VARCHAR(600) DEFAULT ''`);
-
-    // Indexes
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_candidates_category ON candidates(category)`);
-
-    // Seed the original 7 MCA candidates (IDs 0-6) if table is empty.
-    // Using explicit IDs preserves all existing vote records that reference 0-6.
-    const { rows } = await pool.query('SELECT COUNT(*) AS count FROM candidates');
-    if (parseInt(rows[0].count) === 0) {
-      const defaults = [
-        { id:0, name:'Hon. James Mwangi', party:'UDA (Incumbent)',  bio:'Two-term MCA, water projects.',    img:'https://randomuser.me/api/portraits/men/32.jpg',    incumbent:true  },
-        { id:1, name:'Grace Wanjiku',     party:'Independent',      bio:'Teacher & community organizer.',   img:'https://randomuser.me/api/portraits/women/68.jpg',  incumbent:false },
-        { id:2, name:'Peter Kimani',      party:'Jubilee',          bio:'Agri-business entrepreneur.',      img:'https://randomuser.me/api/portraits/men/45.jpg',    incumbent:false },
-        { id:3, name:'Sarah Nduati',      party:'Wiper',            bio:'Public health expert.',            img:'https://randomuser.me/api/portraits/women/22.jpg',  incumbent:false },
-        { id:4, name:'John Otieno',       party:'Independent',      bio:'Farmer cooperative leader.',       img:'https://randomuser.me/api/portraits/men/89.jpg',    incumbent:false },
-        { id:5, name:'Mary Wambui',       party:'Maendeleo',        bio:'ICT & agribusiness graduate.',     img:'https://randomuser.me/api/portraits/women/54.jpg', incumbent:false },
-        { id:6, name:'David Kiprotich',   party:'Roots',            bio:'Governance activist.',             img:'https://randomuser.me/api/portraits/men/99.jpg',    incumbent:false }
-      ];
-      for (const c of defaults) {
-        await pool.query(
-          `INSERT INTO candidates (id, name, party, bio, img, category, incumbent, display_order)
-           VALUES ($1,$2,$3,$4,$5,'MCA',$6,$1)
-           ON CONFLICT (id) DO NOTHING`,
-          [c.id, c.name, c.party, c.bio, c.img, c.incumbent]
-        );
-      }
-      console.log('✅ Default MCA candidates seeded (IDs 0-6)');
-    }
-
-    // Ensure the sequence starts ABOVE the max existing ID so new inserts
-    // never clash with the original 0-6 MCA candidate IDs.
-    await pool.query(`
-      SELECT setval(
-        pg_get_serial_sequence('candidates', 'id'),
-        GREATEST(7, (SELECT COALESCE(MAX(id), 6) + 1 FROM candidates)),
-        false
-      )
-    `);
-
-    console.log('✅ candidates table ready');
-  } catch (e) {
-    console.error('❌ ensureCandidatesTable error:', e.message);
-  }
-}
-
+// ensureCandidatesTable() moved to bootstrap/migrations.js (Phase 4B.1)
 // ══════════════════════════════════════════════════════════════════
 // PHASE 1: GEOGRAPHIC FOUNDATION — County / Constituency / Ward
 // Additive only. No existing tables, columns, or routes are modified.
 // Future phases will wire ward_id into users/votes — not this phase.
 // ══════════════════════════════════════════════════════════════════
-async function ensureGeographyTables() {
-  try {
-    // ── Create tables with named constraints (idempotent on re-run) ──
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS counties (
-        id         SERIAL PRIMARY KEY,
-        name       VARCHAR(100) NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        CONSTRAINT counties_name_unique UNIQUE (name)
-      )
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS constituencies (
-        id         SERIAL PRIMARY KEY,
-        county_id  INT NOT NULL,
-        name       VARCHAR(100) NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        CONSTRAINT constituencies_county_fk   FOREIGN KEY (county_id) REFERENCES counties(id),
-        CONSTRAINT constituencies_county_name UNIQUE (county_id, name)
-      )
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS wards (
-        id              SERIAL PRIMARY KEY,
-        constituency_id INT NOT NULL,
-        name            VARCHAR(100) NOT NULL,
-        created_at      TIMESTAMP DEFAULT NOW(),
-        CONSTRAINT wards_constituency_fk   FOREIGN KEY (constituency_id) REFERENCES constituencies(id),
-        CONSTRAINT wards_constituency_name UNIQUE (constituency_id, name)
-      )
-    `);
-
-    // ── Indexes for FK look-up performance (idempotent) ──
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_constituencies_county_id ON constituencies(county_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_wards_constituency_id    ON wards(constituency_id)`);
-
-    // ── Seed: Founding geographic hierarchy ──────────────────────────────
-    // Stage 3B.1: was hardcoded to 'Kiambu → Thika Town → Ngoliba'. Now
-    // read from environment variables with those values as defaults, so
-    // existing deployments continue working with zero configuration change,
-    // while a new deployment for a different ward supplies its own values.
-    // ON CONFLICT ensures running startup multiple times never creates duplicates.
-    const FOUNDING_COUNTY       = process.env.FOUNDING_COUNTY_NAME       || 'Kiambu';
-    const FOUNDING_CONSTITUENCY = process.env.FOUNDING_CONSTITUENCY_NAME || 'Thika Town';
-    const FOUNDING_WARD         = process.env.FOUNDING_WARD_NAME         || 'Ngoliba';
-
-    await pool.query(`
-      INSERT INTO counties (name)
-      VALUES ($1)
-      ON CONFLICT ON CONSTRAINT counties_name_unique DO NOTHING
-    `, [FOUNDING_COUNTY]);
-
-    await pool.query(`
-      INSERT INTO constituencies (county_id, name)
-      SELECT id, $1
-        FROM counties
-       WHERE name = $2
-      ON CONFLICT ON CONSTRAINT constituencies_county_name DO NOTHING
-    `, [FOUNDING_CONSTITUENCY, FOUNDING_COUNTY]);
-
-    await pool.query(`
-      INSERT INTO wards (constituency_id, name)
-      SELECT con.id, $1
-        FROM constituencies con
-        JOIN counties       cty ON cty.id = con.county_id
-       WHERE cty.name = $2
-         AND con.name = $3
-      ON CONFLICT ON CONSTRAINT wards_constituency_name DO NOTHING
-    `, [FOUNDING_WARD, FOUNDING_COUNTY, FOUNDING_CONSTITUENCY]);
-
-    console.log(`✅ geography tables ready — founding hierarchy: ${FOUNDING_COUNTY} → ${FOUNDING_CONSTITUENCY} → ${FOUNDING_WARD}`);
-  } catch (e) {
-    console.error('❌ ensureGeographyTables error:', e.message);
-    // Non-fatal: geography tables are Phase 1 foundation only.
-    // Existing functionality is unaffected if this fails.
-  }
-}
-
+// ensureGeographyTables() moved to bootstrap/migrations.js (Phase 4B.1)
 // ══════════════════════════════════════════════════════════════════
 // PHASE 3B — KIAMBU COUNTY COMPLETE REFERENCE DATA SEED
 // Idempotent: ON CONFLICT DO NOTHING on every insert.
@@ -992,110 +249,7 @@ async function ensureGeographyTables() {
 // Does NOT touch users, votes, candidates, forum_posts, or notices.
 // Source: official IEBC administrative hierarchy for Kiambu County.
 // ══════════════════════════════════════════════════════════════════
-async function seedKiambuHierarchy() {
-  try {
-    console.log('🗺️  Seeding Kiambu County administrative hierarchy...');
-
-    // ── 1. Ensure Kiambu County exists ──────────────────────────────────
-    await pool.query(`
-      INSERT INTO counties (name)
-      VALUES ('Kiambu')
-      ON CONFLICT ON CONSTRAINT counties_name_unique DO NOTHING
-    `);
-
-    const countyRes = await pool.query(
-      `SELECT id FROM counties WHERE name = 'Kiambu' LIMIT 1`
-    );
-    if (!countyRes.rows.length) {
-      console.warn('⚠️  seedKiambuHierarchy: Kiambu county row not found after insert — skipping.');
-      return;
-    }
-    const countyId = countyRes.rows[0].id;
-
-    // ── 2. Constituency + ward data (official IEBC mapping) ─────────────
-    // Format: [ constituencyName, [ ward, ward, … ] ]
-    const KIAMBU_HIERARCHY = [
-      ['Gatundu South', [
-        'Kiganjo', 'Mutarakwa', 'Kinoo', 'Gituamba', 'Githobokoni'
-      ]],
-      ['Gatundu North', [
-        'Githiga', 'Kiamwangi', 'Kigoro', 'Gatuanyaga', 'Chania'
-      ]],
-      ['Juja', [
-        'Theta', 'Juja Farm', 'Witeithie', 'Kalimoni', 'Murera'
-      ]],
-      ['Thika Town', [
-        'Township', 'Kamenu', 'Hospital', 'Gatuanyaga', 'Ngoliba'
-      ]],
-      ['Ruiru', [
-        'Gitothua', 'Biashara', 'Gatongora', 'Kahawa Sukari',
-        'Kahawa Wendani', 'Mwiki', 'Mwihoko'
-      ]],
-      ['Githunguri', [
-        'Githunguri', 'Githiga', 'Ikinu', 'Ngewa', 'Komothai'
-      ]],
-      ['Kiambu', [
-        'Kiambu', "Ting'ang'a", 'Ndenderu', 'Kinoo', 'Kabete'
-      ]],
-      ['Kiambaa', [
-        'Cianda', 'Karuri', 'Ndumberi', 'Tinganga', 'Kihara'
-      ]],
-      ['Kabete', [
-        'Gitaru', 'Muguga', 'Nyadhuna', 'Kabete', 'Uthiru/Ruthimitu'
-      ]],
-      ['Kikuyu', [
-        'Karai', 'Nachu', 'Sigona', 'Kikuyu', 'Kinoo'
-      ]],
-      ['Limuru', [
-        'Ndeiya', 'Limuru Central', 'Ngecha/Tigoni', 'Kamirithu', 'Kinale'
-      ]],
-      ['Lari', [
-        'Kijabe', 'Nyanduma', 'Kirenga', "Lari/Kirenga", 'Kinale'
-      ]]
-    ];
-
-    // ── 3. Insert each constituency then its wards ───────────────────────
-    let consInserted = 0, wardInserted = 0;
-    for (const [consName, wards] of KIAMBU_HIERARCHY) {
-      // Insert constituency if missing
-      const consInsert = await pool.query(`
-        INSERT INTO constituencies (county_id, name)
-        VALUES ($1, $2)
-        ON CONFLICT ON CONSTRAINT constituencies_county_name DO NOTHING
-        RETURNING id
-      `, [countyId, consName]);
-      if (consInsert.rows.length > 0) consInserted++;
-
-      // Always resolve the constituency id (whether just inserted or pre-existing)
-      const consRes = await pool.query(
-        `SELECT id FROM constituencies WHERE county_id = $1 AND name = $2 LIMIT 1`,
-        [countyId, consName]
-      );
-      if (!consRes.rows.length) {
-        console.warn(`⚠️  seedKiambuHierarchy: constituency '${consName}' not found after insert — skipping its wards.`);
-        continue;
-      }
-      const consId = consRes.rows[0].id;
-
-      // Insert each ward if missing
-      for (const wardName of wards) {
-        const wardInsert = await pool.query(`
-          INSERT INTO wards (constituency_id, name)
-          VALUES ($1, $2)
-          ON CONFLICT ON CONSTRAINT wards_constituency_name DO NOTHING
-          RETURNING id
-        `, [consId, wardName]);
-        if (wardInsert.rows.length > 0) wardInserted++;
-      }
-    }
-
-    console.log(`✅ Kiambu hierarchy seeded — ${consInserted} new constituency(ies), ${wardInserted} new ward(s) added.`);
-  } catch (err) {
-    // Non-fatal: log and continue startup. Existing data is unaffected.
-    console.error('❌ seedKiambuHierarchy error (non-fatal):', err.message);
-  }
-}
-
+// seedKiambuHierarchy() moved to bootstrap/migrations.js (Phase 4B.1)
 // ══════════════════════════════════════════════════════════════════
 // PHASE 2: ATTACH GEOGRAPHIC OWNERSHIP TO DATA
 // Additive only. No existing columns, queries, or routes are modified.
@@ -1206,70 +360,7 @@ async function ensurePhase2Migrations() {
 // column can't have a real FK pointing at three different tables
 // depending on role). SUPER_ADMIN, MODERATOR, and VOTER leave all three
 // scope columns NULL.
-async function ensureRBACFoundation() {
-  try {
-    // ── Step 1: role column, defaulted to VOTER ──
-    // DEFAULT 'VOTER' backfills existing rows automatically when the
-    // column is added, and makes every future INSERT INTO users (which
-    // doesn't list `role`) get VOTER with zero changes to the
-    // registration code path.
-    await pool.query(
-      `ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(30) DEFAULT 'VOTER'`
-    );
-    // Defensive backfill in case the column already existed without a
-    // default from some earlier partial run — idempotent, no-op once done.
-    await pool.query(`UPDATE users SET role = 'VOTER' WHERE role IS NULL`);
-
-    // Constrain to the known role set (idempotent — duplicate_object is
-    // swallowed the same way the ward_id FK constraints do it above).
-    await pool.query(`
-      DO $$
-      BEGIN
-        ALTER TABLE users
-          ADD CONSTRAINT users_role_check
-          CHECK (role IN ('SUPER_ADMIN','COUNTY_ADMIN','CONSTITUENCY_ADMIN','WARD_ADMIN','MODERATOR','VOTER'));
-      EXCEPTION WHEN duplicate_object THEN
-        NULL;
-      END $$
-    `);
-
-    // ── Step 2: geographic admin-scope columns ──
-    // Only populated for COUNTY_ADMIN / CONSTITUENCY_ADMIN / WARD_ADMIN
-    // respectively; NULL for SUPER_ADMIN, MODERATOR, and VOTER.
-    const SCOPE_COLUMNS = [
-      { column: 'admin_county_id',       table: 'counties',       fkName: 'users_admin_county_id_fk'       },
-      { column: 'admin_constituency_id', table: 'constituencies', fkName: 'users_admin_constituency_id_fk' },
-      { column: 'admin_ward_id',         table: 'wards',          fkName: 'users_admin_ward_id_fk'         },
-    ];
-
-    for (const { column, table, fkName } of SCOPE_COLUMNS) {
-      await pool.query(
-        `ALTER TABLE users ADD COLUMN IF NOT EXISTS ${column} INT`
-      );
-      await pool.query(`
-        DO $$
-        BEGIN
-          ALTER TABLE users
-            ADD CONSTRAINT ${fkName} FOREIGN KEY (${column}) REFERENCES ${table}(id);
-        EXCEPTION WHEN duplicate_object THEN
-          NULL;
-        END $$
-      `);
-      await pool.query(
-        `CREATE INDEX IF NOT EXISTS idx_users_${column} ON users(${column})`
-      );
-    }
-
-    console.log('✅ RBAC foundation ready (role + admin-scope columns on users, default VOTER)');
-  } catch (e) {
-    console.error('❌ ensureRBACFoundation error:', e.message);
-    console.error(e.stack);
-    // Non-fatal: role defaults to VOTER at the DB level regardless of
-    // whether this migration fully completes, so existing flows continue
-    // unchanged either way.
-  }
-}
-
+// ensureRBACFoundation() moved to bootstrap/migrations.js (Phase 4B.1)
 // ── Middleware ──
 
 // ── Phase 4A.2: SUPER_ADMIN bootstrap ──
@@ -1281,158 +372,28 @@ async function ensureRBACFoundation() {
 // never touches a user whose role isn't (or is no longer) VOTER, so a
 // manually-assigned or already-promoted role is never overwritten or
 // downgraded.
-async function ensureSuperAdminBootstrap() {
-  const phone = process.env.SUPER_ADMIN_PHONE;
-  if (!phone) return; // not configured — do nothing, as specified
+// ensureSuperAdminBootstrap() moved to bootstrap/migrations.js (Phase 4B.1)
+// ALLOWED_ORIGINS + compression/cors/json/static registration moved to
+// config/middleware.js (Phase 4B.1) — called here, in the exact same
+// position, right after the custom auth middleware above and before any
+// route registration below.
+const { applyCoreMiddleware } = require('./config/middleware');
+applyCoreMiddleware(app);
 
-  try {
-    const result = await pool.query(
-      `UPDATE users SET role = 'SUPER_ADMIN' WHERE phone = $1 AND role = 'VOTER' RETURNING id`,
-      [phone]
-    );
-    if (result.rowCount > 0) {
-      console.log(`✅ SUPER_ADMIN bootstrap: promoted user id=${result.rows[0].id} (phone ${phone}) from VOTER to SUPER_ADMIN`);
-      return;
-    }
-    // No row updated — either the phone doesn't exist, or it exists but
-    // isn't VOTER anymore (already promoted in an earlier run, or manually
-    // reassigned to a different role since). Informational logging only,
-    // per spec — never treated as an error.
-    const existing = await pool.query(`SELECT id, role FROM users WHERE phone = $1`, [phone]);
-    if (existing.rows.length === 0) {
-      console.log(`ℹ️  SUPER_ADMIN bootstrap: no registered user found with phone ${phone} — nothing to do.`);
-    } else if (existing.rows[0].role !== 'SUPER_ADMIN') {
-      console.log(`ℹ️  SUPER_ADMIN bootstrap: user id=${existing.rows[0].id} (phone ${phone}) already has role '${existing.rows[0].role}', not VOTER — leaving unchanged.`);
-    }
-    // else: already SUPER_ADMIN from an earlier run — silently idempotent, nothing to log.
-  } catch (e) {
-    console.error('❌ ensureSuperAdminBootstrap error:', e.message);
-    // Non-fatal — startup continues regardless.
-  }
-}
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGIN || 'http://localhost:10000')
-  .split(',')
-  .map(o => o.trim())
-  .filter(Boolean);
-
-if (!process.env.ALLOWED_ORIGIN) {
-  console.warn('[CORS] ALLOWED_ORIGIN env var not set — restricting to localhost only. Set it to your Render URL in production.');
-}
-
-// Pre-Phase 3B Task 2: HTTP response compression.
-// Placed first in this infrastructure group so it wraps every downstream
-// response — cors, json-parsed API responses, static assets, and the
-// votingRouter/analyticsRouter responses mounted later in this file —
-// since compression must patch res.write/res.end before any handler uses
-// them in order to apply.
-//
-// SSE is explicitly excluded. Verified, not assumed: the `compression`
-// package's default filter would otherwise compress text/event-stream
-// (confirmed directly against the `compressible` library it uses
-// internally), and the existing SSE implementation in routes/voting.js
-// (GET /api/votes/stream) never calls res.flush() — without that call,
-// individual SSE events could sit buffered inside compression's internal
-// zlib stream instead of reaching clients immediately, breaking the
-// real-time leaderboard/voting-page updates. filter() is confirmed (via
-// the package's own source) to run after the route handler sets headers,
-// so checking the request path here is reliable.
-app.use(compression({
-  filter: (req, res) => {
-    if (req.path === '/api/votes/stream') return false;
-    if (res.getHeader('Content-Type') === 'text/event-stream') return false;
-    return compression.filter(req, res);
-  }
-}));
-app.use(cors({
-  origin: (incomingOrigin, callback) => {
-    // Allow server-to-server requests (no Origin header, e.g. curl, Render health checks)
-    if (!incomingOrigin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(incomingOrigin)) return callback(null, true);
-    console.warn(`[CORS] Blocked request from unlisted origin: ${incomingOrigin}`);
-    callback(new Error(`CORS: origin ${incomingOrigin} is not allowed`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Password']
-}));
-app.use(express.json({ limit: '5mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-
-// ── Candidate Photo Upload (Multer) ──
-const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads', 'candidates');
-// Ensure upload directory exists at startup (no crash if already present)
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const candidateStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const unique = `cand_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
-    cb(null, unique);
-  }
-});
-
-const ALLOWED_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
-
-const candidateUpload = multer({
-  storage: candidateStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_MIME.has(file.mimetype)) cb(null, true);
-    else cb(new Error('Only JPG, JPEG, PNG, and WEBP images are allowed'));
-  }
-});
-
-// POST /api/admin/candidates/upload-photo — upload a candidate photo, return its public path
-// Phase 4A.2: WARD_ADMIN+ (candidates are ward-managed content per the RBAC
-// role hierarchy). No wardId is available on this route to scope-check
-// against — it's a stateless file-upload utility, not tied to any specific
-// candidate record — so role-only gating is all that applies here.
-app.post('/api/admin/candidates/upload-photo', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), (req, res) => {
-  candidateUpload.single('photo')(req, res, (err) => {
-    if (err instanceof multer.MulterError) {
-      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ success: false, error: 'Image must be smaller than 5 MB' });
-      return res.status(400).json({ success: false, error: err.message });
-    }
-    if (err) return res.status(400).json({ success: false, error: err.message });
-    if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
-    // Return a public URL path that works with express.static
-    const publicPath = `/uploads/candidates/${req.file.filename}`;
-    return res.json({ success: true, url: publicPath });
-  });
-});
+// POST /api/admin/candidates/upload-photo moved to routes/candidates.js
+// (Phase 4B.2B) — cache-independent, fully self-contained (multer config
+// included), safe to move as a complete route.
 
 // ── Shared Utilities ──
-function hashPassword(password, salt) {
-  return crypto.createHash('sha256').update(password + salt).digest('hex');
-}
+// hashPassword() moved to lib/auth/password.js (Phase 4B.2A)
+// createSession()/verifySession() moved to lib/auth/session.js (Phase 4B.2A)
+// sanitizeUser() stays here: it's used by /api/me and /api/profile too (not
+// auth-exclusive), so per this phase's Stop Condition 5 it is reported, not
+// moved or duplicated — see the Phase 4B.2A report.
+const { hashPassword, generateSalt } = require('./lib/auth/password');
+const { createSession, verifySession } = require('./lib/auth/session');
 
-function createSession(phone, userId, ttlDays = 7) {
-  const payload = { phone, userId, exp: Date.now() + ttlDays * 24 * 60 * 60 * 1000 };
-  const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');
-  const signature = crypto
-    .createHmac('sha256', process.env.SESSION_SECRET)
-    .update(payloadBase64)
-    .digest('base64');
-  return `${payloadBase64}.${signature}`;
-}
 
-function verifySession(cookieHeader) {
-  if (!cookieHeader) return null;
-  const match = cookieHeader.match(/session=([^;]+)/);
-  if (!match) return null;
-  try {
-    const [payloadBase64, signature] = match[1].split('.');
-    const expectedSig = crypto
-      .createHmac('sha256', process.env.SESSION_SECRET)
-      .update(payloadBase64)
-      .digest('base64');
-    if (signature !== expectedSig) return null;
-    const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
-    if (payload.exp < Date.now()) return null;
-    return payload;
-  } catch { return null; }
-}
 
 function sanitizeUser(user) {
   const { password_hash, salt, ...safe } = user;
@@ -1640,7 +601,7 @@ app.post('/api/auth', authLimiter, async (req, res) => {
 
       const voterNumber = await getNextVoterNumber();
       const id = crypto.randomUUID();
-      const salt = crypto.randomBytes(16).toString('hex');
+      const salt = generateSalt();
       const passwordHash = hashPassword(password, salt);
 
       // Phase 3A Task 4: was hardcoded NGOLIBA_WARD_ID. wardId is now read
@@ -1838,7 +799,7 @@ app.post('/api/reset-password', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Incorrect OTP' });
 
       // OTP valid — reset password
-      const salt         = crypto.randomBytes(16).toString('hex');
+      const salt         = generateSalt();
       const passwordHash = hashPassword(password, salt);
       await pool.query(
         'UPDATE users SET password_hash=$1, salt=$2, updated_at=NOW() WHERE phone=$3',
@@ -1873,7 +834,7 @@ app.post('/api/change-password', async (req, res) => {
     const user = result.rows[0];
     if (hashPassword(currentPassword, user.salt) !== user.password_hash)
       return res.status(401).json({ success: false, error: 'Current password incorrect' });
-    const salt = crypto.randomBytes(16).toString('hex');
+    const salt = generateSalt();
     const passwordHash = hashPassword(newPassword, salt);
     await pool.query('UPDATE users SET password_hash=$1, salt=$2, updated_at=NOW() WHERE id=$3',
       [passwordHash, salt, session.userId]);
@@ -2515,35 +1476,17 @@ app.get('/api/my-votes', async (req, res) => {
 // All routes require X-Admin-Password header (same as notices admin)
 // ══════════════════════════════════════════════════════════════════════
 
-// GET /api/admin/candidates?category=MCA — list candidates (optionally filtered)
-// Phase 4A.2: WARD_ADMIN+. Note: this route has no ward/geography filter to
-// scope-check against (returns all wards' candidates for any caller who
-// passes the role gate) — a pre-existing route-design limitation, not
-// something this phase adds filtering logic to invent a fix for.
-app.get('/api/admin/candidates', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
-  const { category } = req.query;
-  try {
-    const result = category
-      ? await pool.query(
-          `SELECT * FROM candidates WHERE category = $1 ORDER BY display_order, id`,
-          [category]
-        )
-      : await pool.query(
-          `SELECT * FROM candidates ORDER BY category, display_order, id`
-        );
-    res.json({ success: true, candidates: result.rows });
-  } catch (err) {
-    console.error('GET /api/admin/candidates error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// GET /api/admin/candidates moved to routes/candidates.js (Phase 4B.2B)
+// — cache-independent (this route never touched getCached/setCached/
+// invalidateStaticCache), safe to move as a complete route.
 
 // POST /api/admin/candidates — add a new candidate
 // Phase 4A.2: WARD_ADMIN+, scope-checked against the target wardId.
 app.post('/api/admin/candidates', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
   const { name, party, bio, img, category, incumbent, wardId } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ success: false, error: 'name is required' });
-  const cat = CANDIDATE_CATEGORIES.includes(category) ? category : 'MCA';
+  // Phase 4B.2B: `cat` normalization now happens inside createCandidate()
+  // itself (lib/candidates.js) — no longer needed here.
   // Phase 3A Task 6: was hardcoded NGOLIBA_WARD_ID. wardId now read from
   // body (sent by admin.html's new County→Constituency→Ward selector),
   // falling back so existing calls that don't send it keep working.
@@ -2552,23 +1495,14 @@ app.post('/api/admin/candidates', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), as
   // this candidate in (SUPER_ADMIN bypasses via hasPermission's own check).
   if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
   try {
-    // display_order = 1 + current max within category
-    const maxOrd = await pool.query(
-      `SELECT COALESCE(MAX(display_order), -1) AS max_ord FROM candidates WHERE category = $1`,
-      [cat]
-    );
-    const nextOrd = parseInt(maxOrd.rows[0].max_ord) + 1;
-    const result = await pool.query(
-      `INSERT INTO candidates (name, party, bio, img, category, incumbent, display_order, ward_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING *`,
-      [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', nextOrd, resolvedWardId]
-    );
+    // Phase 4B.2B: SQL moved to lib/candidates.js createCandidate() — same
+    // max-display_order-then-INSERT logic, called here instead of inline.
+    const candidate = await createCandidate(pool, { name, party, bio, img, category, incumbent, wardId: resolvedWardId });
     // Pre-Phase 3B Task 3: invalidate the candidates cache so the very
     // next read (even one racing in immediately after this response)
     // sees the newly-created candidate, not a stale cached list.
     invalidateStaticCache('candidates');
-    res.json({ success: true, candidate: result.rows[0] });
+    res.json({ success: true, candidate });
   } catch (err) {
     console.error('POST /api/admin/candidates error:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -2583,11 +1517,13 @@ app.post('/api/admin/candidates', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), as
 app.put('/api/admin/candidates/:id', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
   const { name, party, bio, img, category, incumbent, wardId } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ success: false, error: 'name is required' });
-  const cat = CANDIDATE_CATEGORIES.includes(category) ? category : 'MCA';
+  // Phase 4B.2B: `cat` normalization now happens inside updateCandidate()
+  // itself (lib/candidates.js) — no longer needed here.
   try {
-    const current = await pool.query('SELECT ward_id FROM candidates WHERE id = $1', [req.params.id]);
-    if (!current.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
-    if (!requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+    // Phase 4B.2B: SQL moved to lib/candidates.js getCandidateWard().
+    const currentWard = await getCandidateWard(pool, req.params.id);
+    if (currentWard === undefined) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    if (!requirePermission(req, res, { wardId: currentWard })) return;
 
     // Phase 3A Task 7: ward_id is only updated when wardId is supplied in
     // the request — omitting it (as every pre-existing caller does) leaves
@@ -2597,24 +1533,12 @@ app.put('/api/admin/candidates/:id', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN),
     const hasWardId = !isNaN(parsedWardId);
     if (hasWardId && !requirePermission(req, res, { wardId: parsedWardId })) return;
 
-    const result = hasWardId
-      ? await pool.query(
-          `UPDATE candidates
-              SET name=$1, party=$2, bio=$3, img=$4, category=$5, incumbent=$6, ward_id=$7
-            WHERE id=$8
-            RETURNING *`,
-          [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', parsedWardId, req.params.id]
-        )
-      : await pool.query(
-          `UPDATE candidates
-              SET name=$1, party=$2, bio=$3, img=$4, category=$5, incumbent=$6
-            WHERE id=$7
-            RETURNING *`,
-          [name.trim(), party || '', bio || '', img || '', cat, incumbent === true || incumbent === 'true', req.params.id]
-        );
-    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    // Phase 4B.2B: SQL moved to lib/candidates.js updateCandidate() — same
+    // conditional (with/without ward_id) UPDATE, called here instead of inline.
+    const candidate = await updateCandidate(pool, req.params.id, { name, party, bio, img, category, incumbent, wardId: parsedWardId, hasWardId });
+    if (!candidate) return res.status(404).json({ success: false, error: 'Candidate not found' });
     invalidateStaticCache('candidates');
-    res.json({ success: true, candidate: result.rows[0] });
+    res.json({ success: true, candidate });
   } catch (err) {
     console.error('PUT /api/admin/candidates/:id error:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -2625,17 +1549,15 @@ app.put('/api/admin/candidates/:id', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN),
 // Phase 4A.2: WARD_ADMIN+, scope-checked against the candidate's current ward.
 app.delete('/api/admin/candidates/:id', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
   try {
-    const current = await pool.query('SELECT ward_id FROM candidates WHERE id = $1', [req.params.id]);
-    if (!current.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
-    if (!requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+    // Phase 4B.2B: SQL moved to lib/candidates.js getCandidateWard()/deleteCandidate().
+    const currentWard = await getCandidateWard(pool, req.params.id);
+    if (currentWard === undefined) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    if (!requirePermission(req, res, { wardId: currentWard })) return;
 
-    const result = await pool.query(
-      `DELETE FROM candidates WHERE id=$1 RETURNING id, name, category`,
-      [req.params.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Candidate not found' });
+    const deleted = await deleteCandidate(pool, req.params.id);
+    if (!deleted) return res.status(404).json({ success: false, error: 'Candidate not found' });
     invalidateStaticCache('candidates');
-    res.json({ success: true, deleted: result.rows[0] });
+    res.json({ success: true, deleted });
   } catch (err) {
     console.error('DELETE /api/admin/candidates/:id error:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -2951,69 +1873,14 @@ app.get('/api/analytics/dashboard', async (req, res) => {
   }
 });
 
-// Allowed forum categories — extend this array to add new ones
-const FORUM_CATEGORIES = ['general', 'water', 'roads', 'health', 'youth'];
-
-// Helper: map post row → API shape
-function formatPost(p) {
-  return {
-    id: p.id,
-    author: p.author_name || 'Anonymous',
-    authorPhone: p.author_phone || null,
-    text: p.content,
-    title: p.title,
-    category: p.category || 'general',
-    likes: parseInt(p.like_count) || 0,
-    reply_count: parseInt(p.reply_count) || 0,
-    created_at: p.created_at,
-    last_activity_at: p.last_activity_at
-  };
-}
-
-// Helper: map reply row → API shape
-function formatReply(r) {
-  return {
-    id: r.id,
-    postId: r.post_id,
-    author: r.author_name || 'Anonymous',
-    text: r.content,
-    likes: parseInt(r.like_count) || 0,
-    created_at: r.created_at
-  };
-}
+// FORUM_CATEGORIES, formatPost(), formatReply() moved to lib/forum.js
+// (Phase 4B.2D), imported below where the remaining forum routes need them.
 
 // ────────────────────────────────────────────────────────────────
 // GET /api/forum  — list posts, optional ?category= filter
 // ────────────────────────────────────────────────────────────────
-app.get('/api/forum', async (req, res) => {
-  try {
-    const cat = req.query.category;
-    const validCat = cat && FORUM_CATEGORIES.includes(cat) ? cat : null;
-
-    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
-    const forumParams = [];
-    let forumWhere = `COALESCE(is_deleted, false) = false AND COALESCE(is_hidden, false) = false`;
-    if (validCat) {
-      forumParams.push(validCat);
-      forumWhere += ` AND category = $${forumParams.length}`;
-    }
-    if (req.wardId != null) {
-      forumParams.push(req.wardId);
-      forumWhere += ` AND ward_id = $${forumParams.length}`;
-    }
-    const result = await pool.query(
-      `SELECT * FROM forum_posts
-        WHERE ${forumWhere}
-        ORDER BY last_activity_at DESC LIMIT 60`,
-      forumParams
-    );
-
-    res.json({ success: true, posts: result.rows.map(formatPost) });
-  } catch (error) {
-    console.error('GET /api/forum error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to get forum posts' });
-  }
-});
+// GET /api/forum moved to routes/forum.js (Phase 4B.2D) — no dependency
+// on requirePermission()/NGOLIBA_WARD_ID, safe to move whole.
 
 // GET /api/admin/forum-posts — Phase 3A Task 12. Admin-only, backend
 // support only — no corresponding UI is built in this phase, per the
@@ -3021,8 +1888,12 @@ app.get('/api/forum', async (req, res) => {
 // forum-moderation panel would consume this. Mirrors get_users' filter
 // priority (wardId > constituencyId > countyId) for consistency.
 // Phase 4A.2: MODERATOR+ (forum moderation). Scope-checked against
-// whichever geography filter was actually requested; a fully unfiltered
-// request (sees every ward at once) is restricted to SUPER_ADMIN.
+// whichever geography filter was actually requested.
+// Phase 4A.4: no explicit filter -> auto-apply the caller's own scope
+// (was: reject with 403 unless SUPER_ADMIN). MODERATOR still sees every
+// ward unfiltered (no geographic scope by design, see lib/rbac.js);
+// COUNTY_ADMIN/CONSTITUENCY_ADMIN/WARD_ADMIN now default to their own
+// scope instead of being rejected outright.
 app.get('/api/admin/forum-posts', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     const { wardId, constituencyId, countyId } = req.query;
@@ -3032,47 +1903,11 @@ app.get('/api/admin/forum-posts', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), asy
       if (!requirePermission(req, res, { constituencyId: parseInt(constituencyId, 10) })) return;
     } else if (countyId != null) {
       if (!requirePermission(req, res, { countyId: parseInt(countyId, 10) })) return;
-    } else if (!requirePermission(req, res, { role: RBAC.ROLES.SUPER_ADMIN })) {
-      return;
     }
 
-    const params = [];
-    let whereClause = '';
-    if (wardId != null) {
-      params.push(parseInt(wardId, 10));
-      whereClause = `WHERE p.ward_id = $${params.length}`;
-    } else if (constituencyId != null) {
-      params.push(parseInt(constituencyId, 10));
-      whereClause = `WHERE w.constituency_id = $${params.length}`;
-    } else if (countyId != null) {
-      params.push(parseInt(countyId, 10));
-      whereClause = `WHERE con.county_id = $${params.length}`;
-    }
-
-    const result = await pool.query(
-      `SELECT p.*,
-              w.name   AS ward_name,
-              con.name AS constituency_name,
-              cty.name AS county_name
-         FROM forum_posts p
-         LEFT JOIN wards         w   ON w.id = p.ward_id
-         LEFT JOIN constituencies con ON con.id = w.constituency_id
-         LEFT JOIN counties      cty ON cty.id = con.county_id
-         ${whereClause}
-         ORDER BY p.created_at DESC
-         LIMIT 100`,
-      params
-    );
-    res.json({
-      success: true,
-      posts: result.rows.map(p => ({
-        ...formatPost(p),
-        wardName: p.ward_name,
-        constituencyName: p.constituency_name,
-        countyName: p.county_name
-      })),
-      total: result.rowCount
-    });
+    // Phase 4B.2D: query-building + SQL moved to lib/forum.js getAdminForumPosts().
+    const { posts, total } = await getAdminForumPosts(pool, req.user, { wardId, constituencyId, countyId });
+    res.json({ success: true, posts, total });
   } catch (error) {
     console.error('GET /api/admin/forum-posts error:', error.message);
     res.status(500).json({ success: false, error: 'Failed to get forum posts' });
@@ -3099,7 +1934,6 @@ app.post('/api/forum', async (req, res) => {
     if (trimmed.length > 2000)
       return res.status(400).json({ success: false, error: 'Post cannot exceed 2000 characters' });
 
-    const safeCategory = FORUM_CATEGORIES.includes(category) ? category : 'general';
     // Sanitise: strip raw HTML tags to prevent XSS (stored as plain text, escaped on render)
     const safeText = trimmed.replace(/<[^>]*>/g, '');
 
@@ -3116,18 +1950,12 @@ app.post('/api/forum', async (req, res) => {
       if (!user.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
       const u = user.rows[0];
       const author = `${u.first_name} ${u.surname}`.trim() || 'Anonymous';
-      const autoTitle = title?.trim() || safeText.slice(0, 80);
       const authorWardId = u.ward_id || NGOLIBA_WARD_ID;
 
-      const post = await pool.query(
-        `INSERT INTO forum_posts
-           (title, content, author_id, author_name, author_phone, category, ward_id, last_activity_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-         RETURNING *`,
-        [autoTitle, safeText, u.id, author, session.phone, safeCategory, authorWardId]
-      );
-
-      res.json({ success: true, post: formatPost(post.rows[0]) });
+      // Phase 4B.2D: INSERT moved to lib/forum.js createForumPost() — the
+      // ward fallback above still happens here since it needs NGOLIBA_WARD_ID.
+      const post = await createForumPost(pool, { userId: u.id, authorName: author, phone: session.phone, title, text: safeText, category, wardId: authorWardId });
+      res.json({ success: true, post });
     } catch (error) {
       console.error('POST /api/forum create_post error:', error.message, error.stack);
       res.status(500).json({ success: false, error: 'Failed to create post' });
@@ -3144,22 +1972,9 @@ app.post('/api/forum', async (req, res) => {
       if (!userRes.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
       const userId = userRes.rows[0].id;
 
-      // Toggle: insert or delete
-      const existing = await pool.query(
-        'SELECT 1 FROM post_likes WHERE post_id = $1 AND user_id = $2', [postId, userId]
-      );
-      if (existing.rows.length) {
-        await pool.query('DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2', [postId, userId]);
-      } else {
-        await pool.query('INSERT INTO post_likes (post_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [postId, userId]);
-      }
-      // Sync count
-      await pool.query(
-        'UPDATE forum_posts SET like_count = (SELECT COUNT(*) FROM post_likes WHERE post_id = $1) WHERE id = $1',
-        [postId]
-      );
-      const updated = await pool.query('SELECT like_count FROM forum_posts WHERE id = $1', [postId]);
-      res.json({ success: true, likes: parseInt(updated.rows[0]?.like_count) || 0, liked: !existing.rows.length });
+      // Phase 4B.2D: toggle logic moved to lib/forum.js toggleLikePost().
+      const { likes, liked } = await toggleLikePost(pool, postId, userId);
+      res.json({ success: true, likes, liked });
     } catch (error) {
       console.error('POST /api/forum like_post error:', error.message);
       res.status(500).json({ success: false, error: 'Failed to like post' });
@@ -3168,24 +1983,12 @@ app.post('/api/forum', async (req, res) => {
   // ── list_posts (legacy POST action — keep for backward compat) ──
   } else if (action === 'list_posts') {
     try {
-      const cat = req.body.category;
-      const validCat = cat && FORUM_CATEGORIES.includes(cat) ? cat : null;
-      // Phase 2.6D Group 3: same ward_id filtering as GET /api/forum above.
-      const lpParams = [];
-      let lpWhere = `COALESCE(is_deleted,false)=false AND COALESCE(is_hidden,false)=false`;
-      if (validCat) {
-        lpParams.push(validCat);
-        lpWhere += ` AND category=$${lpParams.length}`;
-      }
-      if (req.wardId != null) {
-        lpParams.push(req.wardId);
-        lpWhere += ` AND ward_id=$${lpParams.length}`;
-      }
-      const result = await pool.query(
-        `SELECT * FROM forum_posts WHERE ${lpWhere} ORDER BY last_activity_at DESC LIMIT 60`,
-        lpParams
-      );
-      res.json({ success: true, posts: result.rows.map(formatPost) });
+      // Phase 4B.2D: consolidated into the same lib/forum.js
+      // listForumPosts() that GET /api/forum (routes/forum.js) now uses —
+      // this was already an exact duplicate of that query before this
+      // extraction, not a rewrite.
+      const posts = await listForumPosts(pool, { category: req.body.category, wardId: req.wardId });
+      res.json({ success: true, posts });
     } catch (error) {
       console.error('POST /api/forum list_posts error:', error.message);
       res.status(500).json({ success: false, error: 'Failed to list posts' });
@@ -3196,81 +1999,9 @@ app.post('/api/forum', async (req, res) => {
   }
 });
 
-// ────────────────────────────────────────────────────────────────
-// GET /api/forum/replies/:postId  — list replies for a post
-// ────────────────────────────────────────────────────────────────
-app.get('/api/forum/replies/:postId', async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT * FROM forum_replies
-        WHERE post_id = $1
-          AND COALESCE(is_deleted, false) = false
-          AND COALESCE(is_hidden,  false) = false
-        ORDER BY created_at ASC`,
-      [req.params.postId]
-    );
-    res.json({ success: true, replies: result.rows.map(formatReply) });
-  } catch (error) {
-    console.error('GET /api/forum/replies error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to get replies' });
-  }
-});
-
-// ────────────────────────────────────────────────────────────────
-// POST /api/forum/replies  — add a reply to a post
-// ────────────────────────────────────────────────────────────────
-app.post('/api/forum/replies', forumReplyLimiter, async (req, res) => {
-  const session = verifySession(req.headers.cookie || '');
-  if (!session) return res.status(401).json({ success: false, error: 'Login required to reply' });
-
-  const { postId, text } = req.body;
-  if (!postId) return res.status(400).json({ success: false, error: 'postId required' });
-
-  const trimmed = (text || '').trim();
-  if (!trimmed || trimmed.length < 1)
-    return res.status(400).json({ success: false, error: 'Reply cannot be empty' });
-  if (trimmed.length > 1000)
-    return res.status(400).json({ success: false, error: 'Reply cannot exceed 1000 characters' });
-
-  const safeText = trimmed.replace(/<[^>]*>/g, '');
-
-  try {
-    // Verify post exists and is not deleted/hidden
-    const postCheck = await pool.query(
-      `SELECT id FROM forum_posts WHERE id = $1 AND COALESCE(is_deleted,false)=false AND COALESCE(is_hidden,false)=false`,
-      [postId]
-    );
-    if (!postCheck.rows.length)
-      return res.status(404).json({ success: false, error: 'Post not found' });
-
-    const user = await pool.query(
-      'SELECT id, first_name, surname FROM users WHERE id = $1', [session.userId]
-    );
-    if (!user.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
-    const u = user.rows[0];
-    const author = `${u.first_name} ${u.surname}`.trim() || 'Anonymous';
-
-    const reply = await pool.query(
-      `INSERT INTO forum_replies (post_id, content, author_id, author_name, author_phone)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [postId, safeText, u.id, author, session.phone]
-    );
-
-    // Update reply_count and last_activity_at on the parent post
-    await pool.query(
-      `UPDATE forum_posts
-         SET reply_count = (SELECT COUNT(*) FROM forum_replies WHERE post_id = $1 AND COALESCE(is_deleted,false)=false),
-             last_activity_at = NOW()
-       WHERE id = $1`,
-      [postId]
-    );
-
-    res.json({ success: true, reply: formatReply(reply.rows[0]) });
-  } catch (error) {
-    console.error('POST /api/forum/replies error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to post reply' });
-  }
-});
+// GET /api/forum/replies/:postId and POST /api/forum/replies moved to
+// routes/forum.js (Phase 4B.2D) — neither depends on requirePermission()
+// or NGOLIBA_WARD_ID, safe to move whole.
 
 // GET /api/faceoff - Top 2 candidates by CUMULATIVE votes across all cycles
 // Supports ?category=MCA|MP|Governor|WomenRep (defaults to MCA for backward compat)
@@ -3343,95 +2074,8 @@ app.get('/api/faceoff', async (req, res) => {
 // ══════════════════════════════════════════════
 // GET /api/notices — fetch all active notices
 // ══════════════════════════════════════════════
-app.get('/api/notices', async (req, res) => {
-  try {
-    const { cat } = req.query;
-    const filterCat = cat && cat !== 'all' ? cat : null;
-
-    // Query 1: admin notices
-    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
-    // (ad_requests below has no ward_id column — it's not in GEO_TABLES —
-    // so that query is left as-is; this table is the only one of the two
-    // that can be ward-filtered.)
-    const noticeParams = [];
-    let noticeWhere = `(expires_at IS NULL OR expires_at > NOW()) AND COALESCE(is_archived, false) = false`;
-    if (filterCat) {
-      noticeParams.push(filterCat);
-      noticeWhere += ` AND category = $${noticeParams.length}`;
-    }
-    if (req.wardId != null) {
-      noticeParams.push(req.wardId);
-      noticeWhere += ` AND ward_id = $${noticeParams.length}`;
-    }
-    const noticesQ = pool.query(
-      `SELECT id, title, content, category, priority, created_at, expires_at,
-              NULL AS contact_phone, NULL AS business_name, false AS is_ad
-       FROM notices
-       WHERE ${noticeWhere}
-       ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`,
-      noticeParams
-    );
-
-    // Query 2: approved paid ad requests shaped to match notice cards
-    const adsQ = filterCat
-      ? pool.query(
-          `SELECT id,
-                  business_name                AS title,
-                  ad_content                   AS content,
-                  COALESCE(category,'general') AS category,
-                  'normal'                     AS priority,
-                  submitted_at                 AS created_at,
-                  NULL                         AS expires_at,
-                  contact_phone,
-                  business_name,
-                  true                         AS is_ad
-           FROM ad_requests
-           WHERE status = 'approved'
-             AND COALESCE(is_hidden, false) = false
-             AND COALESCE(category, 'general') = $1
-           ORDER BY submitted_at DESC`,
-          [filterCat]
-        )
-      : pool.query(
-          `SELECT id,
-                  business_name                AS title,
-                  ad_content                   AS content,
-                  COALESCE(category,'general') AS category,
-                  'normal'                     AS priority,
-                  submitted_at                 AS created_at,
-                  NULL                         AS expires_at,
-                  contact_phone,
-                  business_name,
-                  true                         AS is_ad
-           FROM ad_requests
-           WHERE status = 'approved'
-             AND COALESCE(is_hidden, false) = false
-           ORDER BY submitted_at DESC`
-        );
-
-    // Run both queries — ads query is isolated so a missing column never kills notices
-    const [noticesResult, adsResultRaw] = await Promise.all([
-      noticesQ,
-      adsQ.catch(err => {
-        console.error('/api/notices ads query error (non-fatal):', err.message);
-        return { rows: [] };
-      })
-    ]);
-
-    // Merge: high-priority first, then newest
-    const all = [...noticesResult.rows, ...adsResultRaw.rows].sort((a, b) => {
-      const pa = a.priority === 'high' ? 0 : 1;
-      const pb = b.priority === 'high' ? 0 : 1;
-      if (pa !== pb) return pa - pb;
-      return new Date(b.created_at) - new Date(a.created_at);
-    });
-
-    res.json({ success: true, notices: all });
-  } catch (error) {
-    console.error('/api/notices GET error:', error.message, '|', error.detail || '');
-    res.status(500).json({ success: false, notices: [], error: error.message });
-  }
-});
+// GET /api/notices moved to routes/notices.js (Phase 4B.2C) — no
+// dependency on requirePermission()/NGOLIBA_WARD_ID, safe to move whole.
 
 // ══════════════════════════════════════════════
 // POST /api/notices — admin: add a new notice
@@ -3448,13 +2092,9 @@ app.post('/api/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, 
     // body, falling back so existing callers that don't send it keep working.
     const resolvedWardId = parseInt(wardId, 10) || NGOLIBA_WARD_ID;
     if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
-    const result = await pool.query(
-      `INSERT INTO notices (title, content, category, priority, expires_at, created_by, ward_id)
-       VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL, 'admin', $6)
-       RETURNING *`,
-      [title, content, category || 'general', priority || 'normal', String(days || 30), resolvedWardId]
-    );
-    res.json({ success: true, notice: result.rows[0] });
+    // Phase 4B.2C: SQL moved to lib/notices.js createNoticeWithDays().
+    const notice = await createNoticeWithDays(pool, { title, content, category, priority, days, wardId: resolvedWardId });
+    res.json({ success: true, notice });
   } catch (error) {
     console.error('/api/notices POST error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -3468,10 +2108,11 @@ app.post('/api/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, 
 // response contract for that case is unchanged from before this phase.
 app.delete('/api/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
-    const current = await pool.query('SELECT ward_id FROM notices WHERE id = $1', [req.params.id]);
-    if (current.rows.length && !requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+    // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/deleteNotice().
+    const currentWard = await getNoticeWard(pool, req.params.id);
+    if (currentWard !== undefined && !requirePermission(req, res, { wardId: currentWard })) return;
 
-    await pool.query('DELETE FROM notices WHERE id = $1', [req.params.id]);
+    await deleteNotice(pool, req.params.id);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -3517,18 +2158,9 @@ function requirePermission(req, res, opts) {
 // anywhere in the project (server.js, routes/, every mounted router, and
 // every .html file) before removing it.
 
-// Phase 4A.2: MODERATOR+. No ward filter exists on this route (returns all
-// wards' notices for any caller who passes the role gate) — same
-// pre-existing route-design limitation as GET /api/admin/candidates.
-app.get('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM notices ORDER BY created_at DESC');
-    res.json({ success: true, data: { notices: result.rows } });
-  } catch (err) {
-    console.error('GET /api/admin/notices error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// GET /api/admin/notices moved to routes/notices.js (Phase 4B.2C) — uses
+// only pool and the pure, stateless RBAC.resolveReadScope/buildScopeFilter
+// helpers, safe to move whole.
 
 // Phase 4A.2: MODERATOR+, scope-checked against the target ward.
 app.post('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
@@ -3539,11 +2171,9 @@ app.post('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async 
   const resolvedWardId = parseInt(wardId, 10) || NGOLIBA_WARD_ID;
   if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
   try {
-    const result = await pool.query(
-      'INSERT INTO notices (title,content,category,priority,expires_at,created_by,ward_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [title, content, category||'general', priority||'normal', expiresAt||null, 'admin', resolvedWardId]
-    );
-    res.json({ success: true, notice: result.rows[0] });
+    // Phase 4B.2C: SQL moved to lib/notices.js createNoticeWithExpiresAt().
+    const notice = await createNoticeWithExpiresAt(pool, { title, content, category, priority, expiresAt, wardId: resolvedWardId });
+    res.json({ success: true, notice });
   } catch (err) {
     console.error('POST /api/admin/notices error:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -3557,16 +2187,14 @@ app.put('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), asy
   const { title, content, category, priority, expiresAt } = req.body;
   if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
   try {
-    const current = await pool.query('SELECT ward_id FROM notices WHERE id = $1', [req.params.id]);
-    if (!current.rows.length) return res.status(404).json({ success: false, error: 'Notice not found' });
-    if (!requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+    // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/updateNotice().
+    const currentWard = await getNoticeWard(pool, req.params.id);
+    if (currentWard === undefined) return res.status(404).json({ success: false, error: 'Notice not found' });
+    if (!requirePermission(req, res, { wardId: currentWard })) return;
 
-    const result = await pool.query(
-      'UPDATE notices SET title=$1,content=$2,category=$3,priority=$4,expires_at=$5,updated_at=NOW() WHERE id=$6 RETURNING *',
-      [title, content, category||'general', priority||'normal', expiresAt||null, req.params.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Notice not found' });
-    res.json({ success: true, notice: result.rows[0] });
+    const notice = await updateNotice(pool, req.params.id, { title, content, category, priority, expiresAt });
+    if (!notice) return res.status(404).json({ success: false, error: 'Notice not found' });
+    res.json({ success: true, notice });
   } catch (err) {
     console.error('PUT /api/admin/notices error:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -3578,10 +2206,11 @@ app.put('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), asy
 // behavior when it doesn't, matching the pre-existing response contract).
 app.delete('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
-    const current = await pool.query('SELECT ward_id FROM notices WHERE id = $1', [req.params.id]);
-    if (current.rows.length && !requirePermission(req, res, { wardId: current.rows[0].ward_id })) return;
+    // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/deleteNotice().
+    const currentWard = await getNoticeWard(pool, req.params.id);
+    if (currentWard !== undefined && !requirePermission(req, res, { wardId: currentWard })) return;
 
-    await pool.query('DELETE FROM notices WHERE id=$1', [req.params.id]);
+    await deleteNotice(pool, req.params.id);
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /api/admin/notices error:', err.message);
@@ -3611,11 +2240,37 @@ app.post('/api/admin', async (req, res) => {
   // ✅ GET STATS - Fixed column names (period_start, period_end instead of created_at, ends_at)
 if (action === 'get_stats') {
   try {
-    const voters = await pool.query('SELECT COUNT(*) as count FROM users');
+    // Phase 4A.4: read-side scope added — SUPER_ADMIN/MODERATOR see
+    // system-wide totals unchanged; COUNTY_ADMIN/CONSTITUENCY_ADMIN/
+    // WARD_ADMIN now see only their own scope's registered-voter and
+    // current-period vote counts.
+    const scope = RBAC.resolveReadScope(req.user);
+    const votersFilter = RBAC.buildScopeFilter(
+      scope, { ward: 'u.ward_id', constituency: 'w.constituency_id', county: 'con.county_id' }, []
+    );
+    const votersWhere = votersFilter.clause ? `WHERE ${votersFilter.clause}` : '';
+    const voters = await pool.query(
+      `SELECT COUNT(*) as count FROM users u
+         LEFT JOIN wards w ON w.id = u.ward_id
+         LEFT JOIN constituencies con ON con.id = w.constituency_id
+       ${votersWhere}`,
+      votersFilter.params
+    );
     const period = await pool.query('SELECT * FROM voting_periods WHERE is_active = true ORDER BY period_start DESC LIMIT 1');
-    const votes = period.rows.length ? 
-      await pool.query('SELECT COUNT(*) as count FROM votes WHERE period_id = $1', [period.rows[0].id]) : 
-      { rows: [{ count: 0 }] };
+    let votes = { rows: [{ count: 0 }] };
+    if (period.rows.length) {
+      const votesFilter = RBAC.buildScopeFilter(
+        scope, { ward: 'v.ward_id', constituency: 'w.constituency_id', county: 'con.county_id' }, [period.rows[0].id]
+      );
+      const votesWhere = votesFilter.clause ? `WHERE v.period_id = $1 AND ${votesFilter.clause}` : 'WHERE v.period_id = $1';
+      votes = await pool.query(
+        `SELECT COUNT(*) as count FROM votes v
+           LEFT JOIN wards w ON w.id = v.ward_id
+           LEFT JOIN constituencies con ON con.id = w.constituency_id
+         ${votesWhere}`,
+        votesFilter.params
+      );
+    }
 
     return res.json({
       success: true,
@@ -3634,6 +2289,12 @@ if (action === 'get_stats') {
 }
 
  // ✅ GET PERIODS - Fixed column references
+ // Phase 4A.4: no scope filtering applied here — voting_periods has no
+ // ward_id/constituency_id/county_id column at all (confirmed: not in
+ // GEO_TABLES, see ensurePhase2Migrations above). This isn't a missing
+ // relationship that should exist; periods are global by architecture —
+ // a single electoral cycle runs across every ward simultaneously — so
+ // every administrator, regardless of scope, sees the same period list.
 if (action === 'get_periods') {
   try {
     const result = await pool.query('SELECT id, period_start, period_end, is_active FROM voting_periods ORDER BY period_start DESC LIMIT 50');
@@ -3651,19 +2312,26 @@ if (action === 'get_users') {
     // plus optional wardId/constituencyId/countyId filters. Filters are
     // optional and additive: omitting all three (every existing caller,
     // since admin.html doesn't send any yet) reproduces the exact same
-    // unfiltered result set as before, just with 3 extra columns appended.
+    // unfiltered result set as before for SUPER_ADMIN/MODERATOR — see the
+    // Phase 4A.4 note just below for every other role.
     const { wardId, constituencyId, countyId } = req.body;
-    // Phase 4A.2: scope-checked against whichever filter was requested; a
-    // fully unfiltered request (every user, every ward) is SUPER_ADMIN-only.
+    // Phase 4A.2: an EXPLICIT filter is scope-checked against the caller's
+    // own geography — a WARD_ADMIN can't pass someone else's wardId.
     if (wardId != null) {
       if (!requirePermission(req, res, { wardId: parseInt(wardId, 10) })) return;
     } else if (constituencyId != null) {
       if (!requirePermission(req, res, { constituencyId: parseInt(constituencyId, 10) })) return;
     } else if (countyId != null) {
       if (!requirePermission(req, res, { countyId: parseInt(countyId, 10) })) return;
-    } else if (!requirePermission(req, res, { role: RBAC.ROLES.SUPER_ADMIN })) {
-      return;
     }
+    // Phase 4A.4: no explicit filter -> auto-apply the caller's own scope
+    // (was: reject with 403 unless SUPER_ADMIN). SUPER_ADMIN/MODERATOR
+    // still see every user unfiltered; COUNTY_ADMIN/CONSTITUENCY_ADMIN/
+    // WARD_ADMIN now see their own scope by default instead of being
+    // rejected outright.
+    const explicitFilter = wardId != null || constituencyId != null || countyId != null;
+    const scope = explicitFilter ? null : RBAC.resolveReadScope(req.user);
+
     const params = [];
     let whereClause = '';
     if (wardId != null) {
@@ -3675,6 +2343,11 @@ if (action === 'get_users') {
     } else if (countyId != null) {
       params.push(parseInt(countyId, 10));
       whereClause = `WHERE con.county_id = $${params.length}`;
+    } else {
+      const scopeFilter = RBAC.buildScopeFilter(
+        scope, { ward: 'u.ward_id', constituency: 'w.constituency_id', county: 'con.county_id' }, []
+      );
+      if (scopeFilter.clause) { whereClause = `WHERE ${scopeFilter.clause}`; params.push(...scopeFilter.params); }
     }
 
     const result = await pool.query(
@@ -3792,156 +2465,10 @@ return res.status(400).json({ success: false, error: 'Unknown action' });
 // ══════════════════════════════════════════════════════
 
 // POST /api/ad-requests — logged-in user submits an ad request
-app.post('/api/ad-requests', async (req, res) => {
-  const session = verifySession(req.headers.cookie || '');
-  if (!session) return res.status(401).json({ success: false, error: 'Please log in to submit an ad request.' });
-
-  const { businessName, adContent, category, contactPhone, contactEmail, budget, duration } = req.body;
-  if (!businessName || !adContent || !contactPhone) {
-    return res.status(400).json({ success: false, error: 'businessName, adContent and contactPhone are required' });
-  }
-  try {
-    const result = await pool.query(
-      `INSERT INTO ad_requests (id, business_name, ad_content, contact_phone, contact_email, budget, duration, status, submitted_by_phone, submitted_at, category)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'pending', $7, NOW(), $8) RETURNING id, submitted_at`,
-      [businessName, adContent, contactPhone, contactEmail || null, budget || null, duration || '7 days', session.phone, category || 'general']
-    );
-    res.json({ success: true, id: result.rows[0].id, submittedAt: result.rows[0].submitted_at });
-  } catch (err) {
-    console.error('POST /api/ad-requests error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/my-ad-requests — returns all requests submitted by the logged-in user
-app.get('/api/my-ad-requests', async (req, res) => {
-  const session = verifySession(req.headers.cookie || '');
-  if (!session) return res.status(401).json({ success: false, error: 'Not authenticated' });
-  try {
-    const result = await pool.query(
-      `SELECT id, business_name, ad_content, duration, status, fee, notes, submitted_at, reviewed_at
-       FROM ad_requests
-       WHERE submitted_by_phone = $1
-       ORDER BY submitted_at DESC`,
-      [session.phone]
-    );
-    res.json({ success: true, adRequests: result.rows });
-  } catch (err) {
-    console.error('GET /api/my-ad-requests error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/admin/ad-requests — admin: list all ad requests (hidden excluded by default)
-// Phase 4A.2: MODERATOR+ (ad requests have no ward concept in the schema, so role-only gating applies).
-app.get('/api/admin/ad-requests', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
-  try {
-    const showHidden = req.query.showHidden === 'true';
-    const result = await pool.query(
-      showHidden
-        ? `SELECT * FROM ad_requests ORDER BY submitted_at DESC`
-        : `SELECT * FROM ad_requests WHERE COALESCE(is_hidden, false) = false ORDER BY submitted_at DESC`
-    );
-    res.json({ success: true, adRequests: result.rows });
-  } catch (err) {
-    console.error('GET /api/admin/ad-requests error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// PATCH /api/admin/ad-requests/:id/hide — toggle is_hidden
-app.patch('/api/admin/ad-requests/:id/hide', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
-  const { hidden } = req.body; // true = hide, false = unhide
-  try {
-    const result = await pool.query(
-      `UPDATE ad_requests SET is_hidden = $1 WHERE id = $2 RETURNING id, is_hidden`,
-      [hidden === true, req.params.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
-    res.json({ success: true, hidden: result.rows[0].is_hidden });
-  } catch (err) {
-    console.error('PATCH /api/admin/ad-requests/:id/hide error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// DELETE /api/admin/ad-requests/:id — permanently delete an ad request
-app.delete('/api/admin/ad-requests/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
-  try {
-    const result = await pool.query(
-      `DELETE FROM ad_requests WHERE id = $1 RETURNING id`,
-      [req.params.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
-    res.json({ success: true });
-  } catch (err) {
-    console.error('DELETE /api/admin/ad-requests error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// PATCH /api/admin/ad-requests/:id — admin: update status + notes + optional fee
-app.patch('/api/admin/ad-requests/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
-  const { status, notes, fee } = req.body;
-  const allowed = ['pending', 'payment_pending', 'approved', 'rejected', 'completed'];
-  if (!status || !allowed.includes(status)) {
-    return res.status(400).json({ success: false, error: `status must be one of: ${allowed.join(', ')}` });
-  }
-  if (status === 'payment_pending' && (!fee || isNaN(parseInt(fee)) || parseInt(fee) <= 0)) {
-    return res.status(400).json({ success: false, error: 'A valid fee (KES) is required when requesting payment.' });
-  }
-  try {
-    const result = await pool.query(
-      `UPDATE ad_requests
-         SET status=$1, notes=$2, fee=COALESCE($3, fee), reviewed_at=NOW(), reviewed_by='admin'
-       WHERE id=$4 RETURNING *`,
-      [status, notes || null, fee ? parseInt(fee) : null, req.params.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
-    res.json({ success: true, adRequest: result.rows[0] });
-  } catch (err) {
-    console.error('PATCH /api/admin/ad-requests error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/ad-requests/:id — public: requester checks their own request status
-app.get('/api/ad-requests/:id', async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT id, business_name, status, fee, duration, notes, submitted_at, reviewed_at FROM ad_requests WHERE id=$1`,
-      [req.params.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Not found' });
-    res.json({ success: true, adRequest: result.rows[0] });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/ad-requests/:id/pay — requester confirms payment (M-Pesa receipt)
-app.post('/api/ad-requests/:id/pay', async (req, res) => {
-  const { mpesaReceiptNumber, phone } = req.body;
-  if (!mpesaReceiptNumber) return res.status(400).json({ success: false, error: 'mpesaReceiptNumber is required' });
-  try {
-    // Verify the request is in payment_pending state
-    const check = await pool.query(`SELECT status, fee FROM ad_requests WHERE id=$1`, [req.params.id]);
-    if (!check.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
-    if (check.rows[0].status !== 'payment_pending') {
-      return res.status(400).json({ success: false, error: `Cannot confirm payment — request is currently "${check.rows[0].status}"` });
-    }
-    const result = await pool.query(
-      `UPDATE ad_requests
-         SET status='approved', notes=COALESCE(notes||' | ', '')||'Paid via M-Pesa: '||$1
-       WHERE id=$2 RETURNING *`,
-      [mpesaReceiptNumber, req.params.id]
-    );
-    res.json({ success: true, adRequest: result.rows[0] });
-  } catch (err) {
-    console.error('POST /api/ad-requests/:id/pay error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// All 8 ad-request routes moved to routes/notices.js (Phase 4B.2C) —
+// none of them touch requirePermission(), NGOLIBA_WARD_ID, or the shared
+// cache (ad_requests has no ward_id column at all — confirmed in the
+// Phase 4A.4 report — so there was never a scope check to preserve here).
 
 // ════════════════════════════════════════════════
 // ROUTE: /api/period/next  — start a new voting cycle (admin only)
@@ -4125,6 +2652,9 @@ app.use(votingRouter);
 
 // ── PHASE 3: Mount analytics router ──
 app.use(analyticsRouter);
+app.use(candidatesRouter); // Phase 4B.2B
+app.use(noticesRouter); // Phase 4B.2C
+app.use(forumRouter); // Phase 4B.2D
 
 // ── PHASE 2: Frontend page routes ──
 app.get('/voting', (req, res) => {
@@ -4354,6 +2884,12 @@ function logAdminIdentityAction(req, action, targetUserId, details) {
 
 // GET /api/admin/administrators — list every non-VOTER user with their
 // geographic assignment names resolved for display.
+// Phase 4A.4: audited, not modified. This route (and /search below) uses
+// RBAC.requireRole(SUPER_ADMIN) — an exact match, not requireMinRole —
+// so no caller below SUPER_ADMIN can ever reach this data in the first
+// place. Since SUPER_ADMIN is specified to see everything unfiltered,
+// there is nothing to restrict here; the existing exact-role gate already
+// satisfies read isolation for this endpoint by construction.
 app.get('/api/admin/administrators', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (req, res) => {
   try {
     const result = await pool.query(`

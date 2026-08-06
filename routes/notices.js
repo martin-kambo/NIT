@@ -1,647 +1,306 @@
-// ============================================
-// PHASE 1: NOTICE BOARD - BACKEND
-// Production-ready Notice API endpoints
-// ============================================
-
-// Add this to your server.js file
+// routes/notices.js
+// Phase 4B.2C: this replaces the previous routes/notices.js, which was a
+// stale, pre-RBAC implementation that had never been mounted (confirmed
+// dead across multiple prior audits this session — it used the legacy
+// ADMIN_SECRET/x-admin-password mechanism retired in Phase 4A.3D, and had
+// none of the ward-scope filtering built since). Rather than reuse that
+// content, this file is the CURRENT, live implementation of every notice
+// and ad-request route that had no dependency on requirePermission() or
+// NGOLIBA_WARD_ID (both of which stay in server.js per this phase's
+// explicit "Leave in server.js" list) — extracted verbatim, not
+// redesigned. This becomes the single source of truth for these 10 routes,
+// finally giving this file a real, mounted purpose.
+//
+// The 5 notice routes that DO depend on requirePermission()/NGOLIBA_WARD_ID
+// (POST /api/notices, DELETE /api/notices/:id, and POST/PUT/DELETE
+// /api/admin/notices) stay in server.js as thin orchestrators, now calling
+// lib/notices.js for their SQL instead of running it inline.
 
 const express = require('express');
-const { Pool } = require('pg');
-const crypto = require('crypto');
+const { pool } = require('../bootstrap/database');
+const RBAC = require('../lib/rbac');
+const { verifySession } = require('../lib/auth/session');
 
 const router = express.Router();
-const logger = require('./logger'); // Use from server.js
 
-// ─────────────────────────────────────────
-// SSE CLIENTS REGISTRY
-// Maintains list of connected SSE clients
-// ─────────────────────────────────────────
-
-let sseClients = []; // Array of response objects
-
-function broadcastSSE(eventType, data) {
-    logger.info(`Broadcasting SSE: ${eventType} to ${sseClients.length} clients`);
-    
-    const message = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
-    
-    sseClients.forEach((res, index) => {
-        res.write(message);
-        
-        // Remove closed connections
-        res.on('error', () => {
-            sseClients.splice(index, 1);
-        });
-    });
-}
-
-// ─────────────────────────────────────────
-// MIDDLEWARE
-// ─────────────────────────────────────────
-
-/**
- * Admin Authentication Middleware
- * Verifies admin password from header
- */
-function adminAuth(req, res, next) {
-    const providedPassword = req.headers['x-admin-password'];
-    
-    if (!providedPassword) {
-        return res.status(401).json({
-            success: false,
-            error: 'Admin password required'
-        });
-    }
-    
-    // Hash the provided password
-    const hash = crypto.createHash('sha256').update(providedPassword).digest('hex');
-    
-    // Compare with ADMIN_PASSWORD_HASH from env
-    if (hash.toUpperCase() !== (process.env.ADMIN_PASSWORD_HASH || '').toUpperCase()) {
-        logger.warn('Failed admin authentication attempt');
-        return res.status(401).json({
-            success: false,
-            error: 'Invalid admin password'
-        });
-    }
-    
-    // Authentication successful
-    req.adminUser = { authenticated: true };
-    next();
-}
-
-/**
- * Input Validation Middleware
- * Sanitizes and validates notice data
- */
-function validateNotice(req, res, next) {
-    const { title, content, category, priority, expiresAt } = req.body;
-    
-    // Validate title
-    if (!title || typeof title !== 'string') {
-        return res.status(400).json({
-            success: false,
-            error: 'Title is required and must be a string'
-        });
-    }
-    if (title.trim().length < 5 || title.length > 200) {
-        return res.status(400).json({
-            success: false,
-            error: 'Title must be between 5 and 200 characters'
-        });
-    }
-    
-    // Validate content
-    if (!content || typeof content !== 'string') {
-        return res.status(400).json({
-            success: false,
-            error: 'Content is required and must be a string'
-        });
-    }
-    if (content.trim().length < 10 || content.length > 5000) {
-        return res.status(400).json({
-            success: false,
-            error: 'Content must be between 10 and 5000 characters'
-        });
-    }
-    
-    // Validate category
-    const validCategories = ['business', 'event', 'public', 'jobs', 'general'];
-    if (category && !validCategories.includes(category)) {
-        return res.status(400).json({
-            success: false,
-            error: `Category must be one of: ${validCategories.join(', ')}`
-        });
-    }
-    
-    // Validate priority
-    const validPriorities = ['high', 'normal', 'low'];
-    if (priority && !validPriorities.includes(priority)) {
-        return res.status(400).json({
-            success: false,
-            error: `Priority must be one of: ${validPriorities.join(', ')}`
-        });
-    }
-    
-    // Validate expiration date
-    if (expiresAt) {
-        const date = new Date(expiresAt);
-        if (isNaN(date.getTime())) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid expiration date format'
-            });
-        }
-        if (date <= new Date()) {
-            return res.status(400).json({
-                success: false,
-                error: 'Expiration date must be in the future'
-            });
-        }
-    }
-    
-    // Sanitize HTML (basic)
-    req.body.title = sanitizeHTML(title.trim());
-    req.body.content = sanitizeHTML(content.trim());
-    req.body.category = category || 'general';
-    req.body.priority = priority || 'normal';
-    
-    next();
-}
-
-/**
- * Basic HTML sanitization
- * Prevents XSS attacks
- */
-function sanitizeHTML(text) {
-    if (!text) return '';
-    
-    return text
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#x27;')
-        .replace(/\//g, '&#x2F;');
-}
-
-// ─────────────────────────────────────────
-// ROUTES
-// ─────────────────────────────────────────
-
-/**
- * GET /api/notices
- * Fetch all active notices with filtering, search, and pagination
- * 
- * Query Parameters:
- *   - category: Filter by category
- *   - priority: Filter by priority
- *   - search: Full-text search in title and content
- *   - page: Page number (default: 1)
- *   - limit: Items per page (default: 10, max: 50)
- */
+// GET /api/notices — public notice board feed (notices + approved paid ads,
+// merged and sorted the same way). Ward-filtered via req.wardId, already
+// attached to every request by the existing session middleware — no import
+// needed for that, it's just a property read off req.
 router.get('/api/notices', async (req, res) => {
-    try {
-        const { category, priority, search, page = 1, limit = 10 } = req.query;
-        
-        // Validate pagination
-        const pageNum = Math.max(1, parseInt(page) || 1);
-        const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 10));
-        const offset = (pageNum - 1) * limitNum;
-        
-        // Build query dynamically
-        let countQuery = 'SELECT COUNT(*) as total FROM notices WHERE is_archived = false AND (expires_at IS NULL OR expires_at > NOW())';
-        let dataQuery = `
-            SELECT 
-                id,
-                title,
-                content,
-                category,
-                priority,
-                expires_at as "expiresAt",
-                created_at as "createdAt",
-                created_by as "createdBy",
-                EXTRACT(DAY FROM (expires_at - NOW()))::INT as "daysUntilExpiry"
-            FROM notices 
-            WHERE is_archived = false AND (expires_at IS NULL OR expires_at > NOW())
-        `;
-        
-        const params = [];
-        let paramIndex = 1;
-        
-        // Apply category filter
-        if (category && category !== 'all') {
-            const filterClause = ` AND category = $${paramIndex}`;
-            countQuery += filterClause;
-            dataQuery += filterClause;
-            params.push(category);
-            paramIndex++;
-        }
-        
-        // Apply priority filter
-        if (priority && priority !== 'all') {
-            const filterClause = ` AND priority = $${paramIndex}`;
-            countQuery += filterClause;
-            dataQuery += filterClause;
-            params.push(priority);
-            paramIndex++;
-        }
-        
-        // Apply search filter (search in title and content)
-        if (search && search.trim()) {
-            const searchTerm = `%${search.trim()}%`;
-            const searchClause = ` AND (title ILIKE $${paramIndex} OR content ILIKE $${paramIndex + 1})`;
-            countQuery += searchClause;
-            dataQuery += searchClause;
-            params.push(searchTerm, searchTerm);
-            paramIndex += 2;
-        }
-        
-        // Get total count
-        const countResult = await req.pool.query(countQuery, params.slice(0, paramIndex - 1));
-        const total = parseInt(countResult.rows[0].total);
-        const totalPages = Math.ceil(total / limitNum);
-        
-        // Add ordering and pagination
-        dataQuery += ` ORDER BY priority DESC, created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-        params.push(limitNum, offset);
-        
-        // Get notices
-        const result = await req.pool.query(dataQuery, params);
-        
-        // Log request
-        logger.info(`Fetched ${result.rows.length} notices (page ${pageNum} of ${totalPages})`);
-        
-        res.json({
-            success: true,
-            data: {
-                notices: result.rows,
-                pagination: {
-                    page: pageNum,
-                    limit: limitNum,
-                    total,
-                    totalPages,
-                    hasNextPage: pageNum < totalPages,
-                    hasPreviousPage: pageNum > 1
-                }
-            }
-        });
-        
-    } catch (error) {
-        logger.error('Error fetching notices:', error.message);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch notices'
-        });
+  try {
+    const { cat } = req.query;
+    const filterCat = cat && cat !== 'all' ? cat : null;
+
+    // Query 1: admin notices
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    // (ad_requests below has no ward_id column — it's not in GEO_TABLES —
+    // so that query is left as-is; this table is the only one of the two
+    // that can be ward-filtered.)
+    const noticeParams = [];
+    let noticeWhere = `(expires_at IS NULL OR expires_at > NOW()) AND COALESCE(is_archived, false) = false`;
+    if (filterCat) {
+      noticeParams.push(filterCat);
+      noticeWhere += ` AND category = $${noticeParams.length}`;
     }
-});
-
-/**
- * GET /api/notices/stream
- * Server-Sent Events (SSE) stream for real-time notice updates
- * 
- * Establishes persistent connection and broadcasts updates to all connected clients
- */
-router.get('/api/notices/stream', (req, res) => {
-    // Set up SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    
-    // Add this client to active clients list
-    sseClients.push(res);
-    const clientIndex = sseClients.length - 1;
-    
-    logger.info(`SSE client connected. Total clients: ${sseClients.length}`);
-    
-    // Send initial connection message
-    res.write(`event: connected\ndata: {"message": "Connected to notice stream"}\n\n`);
-    
-    // Handle client disconnect
-    req.on('close', () => {
-        sseClients.splice(clientIndex, 1);
-        logger.info(`SSE client disconnected. Total clients: ${sseClients.length}`);
-    });
-    
-    // Keep connection alive with heartbeat
-    const heartbeat = setInterval(() => {
-        res.write(`: heartbeat\n\n`);
-    }, 30000); // Every 30 seconds
-    
-    res.on('close', () => {
-        clearInterval(heartbeat);
-    });
-});
-
-/**
- * POST /api/admin/notices
- * Create a new notice (admin only)
- * 
- * Headers:
- *   - x-admin-password: Admin password
- * 
- * Body:
- *   - title: Notice title (max 200 chars)
- *   - content: Notice content (max 5000 chars)
- *   - category: 'business' | 'event' | 'public' | 'jobs' | 'general'
- *   - priority: 'high' | 'normal' | 'low'
- *   - expiresAt: ISO date string (optional)
- */
-router.post('/api/admin/notices', adminAuth, validateNotice, async (req, res) => {
-    try {
-        const { title, content, category, priority, expiresAt } = req.body;
-        
-        const query = `
-            INSERT INTO notices 
-            (title, content, category, priority, expires_at, created_by, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-            RETURNING 
-                id,
-                title,
-                content,
-                category,
-                priority,
-                expires_at as "expiresAt",
-                created_at as "createdAt",
-                created_by as "createdBy"
-        `;
-        
-        const result = await req.pool.query(query, [
-            title,
-            content,
-            category,
-            priority,
-            expiresAt || null,
-            'admin'
-        ]);
-        
-        const notice = result.rows[0];
-        
-        // Broadcast to all connected SSE clients
-        broadcastSSE('notice-created', notice);
-        
-        logger.info(`Notice created: ${notice.id} (${notice.title})`);
-        
-        res.status(201).json({
-            success: true,
-            message: 'Notice created successfully',
-            data: notice
-        });
-        
-    } catch (error) {
-        logger.error('Error creating notice:', error.message);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to create notice'
-        });
+    if (req.wardId != null) {
+      noticeParams.push(req.wardId);
+      noticeWhere += ` AND ward_id = $${noticeParams.length}`;
     }
-});
+    const noticesQ = pool.query(
+      `SELECT id, title, content, category, priority, created_at, expires_at,
+              NULL AS contact_phone, NULL AS business_name, false AS is_ad
+       FROM notices
+       WHERE ${noticeWhere}
+       ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at DESC`,
+      noticeParams
+    );
 
-/**
- * PUT /api/admin/notices/:id
- * Update an existing notice (admin only)
- */
-router.put('/api/admin/notices/:id', adminAuth, validateNotice, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { title, content, category, priority, expiresAt } = req.body;
-        
-        // Verify notice exists
-        const checkQuery = 'SELECT id FROM notices WHERE id = $1';
-        const checkResult = await req.pool.query(checkQuery, [id]);
-        
-        if (checkResult.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                error: 'Notice not found'
-            });
-        }
-        
-        const query = `
-            UPDATE notices 
-            SET title = $1, content = $2, category = $3, priority = $4, 
-                expires_at = $5, updated_at = NOW()
-            WHERE id = $6
-            RETURNING 
-                id,
-                title,
-                content,
-                category,
-                priority,
-                expires_at as "expiresAt",
-                created_at as "createdAt",
-                created_by as "createdBy",
-                updated_at as "updatedAt"
-        `;
-        
-        const result = await req.pool.query(query, [
-            title,
-            content,
-            category,
-            priority,
-            expiresAt || null,
-            id
-        ]);
-        
-        const notice = result.rows[0];
-        
-        // Broadcast update to all connected clients
-        broadcastSSE('notice-updated', notice);
-        
-        logger.info(`Notice updated: ${id}`);
-        
-        res.json({
-            success: true,
-            message: 'Notice updated successfully',
-            data: notice
-        });
-        
-    } catch (error) {
-        logger.error('Error updating notice:', error.message);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to update notice'
-        });
-    }
-});
+    // Query 2: approved paid ad requests shaped to match notice cards
+    const adsQ = filterCat
+      ? pool.query(
+          `SELECT id,
+                  business_name                AS title,
+                  ad_content                   AS content,
+                  COALESCE(category,'general') AS category,
+                  'normal'                     AS priority,
+                  submitted_at                 AS created_at,
+                  NULL                         AS expires_at,
+                  contact_phone,
+                  business_name,
+                  true                         AS is_ad
+           FROM ad_requests
+           WHERE status = 'approved'
+             AND COALESCE(is_hidden, false) = false
+             AND COALESCE(category, 'general') = $1
+           ORDER BY submitted_at DESC`,
+          [filterCat]
+        )
+      : pool.query(
+          `SELECT id,
+                  business_name                AS title,
+                  ad_content                   AS content,
+                  COALESCE(category,'general') AS category,
+                  'normal'                     AS priority,
+                  submitted_at                 AS created_at,
+                  NULL                         AS expires_at,
+                  contact_phone,
+                  business_name,
+                  true                         AS is_ad
+           FROM ad_requests
+           WHERE status = 'approved'
+             AND COALESCE(is_hidden, false) = false
+           ORDER BY submitted_at DESC`
+        );
 
-/**
- * DELETE /api/admin/notices/:id
- * Delete a notice (admin only)
- * Soft delete - sets is_archived to true
- */
-router.delete('/api/admin/notices/:id', adminAuth, async (req, res) => {
-    try {
-        const { id } = req.params;
-        
-        // Soft delete (archive)
-        const query = `
-            UPDATE notices 
-            SET is_archived = true, updated_at = NOW()
-            WHERE id = $1
-            RETURNING id
-        `;
-        
-        const result = await req.pool.query(query, [id]);
-        
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                error: 'Notice not found'
-            });
-        }
-        
-        // Broadcast deletion to all connected clients
-        broadcastSSE('notice-deleted', { id });
-        
-        logger.info(`Notice deleted (archived): ${id}`);
-        
-        res.json({
-            success: true,
-            message: 'Notice deleted successfully'
-        });
-        
-    } catch (error) {
-        logger.error('Error deleting notice:', error.message);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to delete notice'
-        });
-    }
-});
+    // Run both queries — ads query is isolated so a missing column never kills notices
+    const [noticesResult, adsResultRaw] = await Promise.all([
+      noticesQ,
+      adsQ.catch(err => {
+        console.error('/api/notices ads query error (non-fatal):', err.message);
+        return { rows: [] };
+      })
+    ]);
 
-/**
- * GET /api/admin/notices
- * Get all notices (including archived) for admin view
- */
-router.get('/api/admin/notices', adminAuth, async (req, res) => {
-    try {
-        const query = `
-            SELECT 
-                id,
-                title,
-                content,
-                category,
-                priority,
-                expires_at as "expiresAt",
-                created_at as "createdAt",
-                updated_at as "updatedAt",
-                created_by as "createdBy",
-                is_archived as "isArchived"
-            FROM notices 
-            ORDER BY created_at DESC
-            LIMIT 100
-        `;
-        
-        const result = await req.pool.query(query);
-        
-        res.json({
-            success: true,
-            data: {
-                notices: result.rows,
-                total: result.rows.length
-            }
-        });
-        
-    } catch (error) {
-        logger.error('Error fetching admin notices:', error.message);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch notices'
-        });
-    }
-});
-
-/**
- * GET /api/notices/categories
- * Get list of available notice categories
- */
-router.get('/api/notices/categories', (req, res) => {
-    res.json({
-        success: true,
-        data: {
-            categories: ['business', 'event', 'public', 'jobs', 'general']
-        }
+    // Merge: high-priority first, then newest
+    const all = [...noticesResult.rows, ...adsResultRaw.rows].sort((a, b) => {
+      const pa = a.priority === 'high' ? 0 : 1;
+      const pb = b.priority === 'high' ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.created_at) - new Date(a.created_at);
     });
+
+    res.json({ success: true, notices: all });
+  } catch (error) {
+    console.error('/api/notices GET error:', error.message, '|', error.detail || '');
+    res.status(500).json({ success: false, notices: [], error: error.message });
+  }
 });
 
-/**
- * GET /api/notices/priorities
- * Get list of available priorities
- */
-router.get('/api/notices/priorities', (req, res) => {
-    res.json({
-        success: true,
-        data: {
-            priorities: ['high', 'normal', 'low']
-        }
-    });
+// Phase 4A.2: MODERATOR+. Phase 4A.4: read-side scope added — MODERATOR
+// still sees every ward's notices (it has no geographic scope by design,
+// see lib/rbac.js resolveReadScope), but WARD_ADMIN/CONSTITUENCY_ADMIN/
+// COUNTY_ADMIN now only see notices within their own scope.
+router.get('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  try {
+    const scope = RBAC.resolveReadScope(req.user);
+    const { clause: scopeClause, params } = RBAC.buildScopeFilter(
+      scope,
+      { ward: 'n.ward_id', constituency: 'w.constituency_id', county: 'con.county_id' },
+      []
+    );
+    const whereSql = scopeClause ? `WHERE ${scopeClause}` : '';
+    const result = await pool.query(
+      `SELECT n.* FROM notices n
+         LEFT JOIN wards w ON w.id = n.ward_id
+         LEFT JOIN constituencies con ON con.id = w.constituency_id
+       ${whereSql}
+       ORDER BY n.created_at DESC`,
+      params
+    );
+    res.json({ success: true, data: { notices: result.rows } });
+  } catch (err) {
+    console.error('GET /api/admin/notices error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-// ─────────────────────────────────────────
-// ERROR HANDLING
-// ─────────────────────────────────────────
+router.post('/api/ad-requests', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ success: false, error: 'Please log in to submit an ad request.' });
 
-router.use((error, req, res, next) => {
-    logger.error('Notice API error:', error.message);
-    res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-    });
+  const { businessName, adContent, category, contactPhone, contactEmail, budget, duration } = req.body;
+  if (!businessName || !adContent || !contactPhone) {
+    return res.status(400).json({ success: false, error: 'businessName, adContent and contactPhone are required' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO ad_requests (id, business_name, ad_content, contact_phone, contact_email, budget, duration, status, submitted_by_phone, submitted_at, category)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'pending', $7, NOW(), $8) RETURNING id, submitted_at`,
+      [businessName, adContent, contactPhone, contactEmail || null, budget || null, duration || '7 days', session.phone, category || 'general']
+    );
+    res.json({ success: true, id: result.rows[0].id, submittedAt: result.rows[0].submitted_at });
+  } catch (err) {
+    console.error('POST /api/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-// ─────────────────────────────────────────
-// EXPORT
-// ─────────────────────────────────────────
+// GET /api/my-ad-requests — returns all requests submitted by the logged-in user
+router.get('/api/my-ad-requests', async (req, res) => {
+  const session = verifySession(req.headers.cookie || '');
+  if (!session) return res.status(401).json({ success: false, error: 'Not authenticated' });
+  try {
+    const result = await pool.query(
+      `SELECT id, business_name, ad_content, duration, status, fee, notes, submitted_at, reviewed_at
+       FROM ad_requests
+       WHERE submitted_by_phone = $1
+       ORDER BY submitted_at DESC`,
+      [session.phone]
+    );
+    res.json({ success: true, adRequests: result.rows });
+  } catch (err) {
+    console.error('GET /api/my-ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/admin/ad-requests — admin: list all ad requests (hidden excluded by default)
+// Phase 4A.2: MODERATOR+ (ad requests have no ward concept in the schema, so role-only gating applies).
+// Phase 4A.4 STOP CONDITION (reported, not worked around): ad_requests has
+// no ward_id, no constituency_id, no county_id, and not even a user_id FK
+// — only free-text contact_phone/contact_email. There is no geographic
+// relationship in this table's schema to filter on at all, so read-side
+// ward isolation cannot be implemented here without a schema change
+// (adding and backfilling a ward_id column, or a user_id FK), which is
+// out of scope for this phase. Left unfiltered, same as before.
+router.get('/api/admin/ad-requests', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  try {
+    const showHidden = req.query.showHidden === 'true';
+    const result = await pool.query(
+      showHidden
+        ? `SELECT * FROM ad_requests ORDER BY submitted_at DESC`
+        : `SELECT * FROM ad_requests WHERE COALESCE(is_hidden, false) = false ORDER BY submitted_at DESC`
+    );
+    res.json({ success: true, adRequests: result.rows });
+  } catch (err) {
+    console.error('GET /api/admin/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/ad-requests/:id/hide — toggle is_hidden
+router.patch('/api/admin/ad-requests/:id/hide', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  const { hidden } = req.body; // true = hide, false = unhide
+  try {
+    const result = await pool.query(
+      `UPDATE ad_requests SET is_hidden = $1 WHERE id = $2 RETURNING id, is_hidden`,
+      [hidden === true, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
+    res.json({ success: true, hidden: result.rows[0].is_hidden });
+  } catch (err) {
+    console.error('PATCH /api/admin/ad-requests/:id/hide error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/admin/ad-requests/:id — permanently delete an ad request
+router.delete('/api/admin/ad-requests/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM ad_requests WHERE id = $1 RETURNING id`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/admin/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/ad-requests/:id — admin: update status + notes + optional fee
+router.patch('/api/admin/ad-requests/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  const { status, notes, fee } = req.body;
+  const allowed = ['pending', 'payment_pending', 'approved', 'rejected', 'completed'];
+  if (!status || !allowed.includes(status)) {
+    return res.status(400).json({ success: false, error: `status must be one of: ${allowed.join(', ')}` });
+  }
+  if (status === 'payment_pending' && (!fee || isNaN(parseInt(fee)) || parseInt(fee) <= 0)) {
+    return res.status(400).json({ success: false, error: 'A valid fee (KES) is required when requesting payment.' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE ad_requests
+         SET status=$1, notes=$2, fee=COALESCE($3, fee), reviewed_at=NOW(), reviewed_by='admin'
+       WHERE id=$4 RETURNING *`,
+      [status, notes || null, fee ? parseInt(fee) : null, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
+    res.json({ success: true, adRequest: result.rows[0] });
+  } catch (err) {
+    console.error('PATCH /api/admin/ad-requests error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/ad-requests/:id — public: requester checks their own request status
+router.get('/api/ad-requests/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, business_name, status, fee, duration, notes, submitted_at, reviewed_at FROM ad_requests WHERE id=$1`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, error: 'Not found' });
+    res.json({ success: true, adRequest: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/ad-requests/:id/pay — requester confirms payment (M-Pesa receipt)
+router.post('/api/ad-requests/:id/pay', async (req, res) => {
+  const { mpesaReceiptNumber, phone } = req.body;
+  if (!mpesaReceiptNumber) return res.status(400).json({ success: false, error: 'mpesaReceiptNumber is required' });
+  try {
+    // Verify the request is in payment_pending state
+    const check = await pool.query(`SELECT status, fee FROM ad_requests WHERE id=$1`, [req.params.id]);
+    if (!check.rows.length) return res.status(404).json({ success: false, error: 'Ad request not found' });
+    if (check.rows[0].status !== 'payment_pending') {
+      return res.status(400).json({ success: false, error: `Cannot confirm payment — request is currently "${check.rows[0].status}"` });
+    }
+    const result = await pool.query(
+      `UPDATE ad_requests
+         SET status='approved', notes=COALESCE(notes||' | ', '')||'Paid via M-Pesa: '||$1
+       WHERE id=$2 RETURNING *`,
+      [mpesaReceiptNumber, req.params.id]
+    );
+    res.json({ success: true, adRequest: result.rows[0] });
+  } catch (err) {
+    console.error('POST /api/ad-requests/:id/pay error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 module.exports = router;
-
-// ============================================
-// HOW TO INTEGRATE INTO SERVER.JS
-// ============================================
-
-/*
-
-In your server.js, add:
-
-// 1. Import the router
-const noticesRouter = require('./routes/notices');
-
-// 2. After database setup, add middleware to attach pool to request
-app.use((req, res, next) => {
-  req.pool = pool;  // PostgreSQL connection pool
-  next();
-});
-
-// 3. Mount the router
-app.use(noticesRouter);
-
-// Now all routes will be available:
-// GET  /api/notices
-// GET  /api/notices/stream
-// POST /api/admin/notices
-// PUT  /api/admin/notices/:id
-// DELETE /api/admin/notices/:id
-
-*/
-
-// ============================================
-// TESTING WITH CURL
-// ============================================
-
-/*
-
-# Get all notices
-curl http://localhost:3000/api/notices
-
-# Get business notices
-curl http://localhost:3000/api/notices?category=business
-
-# Search notices
-curl http://localhost:3000/api/notices?search=water
-
-# Create notice (admin)
-curl -X POST http://localhost:3000/api/admin/notices \
-  -H "Content-Type: application/json" \
-  -H "x-admin-password: your_password" \
-  -d '{
-    "title": "Test Notice",
-    "content": "This is a test notice",
-    "category": "business",
-    "priority": "normal",
-    "expiresAt": "2026-06-23T23:59:59Z"
-  }'
-
-# Update notice
-curl -X PUT http://localhost:3000/api/admin/notices/notice-id \
-  -H "Content-Type: application/json" \
-  -H "x-admin-password: your_password" \
-  -d '{"title": "Updated Title", "content": "Updated content", ...}'
-
-# Delete notice
-curl -X DELETE http://localhost:3000/api/admin/notices/notice-id \
-  -H "x-admin-password: your_password"
-
-# Stream real-time updates
-curl http://localhost:3000/api/notices/stream
-
-*/

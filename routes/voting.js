@@ -388,22 +388,33 @@ router.delete('/api/vote/:id', RBAC.requireRole(RBAC.ROLES.SUPER_ADMIN), async (
  * Admin: GET /api/admin/votes
  * Recent votes for the current period with candidate names.
  * Phase 4A.3C: WARD_ADMIN+, read-only — same minimum-role reasoning as
- * get_stats/get_periods in server.js's /api/admin dispatcher. No ward
- * filter exists on this route (returns the current period's votes
- * across every ward for any caller who passes the role gate) — a
- * pre-existing route-design limitation, not something this migration
- * adds new filtering logic to fix.
+ * get_stats/get_periods in server.js's /api/admin dispatcher.
+ * Phase 4A.4: read-side scope added. votes.ward_id (added by
+ * ensurePhase2Migrations' GEO_TABLES migration) is used directly for
+ * WARD_ADMIN; CONSTITUENCY_ADMIN/COUNTY_ADMIN join through wards/
+ * constituencies. Response shape (id, user_id, candidate_id, sublocation,
+ * timestamp) is unchanged — ward_id is used in the WHERE clause only, not
+ * added to the SELECT list.
  */
 router.get('/api/admin/votes', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
     try {
         const period = await getCurrentPeriod(req.pool);
+        const scope = RBAC.resolveReadScope(req.user);
+        const { clause: scopeClause, params } = RBAC.buildScopeFilter(
+            scope,
+            { ward: 'v.ward_id', constituency: 'w.constituency_id', county: 'con.county_id' },
+            [period.id]
+        );
+        const whereSql = scopeClause ? `WHERE v.period_id = $1 AND ${scopeClause}` : 'WHERE v.period_id = $1';
         const result = await req.pool.query(`
-            SELECT id, user_id, candidate_id, sublocation, timestamp
-            FROM   votes
-            WHERE  period_id = $1
-            ORDER  BY timestamp DESC
+            SELECT v.id, v.user_id, v.candidate_id, v.sublocation, v.timestamp
+            FROM   votes v
+            LEFT JOIN wards w ON w.id = v.ward_id
+            LEFT JOIN constituencies con ON con.id = w.constituency_id
+            ${whereSql}
+            ORDER  BY v.timestamp DESC
             LIMIT  100
-        `, [period.id]);
+        `, params);
 
         res.json({
             success: true,
