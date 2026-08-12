@@ -2,12 +2,22 @@
 // PHASE 3: ADVANCED LEADERBOARD - BACKEND
 // Analytics API Endpoints
 // ============================================
+//
+// Phase 4B.14: GET /api/stats and GET /api/analytics/dashboard, moved
+// verbatim from server.js. Neither calls into analyticsEngine (confirmed
+// by reading both in full before moving) -- both are standalone inline-SQL
+// routes, same as they were, just relocated. Both reference a bare `pool`
+// identifier (as they did in server.js), unlike every other route in this
+// file, which uses req.pool -- the require below exists solely so that
+// reference resolves; it does not change how any other route in this file
+// accesses the database pool.
 
 const express = require('express');
 const crypto = require('crypto');
 const analyticsEngine = require('../lib/analytics-engine');
 const { getCandidatesByCategory } = require('../lib/candidates');
 const RBAC = require('../lib/rbac'); // Phase 4A.3C: migrating this file's last legacy-secret-gated route to RBAC
+const { pool } = require('../bootstrap/database');
 
 const router = express.Router();
 
@@ -546,6 +556,317 @@ router.post('/api/analytics/export', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN),
         });
     }
 });
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 4B.14: GET /api/stats and GET /api/analytics/dashboard,
+// moved verbatim from server.js. Every query, ward-scope clause,
+// heatmap/hourly/prediction calculation, and response shape below is
+// byte-for-byte identical to the original inline version (line
+// endings normalized from CRLF to LF to match this file's existing
+// convention). Note: /api/analytics/dashboard's own prediction logic
+// below is a separate, independent implementation from
+// analyticsEngine.predictNextPeriod() used elsewhere in this file --
+// this predates this extraction and was left exactly as found, not
+// consolidated.
+// ────────────────────────────────────────────────────────────────────────────
+
+// GET /api/stats - Return voting statistics
+router.get('/api/stats', async (req, res) => {
+  try {
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    const votersParams = [];
+    let votersWardClause = '';
+    if (req.wardId != null) {
+      votersParams.push(req.wardId);
+      votersWardClause = 'WHERE ward_id = $1';
+    }
+    const votersResult = await pool.query(`SELECT COUNT(*) as count FROM users ${votersWardClause}`, votersParams);
+    const registeredVoters = parseInt(votersResult.rows[0].count || 0);
+
+    const periodResult = await pool.query(
+      'SELECT id, total_votes, period_start, period_end FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
+    );
+    const period = periodResult.rows[0] || null;
+
+    const votesByCandidate = {};
+    if (period) {
+      const votesParams = [period.id];
+      let votesWardClause = '';
+      if (req.wardId != null) {
+        votesParams.push(req.wardId);
+        votesWardClause = 'AND ward_id = $2';
+      }
+      const votesResult = await pool.query(
+        `SELECT candidate_id, COUNT(*) as vote_count FROM votes WHERE period_id = $1 ${votesWardClause} GROUP BY candidate_id`,
+        votesParams
+      );
+      votesResult.rows.forEach(row => {
+        votesByCandidate[row.candidate_id] = parseInt(row.vote_count);
+      });
+    }
+
+    // Real sublocation breakdown from users table
+    const sublocParams = [];
+    let sublocWardClause = '';
+    if (req.wardId != null) {
+      sublocParams.push(req.wardId);
+      sublocWardClause = 'WHERE ward_id = $1';
+    }
+    const sublocResult = await pool.query(
+      `SELECT COALESCE(sublocation, 'Unknown') as sublocation, COUNT(*) as count
+       FROM users ${sublocWardClause} GROUP BY sublocation`,
+      sublocParams
+    );
+    const votersBySubLocation = {};
+    sublocResult.rows.forEach(r => { votersBySubLocation[r.sublocation] = parseInt(r.count); });
+
+    // Live count for current period
+    let statsTotalVotes = 0;
+    if (period) {
+      const statsTotalParams = [period.id];
+      let statsTotalWardClause = '';
+      if (req.wardId != null) {
+        statsTotalParams.push(req.wardId);
+        statsTotalWardClause = 'AND ward_id = $2';
+      }
+      const statsTotalRes = await pool.query(
+        `SELECT COUNT(*) AS count FROM votes WHERE period_id = $1 ${statsTotalWardClause}`, statsTotalParams
+      );
+      statsTotalVotes = parseInt(statsTotalRes.rows[0].count || 0);
+    }
+
+    res.json({
+      success: true,
+      registeredVoters,
+      currentPeriod: period ? {
+        periodId: period.id,
+        totalVotes: statsTotalVotes,
+        periodStart: period.period_start,
+        periodEnd: period.period_end,
+        votesByCandidate
+      } : null,
+      votersBySubLocation
+    });
+  } catch (error) {
+    console.error('/api/stats error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// GET /api/analytics/dashboard — all data needed by the Analytics tab
+// Returns: votesThisCycle, registeredVoters, turnoutRate, allTimeVotes,
+//          per-sublocation heatmap, real hourly distribution, AI prediction
+// ════════════════════════════════════════════════════════════════════════════
+router.get('/api/analytics/dashboard', async (req, res) => {
+  try {
+    // ── Phase 2.5: KNOWN_SUBLOCATIONS removed ──────────────────────────────
+    // Previously: const KNOWN_SUBLOCATIONS = ['Ngoliba','Gatiiguru','Kilimambogo','Magogoni']
+    // That array silently excluded any sublocation not in the list.
+    // Replacement: derive sublocations live from the users table so new
+    // sublocations appear in the heatmap automatically with zero code changes.
+    // Heatmap shape, calculations, and API response format are unchanged.
+    // ────────────────────────────────────────────────────────────────────────
+
+    // 1. Registered voters
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    const votersParams = [];
+    let votersWardClause = '';
+    if (req.wardId != null) {
+      votersParams.push(req.wardId);
+      votersWardClause = 'WHERE ward_id = $1';
+    }
+    const votersRes = await pool.query(`SELECT COUNT(*) AS count FROM users ${votersWardClause}`, votersParams);
+    const registeredVoters = parseInt(votersRes.rows[0].count || 0);
+
+    // 2. Active period
+    const periodRes = await pool.query(
+      'SELECT id, period_start, period_end, total_votes FROM voting_periods WHERE is_active = true ORDER BY id DESC LIMIT 1'
+    );
+    const period   = periodRes.rows[0] || null;
+    const periodId = period ? period.id : null;
+
+    // 3. Votes this cycle — live count from votes table (authoritative)
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    let votesThisCycle = 0;
+    if (periodId !== null) {
+      const cycleParams = [periodId];
+      let cycleWardClause = '';
+      if (req.wardId != null) {
+        cycleParams.push(req.wardId);
+        cycleWardClause = 'AND ward_id = $2';
+      }
+      const cycleRes = await pool.query(
+        `SELECT COUNT(*) AS count FROM votes WHERE period_id = $1 ${cycleWardClause}`, cycleParams
+      );
+      votesThisCycle = parseInt(cycleRes.rows[0].count || 0);
+    }
+
+    // 4. All-time total votes across every period
+    // Phase 2.6D Group 3: voting_periods.total_votes is a per-period counter
+    // incremented by EVERY ward's votes combined (voting_periods has no
+    // ward_id column — periods are global by design, see GEO_TABLES above).
+    // That makes it structurally impossible to filter. Reading directly
+    // from the votes table instead gives the identical number today (one
+    // ward) and becomes correctly filterable once a second ward exists.
+    const allTimeParams = [];
+    let allTimeWardClause = '';
+    if (req.wardId != null) {
+      allTimeParams.push(req.wardId);
+      allTimeWardClause = 'WHERE ward_id = $1';
+    }
+    const allTimeRes = await pool.query(
+      `SELECT COUNT(*) AS total FROM votes ${allTimeWardClause}`, allTimeParams
+    );
+    const allTimeVotes = parseInt(allTimeRes.rows[0].total || 0);
+
+    // 5. Turnout rate for this cycle
+    const turnoutRate = registeredVoters > 0
+      ? parseFloat(((votesThisCycle / registeredVoters) * 100).toFixed(1))
+      : 0;
+
+    // 6. Registered voters per sublocation — also used to derive heatmap sublocation list
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    const subVotersParams = [];
+    let subVotersWardClause = '';
+    if (req.wardId != null) {
+      subVotersParams.push(req.wardId);
+      subVotersWardClause = 'WHERE ward_id = $1';
+    }
+    const subVotersRes = await pool.query(
+      `SELECT COALESCE(sublocation, 'Unknown') AS sub, COUNT(*) AS cnt FROM users ${subVotersWardClause} GROUP BY sublocation`,
+      subVotersParams
+    );
+    const votersBySubLocation = {};
+    subVotersRes.rows.forEach(r => { votersBySubLocation[r.sub] = parseInt(r.cnt); });
+
+    // 7. Votes per sublocation in current period
+    // Phase 2.6D Group 3: filtered by ward_id when req.wardId is set.
+    let subVotesRes = { rows: [] };
+    if (periodId !== null) {
+      const subVotesParams = [periodId];
+      let subVotesWardClause = '';
+      if (req.wardId != null) {
+        subVotesParams.push(req.wardId);
+        subVotesWardClause = 'AND ward_id = $2';
+      }
+      subVotesRes = await pool.query(
+        `SELECT COALESCE(sublocation, 'Unknown') AS sub, COUNT(*) AS cnt
+         FROM votes WHERE period_id = $1 ${subVotesWardClause} GROUP BY sublocation`,
+        subVotesParams
+      );
+    }
+    const votesBySubLocation = {};
+    subVotesRes.rows.forEach(r => { votesBySubLocation[r.sub] = parseInt(r.cnt); });
+
+    // 8. Heatmap — per-sublocation accuracy
+    // Phase 2.5: sublocation list is now derived from registered users (step 6 above).
+    // Any sublocation present in the users table appears automatically — no hardcoded list.
+    // Excludes 'Unknown' (NULL users) from the heatmap as they carry no geographic meaning.
+    // Sorted alphabetically so order is stable and deterministic across restarts.
+    const derivedSublocations = Object.keys(votersBySubLocation)
+      .filter(sub => sub !== 'Unknown')
+      .sort();
+    const heatmap = derivedSublocations.map(sub => {
+      const registered = votersBySubLocation[sub] || 0;
+      const votes      = votesBySubLocation[sub]  || 0;
+      const pct        = registered > 0 ? parseFloat(((votes / registered) * 100).toFixed(1)) : 0;
+      return { sublocation: sub, votes, registered, pct };
+    });
+
+    // 9. Hourly vote distribution — real data from votes.timestamp (EAT = UTC+3)
+    //    Shows votes cast in the last 24 hours, bucketed by local hour
+    let hourlyVotes = [];
+    try {
+      const hourlyParams = [];
+      let hourlyWardClause = '';
+      if (req.wardId != null) {
+        hourlyParams.push(req.wardId);
+        hourlyWardClause = `AND ward_id = $${hourlyParams.length}`;
+      }
+      const hourlyRes = await pool.query(
+        `SELECT
+           EXTRACT(HOUR FROM (to_timestamp(timestamp::bigint / 1000) + INTERVAL '3 hours')) AS hr,
+           COUNT(*) AS cnt
+         FROM votes
+         WHERE timestamp::bigint >= (EXTRACT(EPOCH FROM (NOW() - INTERVAL '24 hours')) * 1000)
+         ${hourlyWardClause}
+         GROUP BY hr
+         ORDER BY hr`,
+        hourlyParams
+      );
+      const hrMap = {};
+      hourlyRes.rows.forEach(r => { hrMap[parseInt(r.hr)] = parseInt(r.cnt); });
+      // 13 slots: 6 AM → 6 PM (Nairobi business hours)
+      hourlyVotes = Array.from({ length: 13 }, (_, i) => {
+        const h = i + 6;
+        return { hour: h, votes: hrMap[h] || 0 };
+      });
+    } catch (hourlyErr) {
+      console.warn('[analytics/dashboard] hourly query failed (non-fatal):', hourlyErr.message);
+      hourlyVotes = Array.from({ length: 13 }, (_, i) => ({ hour: i + 6, votes: 0 }));
+    }
+
+    // 10. AI Prediction — leading candidate by cumulative all-category votes
+    // Phase 2.6D fix: this query had a `WHERE c.category = 'MCA'` filter
+    // that directly contradicted its own comment and every other section
+    // of this route (registered voters, votes this cycle, heatmap, hourly
+    // votes) — none of which filter by category at all. Removed so the
+    // prediction widget is consistent with the rest of the dashboard.
+    let prediction = { leader: null, confidence: 50 };
+    try {
+      const predParams = [];
+      let predWardClause = '';
+      if (req.wardId != null) {
+        predParams.push(req.wardId);
+        predWardClause = `WHERE c.ward_id = $${predParams.length}`;
+      }
+      const allVotesRes = await pool.query(
+        `SELECT v.candidate_id, COUNT(*) AS cnt, c.name
+         FROM votes v
+         JOIN candidates c ON c.id = v.candidate_id
+         ${predWardClause}
+         GROUP BY v.candidate_id, c.name
+         ORDER BY cnt DESC
+         LIMIT 2`,
+        predParams
+      );
+      if (allVotesRes.rows.length > 0) {
+        const top    = allVotesRes.rows[0];
+        const second = allVotesRes.rows[1];
+        const total  = parseInt(top.cnt) + (second ? parseInt(second.cnt) : 0);
+        prediction = {
+          leader:     top.name,
+          confidence: total > 0 ? Math.min(99, Math.round((parseInt(top.cnt) / total) * 100)) : 50
+        };
+      }
+    } catch (predErr) {
+      console.warn('[analytics/dashboard] prediction query failed (non-fatal):', predErr.message);
+    }
+
+    res.json({
+      success:          true,
+      votesThisCycle,
+      registeredVoters,
+      turnoutRate,
+      allTimeVotes,
+      currentPeriodId:  periodId,
+      periodStart:      period?.period_start || null,
+      periodEnd:        period?.period_end   || null,
+      heatmap,
+      hourlyVotes,
+      prediction,
+      votersBySubLocation
+    });
+
+  } catch (error) {
+    console.error('/api/analytics/dashboard error:', error.message, error.stack);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 module.exports = router;
 

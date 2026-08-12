@@ -5,21 +5,28 @@
 // ADMIN_SECRET/x-admin-password mechanism retired in Phase 4A.3D, and had
 // none of the ward-scope filtering built since). Rather than reuse that
 // content, this file is the CURRENT, live implementation of every notice
-// and ad-request route that had no dependency on requirePermission() or
-// NGOLIBA_WARD_ID (both of which stay in server.js per this phase's
-// explicit "Leave in server.js" list) — extracted verbatim, not
-// redesigned. This becomes the single source of truth for these 10 routes,
-// finally giving this file a real, mounted purpose.
+// and ad-request route.
 //
-// The 5 notice routes that DO depend on requirePermission()/NGOLIBA_WARD_ID
-// (POST /api/notices, DELETE /api/notices/:id, and POST/PUT/DELETE
-// /api/admin/notices) stay in server.js as thin orchestrators, now calling
-// lib/notices.js for their SQL instead of running it inline.
+// Phase 4B.9: the 5 remaining notice routes (POST /api/notices, DELETE
+// /api/notices/:id, and POST/PUT/DELETE /api/admin/notices) moved here
+// too, now that requirePermission() (lib/rbac.js) and getFoundingWardId()
+// (lib/ward-cache.js) each have a single-owner module home (Phase 4B.5) --
+// the dependency that had kept them in server.js as thin orchestrators.
+// This file is now the sole owner of every notice route.
 
 const express = require('express');
 const { pool } = require('../bootstrap/database');
 const RBAC = require('../lib/rbac');
+const { requirePermission } = RBAC;
 const { verifySession } = require('../lib/auth/session');
+const { getFoundingWardId } = require('../lib/ward-cache');
+const {
+  createNoticeWithDays,
+  createNoticeWithExpiresAt,
+  getNoticeWard,
+  updateNotice,
+  deleteNotice,
+} = require('../lib/notices');
 
 const router = express.Router();
 
@@ -141,6 +148,116 @@ router.get('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), asyn
     res.json({ success: true, data: { notices: result.rows } });
   } catch (err) {
     console.error('GET /api/admin/notices error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 4B.9: the remaining Notices-domain routes below, moved verbatim
+// from server.js -- POST /api/notices, DELETE /api/notices/:id, POST
+// /api/admin/notices, PUT /api/admin/notices/:id, DELETE
+// /api/admin/notices/:id. Each was blocked from moving earlier only by
+// the requirePermission()/founding-ward dependency, resolved in Phase
+// 4B.5. Every RBAC check, scope check, lib/notices.js call, and
+// response shape below is byte-for-byte identical to the original
+// inline version (line endings normalized from CRLF to LF to match
+// this file's existing convention -- content otherwise unchanged).
+// ────────────────────────────────────────────────────────────────────────────
+
+// ══════════════════════════════════════════════
+// POST /api/notices — admin: add a new notice
+// ══════════════════════════════════════════════
+// Phase 4A.2: MODERATOR+, scope-checked against the target ward. Replaces
+// the legacy body.adminSecret === process.env.ADMIN_SECRET check.
+router.post('/api/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  try {
+    const { title, content, category, priority, days, wardId } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ success: false, error: 'title and content are required' });
+    }
+    // Phase 3A Task 9: was hardcoded getFoundingWardId(). wardId now read from
+    // body, falling back so existing callers that don't send it keep working.
+    const resolvedWardId = parseInt(wardId, 10) || getFoundingWardId();
+    if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
+    // Phase 4B.2C: SQL moved to lib/notices.js createNoticeWithDays().
+    const notice = await createNoticeWithDays(pool, { title, content, category, priority, days, wardId: resolvedWardId });
+    res.json({ success: true, notice });
+  } catch (error) {
+    console.error('/api/notices POST error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/notices/:id — admin: remove a notice
+// Phase 4A.2: MODERATOR+, scope-checked against the notice's current ward
+// when it exists. If it doesn't exist, there's nothing to scope-check —
+// falls through to the original no-op-delete-then-success behavior so the
+// response contract for that case is unchanged from before this phase.
+router.delete('/api/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  try {
+    // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/deleteNotice().
+    const currentWard = await getNoticeWard(pool, req.params.id);
+    if (currentWard !== undefined && !requirePermission(req, res, { wardId: currentWard })) return;
+
+    await deleteNotice(pool, req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Phase 4A.2: MODERATOR+, scope-checked against the target ward.
+router.post('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  const { title, content, category, priority, expiresAt, wardId } = req.body;
+  if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
+  // Phase 3A Task 9: was hardcoded getFoundingWardId(). wardId now read from
+  // body, falling back so existing callers that don't send it keep working.
+  const resolvedWardId = parseInt(wardId, 10) || getFoundingWardId();
+  if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
+  try {
+    // Phase 4B.2C: SQL moved to lib/notices.js createNoticeWithExpiresAt().
+    const notice = await createNoticeWithExpiresAt(pool, { title, content, category, priority, expiresAt, wardId: resolvedWardId });
+    res.json({ success: true, notice });
+  } catch (err) {
+    console.error('POST /api/admin/notices error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Phase 4A.2: MODERATOR+, scope-checked against the notice's current ward
+// (this route doesn't accept wardId in the body at all, so the only way to
+// scope-check is against the existing record).
+router.put('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  const { title, content, category, priority, expiresAt } = req.body;
+  if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
+  try {
+    // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/updateNotice().
+    const currentWard = await getNoticeWard(pool, req.params.id);
+    if (currentWard === undefined) return res.status(404).json({ success: false, error: 'Notice not found' });
+    if (!requirePermission(req, res, { wardId: currentWard })) return;
+
+    const notice = await updateNotice(pool, req.params.id, { title, content, category, priority, expiresAt });
+    if (!notice) return res.status(404).json({ success: false, error: 'Notice not found' });
+    res.json({ success: true, notice });
+  } catch (err) {
+    console.error('PUT /api/admin/notices error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Phase 4A.2: MODERATOR+, scope-checked against the notice's current ward
+// when it exists (falls through to the original no-op-then-success
+// behavior when it doesn't, matching the pre-existing response contract).
+router.delete('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  try {
+    // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/deleteNotice().
+    const currentWard = await getNoticeWard(pool, req.params.id);
+    if (currentWard !== undefined && !requirePermission(req, res, { wardId: currentWard })) return;
+
+    await deleteNotice(pool, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/admin/notices error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
