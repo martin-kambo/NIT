@@ -62,7 +62,7 @@ const { requirePermission } = RBAC;
 // getFoundingWardId()/setFoundingWardId(). Single writer
 // (ensurePhase2Migrations(), below), many readers -- unchanged in
 // every other respect.
-const { getFoundingWardId, setFoundingWardId } = require('./lib/ward-cache');
+const { getFoundingWardId } = require('./lib/ward-cache'); // setFoundingWardId moved to bootstrap/migrations.js (Phase 4B.28C)
 const votingRouter          = votingRouterModule.router || votingRouterModule;
 const broadcastVoteUpdate   = votingRouterModule.broadcastVoteUpdate || function(){};
 
@@ -174,13 +174,11 @@ app.use(async (req, res, next) => {
 
 // Initialize on startup — server only starts listening AFTER all migrations complete
 // Startup orchestration moved to bootstrap/startup.js (Phase 4B.1).
-// ensurePhase2Migrations stays here (see the Phase 4B.1 report for why) and
-// is passed in explicitly, alongside the app/pool/PORT this file already
-// owns and the migration functions that did move — this avoids
-// bootstrap/startup.js ever needing to require server.js itself, so there
-// is no circular dependency. The sequence, every log line, the 30s
-// interval, and the SIGTERM handler are all unchanged from the original
-// inline IIFE — see bootstrap/startup.js.
+// ensurePhase2Migrations moved to bootstrap/migrations.js (Phase 4B.28C) and is
+// included automatically via the ...migrations spread below — no circular
+// dependency: migrations.js → lib/ward-cache.js (one-way), not → server.js.
+// The sequence, every log line, the 30s interval, and the SIGTERM handler
+// are all unchanged — see bootstrap/startup.js.
 const migrations = require('./bootstrap/migrations');
 const { startServer } = require('./bootstrap/startup');
 startServer({
@@ -191,7 +189,6 @@ startServer({
   transitionPeriod,
   broadcastVoteUpdate,
   ...migrations,
-  ensurePhase2Migrations,
 });
 
 // ── Ensure voting_periods table exists with correct schema ──
@@ -222,95 +219,8 @@ startServer({
 // ══════════════════════════════════════════════════════════════════
 // seedKiambuHierarchy() moved to bootstrap/migrations.js (Phase 4B.1)
 // ══════════════════════════════════════════════════════════════════
-// PHASE 2: ATTACH GEOGRAPHIC OWNERSHIP TO DATA
-// Additive only. No existing columns, queries, or routes are modified.
-// All new ward_id columns are nullable — existing rows and all
-// current functionality continue working with zero behaviour change.
+// ensurePhase2Migrations() moved to bootstrap/migrations.js (Phase 4B.28C)
 // ══════════════════════════════════════════════════════════════════
-async function ensurePhase2Migrations() {
-  try {
-    // ── Step 1: Add nullable ward_id + FK constraint to all 5 tables ──
-    // ADD COLUMN IF NOT EXISTS  → idempotent on every startup.
-    // DO $$ EXCEPTION block     → idempotent FK constraint (survives re-runs).
-    // CREATE INDEX IF NOT EXISTS → idempotent index for future-phase filtering.
-    const GEO_TABLES = [
-      { table: 'users',       fkName: 'users_ward_id_fk'       },
-      { table: 'votes',       fkName: 'votes_ward_id_fk'       },
-      { table: 'notices',     fkName: 'notices_ward_id_fk'     },
-      { table: 'forum_posts', fkName: 'forum_posts_ward_id_fk' },
-      { table: 'candidates',  fkName: 'candidates_ward_id_fk'  },
-    ];
-
-    for (const { table, fkName } of GEO_TABLES) {
-      // Column (no-op if already present)
-      await pool.query(
-        `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ward_id INT`
-      );
-      // FK constraint (no-op if already present — caught by EXCEPTION block)
-      await pool.query(`
-        DO $$
-        BEGIN
-          ALTER TABLE ${table}
-            ADD CONSTRAINT ${fkName} FOREIGN KEY (ward_id) REFERENCES wards(id);
-        EXCEPTION WHEN duplicate_object THEN
-          NULL;
-        END $$
-      `);
-      // Index for efficient ward-scoped queries in future phases
-      await pool.query(
-        `CREATE INDEX IF NOT EXISTS idx_${table}_ward_id ON ${table}(ward_id)`
-      );
-    }
-
-    // ── Step 2: Resolve the founding ward_id ──────────────────────────────
-    // Stage 3B.1: was hardcoded to 'Kiambu → Thika Town → Ngoliba'. Now
-    // reads the same env vars used by the seed above, so both sides of
-    // startup always resolve the same founding ward regardless of environment.
-    const FOUNDING_COUNTY       = process.env.FOUNDING_COUNTY_NAME       || 'Kiambu';
-    const FOUNDING_CONSTITUENCY = process.env.FOUNDING_CONSTITUENCY_NAME || 'Thika Town';
-    const FOUNDING_WARD         = process.env.FOUNDING_WARD_NAME         || 'Ngoliba';
-
-    const wardRes = await pool.query(`
-      SELECT w.id
-        FROM wards        w
-        JOIN constituencies con ON con.id = w.constituency_id
-        JOIN counties       cty ON cty.id = con.county_id
-       WHERE cty.name = $1
-         AND con.name = $2
-         AND w.name   = $3
-       LIMIT 1
-    `, [FOUNDING_COUNTY, FOUNDING_CONSTITUENCY, FOUNDING_WARD]);
-
-    if (!wardRes.rows.length) {
-      console.warn(`⚠️  [Phase 2] Founding ward '${FOUNDING_WARD}' not found — backfill skipped. Ensure ensureGeographyTables() ran successfully first.`);
-      return;
-    }
-
-    const wardId = wardRes.rows[0].id;
-    setFoundingWardId(wardId); // resolved from config, not hardcoded to Ngoliba
-
-    // ── Step 3: Backfill all existing records ──
-    // WHERE ward_id IS NULL guarantees full idempotency:
-    //   • Already-backfilled rows are never touched again.
-    //   • Safe to rerun on every deployment with zero side effects.
-    //   • No data is deleted or overwritten.
-    for (const { table } of GEO_TABLES) {
-      const res = await pool.query(
-        `UPDATE ${table} SET ward_id = $1 WHERE ward_id IS NULL`,
-        [wardId]
-      );
-      if (res.rowCount > 0) {
-        console.log(`  ↳ [Phase 2] backfilled ${res.rowCount} ${table} row(s) → ward_id=${wardId}`);
-      }
-    }
-
-    console.log(`✅ Phase 2 complete — founding ward '${FOUNDING_WARD}' resolved (id=${wardId})`);
-  } catch (e) {
-    console.error('❌ ensurePhase2Migrations error:', e.message);
-    console.error(e.stack);
-    // Non-fatal: ward_id is nullable — all existing flows continue unchanged.
-  }
-}
 
 // ── Phase 4A.1: RBAC Foundation ──
 // Adds role + admin-scope columns to users. Foundation only — see

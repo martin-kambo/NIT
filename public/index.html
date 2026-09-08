@@ -3284,6 +3284,15 @@ window.POLL_CAT_LABELS = POLL_CAT_LABELS; // expose so Script 2's catLabel looku
 let currentUser = null, faceoffInterval = null, countdownInterval = null;
 let historyChart = null, analyticsChart = null;
 let mpesaPendingVote = null, mpesaActiveCheckoutId = null, mpesaCountdownTimer = null;
+// Phase 4B.18A: coordinates the local countdown, the SSE period-rollover
+// event, and the fallback poller so a single real period transition
+// produces exactly one "New voting cycle started" notification, keyed on
+// the period ID (not a per-call boolean, not elapsed time). See
+// handleConfirmedNewPeriod()/pollForRolloverFallback() near
+// startCountdown() below.
+window.lastNotifiedPeriodId = window.lastNotifiedPeriodId ?? null;
+window._rolloverPollTimer = null;
+window._rolloverPollAttempt = 0;
 let otpTimer = null, otpDataStore = {};
 let activeForumFilter = "all", activeForumTag = "general";
 let activePromiseCandidate = 0;
@@ -5373,6 +5382,60 @@ function showWelcomePopup(){
 // Driven exclusively by window.currentPeriodEnd (set from server on every renderDashboard call).
 // When the timer reaches zero it re-fetches the period from the server, resets vote eligibility,
 // and restarts itself — timer and backend cycle always stay in sync.
+// Phase 4B.18A — coordinates the local countdown, the SSE period-rollover
+// event, and the fallback poller so a single real period transition
+// produces exactly one notification, keyed on the period ID returned by
+// the server (the canonical existing field: `periodId` from
+// /api/voting-period, `newPeriodId` from the period-rollover SSE payload)
+// rather than a timer-local boolean, elapsed time, or notification text.
+//
+// This is the single funnel every path (local timer, fallback poll, SSE)
+// goes through once it believes a genuinely new period exists. Redundant
+// arrivals for a period ID already notified are silently absorbed here.
+function handleConfirmedNewPeriod(newPeriodId){
+  if (window._rolloverPollTimer) { clearTimeout(window._rolloverPollTimer); window._rolloverPollTimer = null; }
+  window._rolloverPollAttempt = 0;
+  const knownId = (newPeriodId !== null && newPeriodId !== undefined);
+  const alreadyNotified = knownId && (window.lastNotifiedPeriodId === newPeriodId);
+  (async () => {
+    try {
+      if (typeof window.renderDashboard === 'function') await window.renderDashboard(); // updates window.currentPeriodEnd + window.userHasVoted
+      if (typeof startCountdown === 'function') startCountdown(); // restart with fresh server period
+      if (!alreadyNotified) {
+        if (knownId) window.lastNotifiedPeriodId = newPeriodId;
+        showToast("🔄 New voting cycle started! You can vote again.","success");
+      }
+    } catch(e) { console.error("Rollover refresh error:", e); }
+  })();
+}
+
+// Capped-backoff fallback poller. Used only while the local countdown
+// believes the current period has expired but the server hasn't confirmed
+// a new one yet (matches the evidenced scenario: the backend rollover can
+// be delayed well past the local countdown reaching zero). Never a tight
+// loop, never shows a notification for the same still-active period, and
+// self-cancels the moment a genuinely different period ID is observed.
+function pollForRolloverFallback(expiredPeriodId){
+  if (window._rolloverPollTimer) clearTimeout(window._rolloverPollTimer);
+  const attempt = (window._rolloverPollAttempt = (window._rolloverPollAttempt || 0) + 1);
+  const delayMs = Math.min(2000 + attempt * 1500, 10000); // 3.5s, 5s, 6.5s, 8s, capped at 10s
+  window._rolloverPollTimer = setTimeout(async () => {
+    try {
+      const res = await fetch('/api/voting-period', { credentials: 'include' });
+      const json = await res.json();
+      const freshId = json && json.data ? json.data.periodId : null;
+      if (freshId !== null && freshId !== undefined && freshId !== expiredPeriodId) {
+        handleConfirmedNewPeriod(freshId);
+      } else {
+        pollForRolloverFallback(expiredPeriodId); // still the same period on the server — keep waiting, no notification
+      }
+    } catch(e) {
+      console.warn("[rollover] fallback poll failed, will retry:", e);
+      pollForRolloverFallback(expiredPeriodId);
+    }
+  }, delayMs);
+}
+
 function startCountdown(){
   if(countdownInterval)clearInterval(countdownInterval);
   let cycleEndHandled = false;
@@ -5391,13 +5454,24 @@ function startCountdown(){
       if(!cycleEndHandled){
         cycleEndHandled = true;
         clearInterval(countdownInterval);
-        // Cycle ended — fetch new period, reset eligibility, restart timer
+        // Cycle believed expired locally — capture which period ID we were
+        // counting down for, then check the server before deciding whether
+        // this is a genuinely new period (and therefore worth a
+        // notification) or the same expired period the backend hasn't
+        // rolled over yet (in which case: wait, don't notify, don't spin).
+        const expiredPeriodId = window.currentPeriodId;
+        window._rolloverPollAttempt = 0;
         setTimeout(async()=>{
           try{
-            await renderDashboard(); // updates window.currentPeriodEnd + window.userHasVoted
-            startCountdown();        // restart with fresh server period
-            showToast("🔄 New voting cycle started! You can vote again.","success");
-          }catch(e){ console.error("Cycle refresh error:",e); }
+            const res = await fetch('/api/voting-period', { credentials: 'include' });
+            const json = await res.json();
+            const freshId = json && json.data ? json.data.periodId : null;
+            if (freshId !== null && freshId !== undefined && freshId !== expiredPeriodId) {
+              handleConfirmedNewPeriod(freshId);
+            } else {
+              pollForRolloverFallback(expiredPeriodId); // server still reports the same expired period — wait, don't notify
+            }
+          }catch(e){ console.error("Cycle refresh error:",e); pollForRolloverFallback(expiredPeriodId); }
         }, 1500);
       }
       return;
@@ -7238,22 +7312,25 @@ window.renderFaceoff = window.updateFaceoff;
         }
       });
 
-      // 'new-period' fires when admin manually starts a new period
-      sseSource.addEventListener('new-period', async () => {
-        console.log('[SSE] new-period — refreshing dashboard');
-        if (typeof window.renderDashboard === 'function') await window.renderDashboard();
-        // Restart countdown with fresh periodEnd from server (set by renderDashboard above)
-        if (typeof startCountdown === 'function') startCountdown();
-        showToast("🔄 New voting cycle started! You can vote again.", "success");
+      // 'new-period' fires when admin manually starts a new period.
+      // No current backend code broadcasts this event (confirmed in the
+      // Phase 4B.18A forensic audit) — kept for backward compatibility if
+      // it is ever revived, routed through the same dedup guard as
+      // 'period-rollover' below rather than notifying unconditionally.
+      sseSource.addEventListener('new-period', (e) => {
+        console.log('[SSE] new-period received');
+        let newPeriodId = null;
+        try { const p = JSON.parse(e.data); newPeriodId = (p && p.newPeriodId != null) ? p.newPeriodId : null; } catch (_) {}
+        handleConfirmedNewPeriod(newPeriodId);
       });
 
       // 'period-rollover' fires when the server auto-rolls over an expired period
       // (broadcast by the auto-rollover setInterval and /api/webhook in server.js)
-      sseSource.addEventListener('period-rollover', async () => {
-        console.log('[SSE] period-rollover — refreshing dashboard and restarting countdown');
-        if (typeof window.renderDashboard === 'function') await window.renderDashboard();
-        if (typeof startCountdown === 'function') startCountdown();
-        showToast("🔄 New voting cycle started! You can vote again.", "success");
+      sseSource.addEventListener('period-rollover', (e) => {
+        console.log('[SSE] period-rollover received');
+        let newPeriodId = null;
+        try { const p = JSON.parse(e.data); newPeriodId = (p && p.newPeriodId != null) ? p.newPeriodId : null; } catch (_) {}
+        handleConfirmedNewPeriod(newPeriodId);
       });
 
       sseSource.onerror = () => {
