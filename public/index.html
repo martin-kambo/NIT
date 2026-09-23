@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>InfoTrack · Ward Opinion Poll</title>
+<title>InfoTrack · Community Platform</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -1727,6 +1727,102 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .feature-pane { display: none; }
 .feature-pane.active { display: block; }
 
+/* ═══ SECTION NAV — top-level 3-pill selector ═══ */
+.section-nav {
+  display: flex; gap: 0.3rem;
+  background: var(--forest); border-radius: var(--radius-lg);
+  padding: 0.35rem; margin-bottom: 0.6rem;
+}
+.section-pill {
+  flex: 1; padding: 0.55rem 0.5rem;
+  background: none; border: none;
+  border-radius: calc(var(--radius-lg) - 4px);
+  font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 0.78rem;
+  color: rgba(255,255,255,0.55); cursor: none;
+  transition: all 0.2s; text-align: center; white-space: nowrap;
+}
+.section-pill.active {
+  background: var(--gold); color: var(--forest);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.section-pill:hover:not(.active) { background: rgba(255,255,255,0.1); color: white; }
+
+/* ═══ SUB-NAV — second tier, scrollable row within each section ═══ */
+.sub-nav {
+  display: flex; background: var(--light-gray); border-radius: var(--radius-lg);
+  padding: 0.3rem; margin-bottom: 1.75rem;
+  flex-wrap: nowrap; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; scroll-snap-type: x mandatory;
+  gap: 0.25rem; scrollbar-width: none;
+}
+.sub-nav::-webkit-scrollbar { display: none; }
+.sub-nav.hidden { display: none !important; }
+
+/* On desktop, sub-nav items fill evenly */
+@media (min-width: 769px) {
+  .sub-nav .feature-tab { flex: 1 1 0; }
+}
+
+/* ═══ ELECTION-CONTEXT: hide countdown / cycle-badge outside Elections ═══ */
+.elections-hidden { display: none !important; }
+
+/* ═══ CANDIDATES BROWSE TAB ═══ */
+.candidates-browse-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 1.25rem;
+}
+.candidate-browse-card {
+  background: white; border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card); padding: 1.25rem;
+  border: 1px solid rgba(0,0,0,0.04);
+  display: flex; flex-direction: column; gap: 0.75rem;
+}
+.cbc-header { display: flex; align-items: center; gap: 0.75rem; }
+.cbc-img { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink:0; }
+.cbc-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; }
+.cbc-party { font-size: 0.75rem; color: var(--mid-gray); margin-top: 0.15rem; }
+.cbc-bio { font-size: 0.82rem; color: var(--text-mid); line-height: 1.55; flex: 1; }
+.cbc-profile-btn {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.5rem 1.1rem; background: var(--forest); color: white;
+  border: none; border-radius: 50px; font-size: 0.78rem; font-weight: 600;
+  cursor: none; font-family: 'Outfit', sans-serif;
+  align-self: flex-start; transition: background 0.2s;
+}
+.cbc-profile-btn:hover { background: var(--forest-light); }
+
+/* ═══ RESULTS TAB ═══ */
+.results-leader-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.results-lb-row {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.75rem 1rem; background: white; border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card); border: 1px solid rgba(0,0,0,0.04);
+}
+.results-lb-rank {
+  font-family: 'Syne', sans-serif; font-weight: 800;
+  font-size: 1.2rem; min-width: 2rem; text-align: center;
+}
+.results-lb-img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink:0; }
+.results-lb-info { flex: 1; }
+.results-lb-name { font-weight: 600; font-size: 0.88rem; }
+.results-lb-party { font-size: 0.72rem; color: var(--mid-gray); }
+.results-lb-votes {
+  font-family: 'JetBrains Mono', monospace; font-weight: 700;
+  font-size: 0.9rem; color: var(--forest-light); white-space: nowrap;
+}
+
+/* ═══ RESPONSIVE — section-nav and sub-nav tightening ═══ */
+@media (max-width: 480px) {
+  .section-pill { font-size: 0.65rem; padding: 0.38rem 0.38rem; }
+  .section-nav { margin-bottom: 0.4rem; }
+  .sub-nav { margin-bottom: 1.25rem; }
+  .candidates-browse-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 360px) {
+  .section-pill { font-size: 0.58rem; padding: 0.3rem 0.3rem; }
+}
+
 /* ═══ POLL CATEGORY STRIP ═══ */
 .poll-category-strip {
   display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
@@ -2298,7 +2394,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         <div class="logo-mark">🗳️</div>
         <div>
           <div class="logo-text">InfoTrack</div>
-          <div class="logo-sub" id="logoWardSub">Ward Opinion Poll</div>
+          <div class="logo-sub" id="logoWardSub">Community Platform</div>
         </div>
       </div>
       <nav class="header-nav hidden" id="headerNav">
@@ -2356,9 +2452,9 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 <div class="hero-band hidden" id="heroBand">
   <div class="container hero-band-inner">
     <div class="ward-chip" id="wardChip"><span>📍</span> <span id="wardChipText">Loading ward…</span></div>
-    <h1 class="hero-title">Opinion Poll <span class="accent">Live</span><br>Tracking</h1>
-    <p class="hero-sub">Real-time ward polling · Every vote shapes the future</p>
-    <div class="cycle-badge">
+    <h1 class="hero-title">Ward <span class="accent">Community</span><br>Platform</h1>
+    <p class="hero-sub">Notices · Forum · Civic participation · Elections</p>
+    <div class="cycle-badge elections-hidden" id="heroElectionBadge">
       <div class="dot"></div>
       <span>Next cycle reset: </span>
       <span id="heroCountdown">00:00</span>
@@ -2522,14 +2618,33 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
     <!-- ═══ DASHBOARD ═══ -->
     <div id="dashboardContent" class="hidden dashboard-wrap">
 
-      <!-- Feature Navigation -->
-      <div class="feature-nav" id="featureNav">
-        <button class="feature-tab active" data-tab="tabNotice">&#128204; Notice Board</button>
-        <button class="feature-tab" data-tab="tabForum">&#128172; Forum</button>
+      <!-- ═══ SECTION NAV — Tier 1 ═══ -->
+      <div class="section-nav" id="sectionNav">
+        <button class="section-pill active" data-section="community">&#127968; Community</button>
+        <button class="section-pill" data-section="elections">&#128611; Elections</button>
+        <button class="section-pill" data-section="engagement">&#128172; Engage</button>
+      </div>
+
+      <!-- ═══ SUB-NAV — Tier 2, Community ═══ -->
+      <div class="sub-nav" id="subNavCommunity">
+        <button class="feature-tab active" data-tab="tabNotice">&#128204; Notices</button>
+        <button class="feature-tab" data-tab="tabCommunityAsk">&#129302; Ask the AI</button>
+      </div>
+
+      <!-- ═══ SUB-NAV — Tier 2, Elections ═══ -->
+      <div class="sub-nav hidden" id="subNavElections">
         <button class="feature-tab" data-tab="tabVote">&#128611; Vote</button>
-        <button class="feature-tab" data-tab="tabLeaderboard">&#127942; Leader Board</button>
+        <button class="feature-tab" data-tab="tabResults">&#127942; Results</button>
         <button class="feature-tab" data-tab="tabAnalytics">&#128202; Analytics</button>
         <button class="feature-tab" data-tab="tabAI">&#129302; AI Insights</button>
+        <button class="feature-tab" data-tab="tabCandidates">&#128100; Candidates</button>
+        <button class="feature-tab" data-tab="tabPromises">&#128203; Promises</button>
+      </div>
+
+      <!-- ═══ SUB-NAV — Tier 2, Engagement ═══ -->
+      <div class="sub-nav hidden" id="subNavEngagement">
+        <button class="feature-tab" data-tab="tabForum">&#128172; Forum</button>
+        <button class="feature-tab" data-tab="tabLeaderboard">&#128293; My Participation</button>
       </div>
 
       <!-- TAB: VOTE -->
@@ -2547,69 +2662,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           <button class="poll-cat-btn"        data-cat="President" onclick="switchPollCategory('President')">🏆 President</button>
         </div>
         <div class="poll-category-badge" id="pollCategoryBadge">MCA Aspirants</div>
-      </div>
-
-      <!-- Face-Off -->
-      <div class="faceoff-section scroll-reveal" id="faceoffSection">
-        <div class="faceoff-bg"></div>
-        <div class="faceoff-grid-lines"></div>
-        <div class="faceoff-inner">
-          <!-- Left candidate -->
-          <div class="fo-candidate fo-left">
-            <div class="fo-portrait-ring">
-              <img id="foLeftImg" src="" alt="">
-            </div>
-            <div class="fo-info">
-              <div class="fo-name" id="foLeftName">—</div>
-              <div class="fo-party" id="foLeftParty">—</div>
-              <div class="fo-stats-row">
-                <span class="fo-votes" id="foLeftVotes">0</span>
-                <span class="fo-votes-unit">votes</span>
-              </div>
-              <div class="fo-bar-row">
-                <div class="fo-mini-bar">
-                  <div class="fo-mini-fill fo-left-fill" id="foLeftBar" style="width:0%"></div>
-                </div>
-                <span class="fo-pct" id="foLeftPct">0%</span>
-              </div>
-            </div>
-          </div>
-          <!-- VS divider -->
-          <div class="fo-vs-divider">
-            <div class="fo-vs-line"></div>
-            <div class="fo-vs-badge">VS</div>
-            <div class="fo-vs-line"></div>
-          </div>
-          <!-- Right candidate -->
-          <div class="fo-candidate fo-right">
-            <div class="fo-portrait-ring">
-              <img id="foRightImg" src="" alt="">
-            </div>
-            <div class="fo-info">
-              <div class="fo-name" id="foRightName">—</div>
-              <div class="fo-party" id="foRightParty">—</div>
-              <div class="fo-stats-row">
-                <span class="fo-votes" id="foRightVotes">0</span>
-                <span class="fo-votes-unit">votes</span>
-              </div>
-              <div class="fo-bar-row">
-                <div class="fo-mini-bar">
-                  <div class="fo-mini-fill fo-right-fill" id="foRightBar" style="width:0%"></div>
-                </div>
-                <span class="fo-pct" id="foRightPct">0%</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <!-- Compact footer strip -->
-        <div class="fo-footer">
-          <div class="fo-winner-chip" id="foWinnerChip">⏳ No winner yet</div>
-          <div class="fo-progress-wrap">
-            <div class="fo-progress-labels"><span>Turnout</span><span>📊</span><span>/ 540</span></div>
-            <div class="fo-progress-bar"><div class="fo-progress-fill" id="foProgressFill" style="width:0%"></div></div>
-          </div>
-          <div class="fo-total-chip">📈 <strong id="foTotalVotes">0</strong> cast</div>
-        </div>
       </div>
 
       <!-- Voter Registry -->
@@ -2719,10 +2771,6 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         <div class="glass-panel scroll-reveal">
           <div class="panel-title"><div class="icon icon-gold"><i class="fas fa-medal"></i></div> Your Badges</div>
           <div class="badges-grid" id="badgesGrid"></div>
-        </div>
-        <div class="glass-panel scroll-reveal">
-          <div class="panel-title"><div class="icon icon-green"><i class="fas fa-trophy"></i></div> Ward Leaderboard — Top Civic Participants</div>
-          <div class="leaderboard-list" id="leaderboardList"></div>
         </div>
       </div>
 
@@ -2929,15 +2977,113 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           <div class="ai-issue-grid" id="aiIssueGrid"></div>
         </div>
         <div id="aiInsightCards"></div>
+      </div>
+
+      <!-- TAB: COMMUNITY — ASK THE AI -->
+      <div class="feature-pane" id="tabCommunityAsk">
         <div class="glass-panel scroll-reveal">
           <div class="panel-title"><div class="icon icon-blue"><i class="fas fa-robot"></i></div> Ask the AI</div>
-          <p style="font-size:0.82rem;color:var(--mid-gray);margin-bottom:0.75rem;">Ask anything about the Ngoliba Ward poll — trends, candidates, issues, predictions.</p>
+          <p style="font-size:0.82rem;color:var(--mid-gray);margin-bottom:0.75rem;">Ask anything about Ngoliba Ward — community issues, notices, candidates, or ward matters.</p>
           <div style="display:flex;gap:0.5rem;">
-            <input type="text" id="aiPromptInput" class="ai-prompt-input" placeholder="e.g. Who is leading in Gatiiguru? What are voters most concerned about?">
+            <input type="text" id="aiPromptInput" class="ai-prompt-input" placeholder="e.g. What are the top ward issues? Who is leading in the poll?">
             <button class="btn-primary ripple-wrap" id="aiAskBtn" style="width:auto;padding:0.875rem 1.25rem;border-radius:var(--radius-md);flex-shrink:0;"><span><i class="fas fa-paper-plane"></i></span></button>
           </div>
           <div class="ai-response" id="aiResponse" style="display:none;"></div>
         </div>
+      </div>
+
+      <!-- TAB: ELECTIONS — RESULTS -->
+      <div class="feature-pane" id="tabResults">
+
+        <!-- Face-Off widget — single source, moved from Vote tab (Phase 4B.23) -->
+        <div class="faceoff-section scroll-reveal" id="faceoffSection">
+          <div class="faceoff-bg"></div>
+          <div class="faceoff-grid-lines"></div>
+          <div class="faceoff-inner">
+            <!-- Left candidate -->
+            <div class="fo-candidate fo-left">
+              <div class="fo-portrait-ring">
+                <img id="foLeftImg" src="" alt="">
+              </div>
+              <div class="fo-info">
+                <div class="fo-name" id="foLeftName">—</div>
+                <div class="fo-party" id="foLeftParty">—</div>
+                <div class="fo-stats-row">
+                  <span class="fo-votes" id="foLeftVotes">0</span>
+                  <span class="fo-votes-unit">votes</span>
+                </div>
+                <div class="fo-bar-row">
+                  <div class="fo-mini-bar">
+                    <div class="fo-mini-fill fo-left-fill" id="foLeftBar" style="width:0%"></div>
+                  </div>
+                  <span class="fo-pct" id="foLeftPct">0%</span>
+                </div>
+              </div>
+            </div>
+            <!-- VS divider -->
+            <div class="fo-vs-divider">
+              <div class="fo-vs-line"></div>
+              <div class="fo-vs-badge">VS</div>
+              <div class="fo-vs-line"></div>
+            </div>
+            <!-- Right candidate -->
+            <div class="fo-candidate fo-right">
+              <div class="fo-portrait-ring">
+                <img id="foRightImg" src="" alt="">
+              </div>
+              <div class="fo-info">
+                <div class="fo-name" id="foRightName">—</div>
+                <div class="fo-party" id="foRightParty">—</div>
+                <div class="fo-stats-row">
+                  <span class="fo-votes" id="foRightVotes">0</span>
+                  <span class="fo-votes-unit">votes</span>
+                </div>
+                <div class="fo-bar-row">
+                  <div class="fo-mini-bar">
+                    <div class="fo-mini-fill fo-right-fill" id="foRightBar" style="width:0%"></div>
+                  </div>
+                  <span class="fo-pct" id="foRightPct">0%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Compact footer strip -->
+          <div class="fo-footer">
+            <div class="fo-winner-chip" id="foWinnerChip">⏳ No winner yet</div>
+            <div class="fo-progress-wrap">
+              <div class="fo-progress-labels"><span>Turnout</span><span>📊</span><span>/ 540</span></div>
+              <div class="fo-progress-bar"><div class="fo-progress-fill" id="foProgressFill" style="width:0%"></div></div>
+            </div>
+            <div class="fo-total-chip">📈 <strong id="foTotalVotes">0</strong> cast</div>
+          </div>
+        </div>
+
+        <div class="glass-panel scroll-reveal" style="margin-bottom:1.25rem;">
+          <div class="panel-title"><div class="icon icon-green"><i class="fas fa-trophy"></i></div> Current Standings</div>
+          <div id="resultsLeaderList" class="results-leader-list"></div>
+        </div>
+        <div class="glass-panel scroll-reveal">
+          <div class="panel-title"><div class="icon icon-gold"><i class="fas fa-users"></i></div> Participation</div>
+          <div id="resultsStatsSummary" style="display:flex;gap:2rem;flex-wrap:wrap;padding:0.5rem 0;"></div>
+        </div>
+      </div>
+
+      <!-- TAB: ELECTIONS — CANDIDATES -->
+      <div class="feature-pane" id="tabCandidates">
+        <div class="section-header scroll-reveal" style="margin-bottom:1.25rem;">
+          <div>
+            <div class="section-title">Candidates</div>
+            <div class="section-sub">Browse all candidates — click to view full profile &amp; compare</div>
+          </div>
+        </div>
+        <div class="candidates-browse-grid" id="candidatesBrowseGrid"></div>
+      </div>
+
+      <!-- TAB: ELECTIONS — PROMISES -->
+      <div class="feature-pane" id="tabPromises">
+        <div id="promiseSummaryBar"></div>
+        <div id="promiseCandTabs"></div>
+        <div id="promisesList"></div>
       </div>
 
     </div>
@@ -3623,6 +3769,7 @@ function enterDashboard(){
   ["authContainer"].forEach(id=>document.getElementById(id)?.classList.add("hidden"));
   ["heroBand","countdownStrip","headerNav","avatarWrap"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
   showPane("dashboardContent");
+  switchSection("community"); // Phase 4B.22: initialize 3-tier nav; hides countdown strip & hero badge
   renderDashboard();
   showWelcomePopup();
   faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();},3000);
@@ -3642,7 +3789,7 @@ function showPane(id){
 function switchFeatureTab(tabId){
   document.querySelectorAll(".feature-tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===tabId));
   document.querySelectorAll(".feature-pane").forEach(p=>p.classList.toggle("active",p.id===tabId));
-  // Lazy-render
+  // Lazy-render — existing tabs
   if(tabId==="tabAnalytics") renderAnalyticsTab();
   if(tabId==="tabLeaderboard") renderLeaderboardTab();
   if(tabId==="tabForum") renderForumTab();
@@ -3655,6 +3802,38 @@ function switchFeatureTab(tabId){
       updateFaceoff();
     });
   }
+  // Lazy-render — new tabs (Phase 4B.22)
+  if(tabId==="tabResults")    { renderResultsTab(); if(typeof updateFaceoff==='function') updateFaceoff(); }
+  if(tabId==="tabCandidates") renderCandidatesTab();
+  if(tabId==="tabPromises")   renderPromisesTab();
+  // tabCommunityAsk is static HTML — no render needed
+}
+
+// ═══ SECTION SWITCHER — Phase 4B.22 ═══
+// Controls tier-1 section pills (Community / Elections / Engagement)
+// and the visibility of election-context UI (countdown strip, hero badge).
+// Does NOT touch any timer logic, period engine, or API calls.
+function switchSection(sectionId) {
+  // Update tier-1 pill active state
+  document.querySelectorAll(".section-pill").forEach(p =>
+    p.classList.toggle("active", p.dataset.section === sectionId)
+  );
+  // Show the correct tier-2 sub-nav, hide the others
+  var subNavMap = { community:"subNavCommunity", elections:"subNavElections", engagement:"subNavEngagement" };
+  Object.keys(subNavMap).forEach(function(k){
+    var el = document.getElementById(subNavMap[k]);
+    if(el) el.classList.toggle("hidden", k !== sectionId);
+  });
+  // Election-context UI: countdown strip and hero cycle badge
+  // visible only when user is in the Elections section
+  var isElections = sectionId === "elections";
+  var strip = document.getElementById("countdownStrip");
+  var badge = document.getElementById("heroElectionBadge");
+  if(strip) strip.classList.toggle("elections-hidden", !isElections);
+  if(badge) badge.classList.toggle("elections-hidden", !isElections);
+  // Navigate to the default pane for each section
+  var defaults = { community:"tabNotice", elections:"tabVote", engagement:"tabForum" };
+  if(defaults[sectionId]) switchFeatureTab(defaults[sectionId]);
 }
 
 // ═══ DASHBOARD (Vote tab) ═══
@@ -3939,10 +4118,11 @@ async function switchPollCategory(cat) {
   const switchBanner = document.getElementById('alreadyVotedMsg');
   if (switchBanner) switchBanner.classList.toggle('hidden', !switchCatVoted);
 
-  // Refresh analytics and leaderboard if those tabs are currently visible
+  // Refresh analytics, leaderboard, and results if those tabs are currently visible
   const activePane = document.querySelector('.feature-pane.active');
   if (activePane?.id === 'tabAnalytics')   renderAnalyticsTab();
   if (activePane?.id === 'tabLeaderboard') renderLeaderboardTab();
+  if (activePane?.id === 'tabResults')     renderResultsTab();
 }
 
 // Load candidates from server for a given category and update the CANDIDATES array
@@ -4033,7 +4213,7 @@ function updateHeaderAvatar(){
   if (wardChipText) wardChipText.textContent = geoLabel;
 
   const logoSub = document.getElementById("logoWardSub");
-  if (logoSub) logoSub.textContent = `${wardLabel} Opinion Poll`;
+  if (logoSub) logoSub.textContent = `${wardLabel} Ward`;
 
   const noticeTitle = document.getElementById("noticeboardTitle");
   if (noticeTitle) noticeTitle.textContent = `${wardLabel} Noticeboard`;
@@ -4042,7 +4222,7 @@ function updateHeaderAvatar(){
   if (profSub) profSub.textContent = `${wardLabel} · Voter`;
 
   // Update page title to reflect the actual ward
-  document.title = `${wardLabel} InfoTrack · Ward Opinion Poll`;
+  document.title = `${wardLabel} InfoTrack`;
 }
 function updateHeaderBadge(){ const b=document.getElementById("headerBadge"); const badge=getUserVoterBadge(currentUser?.phone); if(badge){b.classList.remove("hidden");b.innerText=badge==="1st"?"🥇":badge==="2nd"?"🥈":"🥉";b.style.background={"1st":"#e9c46a","2nd":"#9ca3af","3rd":"#cd7f32"}[badge]||"#666";}else b.classList.add("hidden"); }
 
@@ -4306,17 +4486,21 @@ function renderLeaderboardTab(){
     return `<div class="badge-card ${isEarned?"":"locked"}"><div class="badge-card-icon">${b.icon}</div><div class="badge-card-name">${b.name}</div><div class="badge-card-desc">${b.desc}</div>${!isEarned?'<div class="badge-card-progress"><div class="badge-card-fill" style="width:20%"></div></div>':""}</div>`;
   }).join("");
   // Leaderboard — build from registered users + metadata
-  const users=DB.getUsers();
-  const withScores=users.map(u=>{
-    const m=DB.getVoterMeta(u.phone);
-    return{...u,civicScore:m.civicScore||0,streak:m.streak||0,badges:getEarnedBadges(u)};
-  }).sort((a,b)=>b.civicScore-a.civicScore);
-  const rankColors=["#e9c46a","#9ca3af","#cd7f32"];
-  document.getElementById("leaderboardList").innerHTML=withScores.slice(0,10).map((u,i)=>{
-    const isMe=u.phone===currentUser.phone;
-    const rankIcon=i<3?["🥇","🥈","🥉"][i]:`#${i+1}`;
-    return `<div class="lb-row ${isMe?"me":""}"><div class="lb-rank" style="color:${rankColors[i]||"var(--mid-gray)"}">${rankIcon}</div><img class="lb-avatar" src="${u.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=44&bold=true&name=${encodeURIComponent(u.firstName+"+"+u.surname)}`}" alt="${u.firstName}" loading="lazy"><div class="lb-info"><div class="lb-name">${u.firstName} ${u.surname}${isMe?' <span style="font-size:0.7rem;background:var(--gold);color:var(--forest);padding:0.1rem 0.4rem;border-radius:50px;font-weight:800;">YOU</span>':""}</div><div class="lb-meta">${u.sublocation} · 🔥 ${u.streak} streak</div><div class="lb-badges">${u.badges.slice(0,3).map(b=>`<span class="lb-badge">${b.icon}</span>`).join("")}</div></div><div class="lb-score">${u.civicScore}</div></div>`;
-  }).join("")||(users.length===0?'<div style="text-align:center;color:var(--mid-gray);padding:2rem;">No voters yet. Be the first!</div>':'');
+  // leaderboardList DOM element moved to Elections → Results (Phase 4B.23). Guard for safety.
+  const lbListEl = document.getElementById("leaderboardList");
+  if (lbListEl) {
+    const users=DB.getUsers();
+    const withScores=users.map(u=>{
+      const m=DB.getVoterMeta(u.phone);
+      return{...u,civicScore:m.civicScore||0,streak:m.streak||0,badges:getEarnedBadges(u)};
+    }).sort((a,b)=>b.civicScore-a.civicScore);
+    const rankColors=["#e9c46a","#9ca3af","#cd7f32"];
+    lbListEl.innerHTML=withScores.slice(0,10).map((u,i)=>{
+      const isMe=u.phone===currentUser.phone;
+      const rankIcon=i<3?["🥇","🥈","🥉"][i]:`#${i+1}`;
+      return `<div class="lb-row ${isMe?"me":""}"><div class="lb-rank" style="color:${rankColors[i]||"var(--mid-gray)"}">${rankIcon}</div><img class="lb-avatar" src="${u.profilePhoto||`https://ui-avatars.com/api/?background=2d6a4f&color=fff&size=44&bold=true&name=${encodeURIComponent(u.firstName+"+"+u.surname)}`}" alt="${u.firstName}" loading="lazy"><div class="lb-info"><div class="lb-name">${u.firstName} ${u.surname}${isMe?' <span style="font-size:0.7rem;background:var(--gold);color:var(--forest);padding:0.1rem 0.4rem;border-radius:50px;font-weight:800;">YOU</span>':""}</div><div class="lb-meta">${u.sublocation} · 🔥 ${u.streak} streak</div><div class="lb-badges">${u.badges.slice(0,3).map(b=>`<span class="lb-badge">${b.icon}</span>`).join("")}</div></div><div class="lb-score">${u.civicScore}</div></div>`;
+    }).join("")||(users.length===0?'<div style="text-align:center;color:var(--mid-gray);padding:2rem;">No voters yet. Be the first!</div>':'');
+  }
   initScrollReveal();
 }
 
@@ -4610,116 +4794,6 @@ window.renderForumTab = async function() {
 
 // ═══ PROMISE TRACKER ═══
 // ═══ NOTICEBOARD ═══
-// ══ NOTICEBOARD — Live API-driven ══
-let activeNoticeFilter = "all";
-let _noticeCache = [];
-
-const NOTICE_EMOJI = {
-  business: "🛒", event: "🎉", public: "📢", jobs: "💼", general: "📌"
-};
-
-async function renderNoticeboardTab() {
-  // Wire filter buttons
-  document.querySelectorAll(".notice-filter").forEach(btn => {
-    btn.onclick = () => {
-      activeNoticeFilter = btn.dataset.nf;
-      document.querySelectorAll(".notice-filter").forEach(b =>
-        b.classList.toggle("active", b.dataset.nf === activeNoticeFilter));
-      buildNotices(_noticeCache);
-    };
-  });
-
-  const grid = document.getElementById("noticesGrid");
-  if (grid) grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--mid-gray)"><i class="fas fa-spinner fa-spin"></i>&nbsp; Loading notices...</div>';
-
-  try {
-    const res = await fetch('/api/notices');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    if (data.success) {
-      _noticeCache = data.notices;
-      buildNotices(_noticeCache);
-    } else {
-      throw new Error(data.error || 'Unknown error');
-    }
-  } catch (err) {
-    console.error('Noticeboard fetch error:', err);
-    if (grid) grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--mid-gray)">⚠️ Could not load notices. Please refresh.</div>';
-  }
-}
-
-function buildNotices(notices) {
-  const grid  = document.getElementById("noticesGrid");
-  const empty = document.getElementById("noticeEmpty");
-  if (!grid) return;
-
-  const filtered = activeNoticeFilter === "all"
-    ? notices
-    : notices.filter(n => n.category === activeNoticeFilter);
-
-  if (!filtered.length) {
-    grid.innerHTML = "";
-    if (empty) empty.classList.remove("hidden");
-    return;
-  }
-  if (empty) empty.classList.add("hidden");
-
-  const catMap = {
-    business: { label: "Business",      cls: "ncat-business" },
-    event:    { label: "Event",          cls: "ncat-event"    },
-    public:   { label: "Public Notice",  cls: "ncat-public"   },
-    jobs:     { label: "Jobs",           cls: "ncat-jobs"     },
-    general:  { label: "General",        cls: ""              }
-  };
-
-  grid.innerHTML = filtered.map(n => {
-    const cm       = catMap[n.category] || { label: n.category, cls: "" };
-    const emoji    = NOTICE_EMOJI[n.category] || "📌";
-    const isUrgent = n.priority === "high";
-    const isAd     = !!n.is_ad;
-
-    // Smart relative date
-    let dateStr = "";
-    if (n.created_at) {
-      const ts   = new Date(n.created_at).getTime();
-      const diff = Date.now() - ts;
-      const mins = Math.floor(diff / 60000);
-      const hrs  = Math.floor(diff / 3600000);
-      const days = Math.floor(diff / 86400000);
-      if (diff < 60000)      dateStr = "Just now";
-      else if (mins < 60)    dateStr = `${mins}m ago`;
-      else if (hrs < 24)     dateStr = `${hrs}h ago`;
-      else if (days === 1)   dateStr = "Yesterday";
-      else if (days < 7)     dateStr = `${days}d ago`;
-      else                   dateStr = new Date(n.created_at).toLocaleDateString("en-KE", { day:"numeric", month:"short" });
-    }
-
-    const author   = n.author || (isAd ? "Sponsored" : "Admin");
-    const safeTitle = (n.title || "").replace(/'/g, "\'");
-    const contactBtn = isAd && n.contact_phone
-      ? `<a class="notice-cta-btn" href="tel:${n.contact_phone}" style="text-decoration:none">📞 Call</a>`
-      : `<button class="notice-cta-btn" onclick="showToast('📌 ${safeTitle}','info')">More →</button>`;
-
-    return `<div class="notice-card scroll-reveal${isAd ? ' notice-card--ad' : ''}">
-      <div class="notice-card-top">
-        <span style="font-size:0.85rem;line-height:1;margin-right:0.1rem">${emoji}</span>
-        <span class="notice-cat-badge ${cm.cls}">${cm.label}</span>
-        ${isAd ? '<span class="notice-sponsored">Ad</span>' : ""}
-        ${isUrgent && !isAd ? '<span class="notice-sponsored" style="background:#e63946;color:#fff;border:none">⚠ Urgent</span>' : ""}
-      </div>
-      <div class="notice-card-body">
-        <div class="notice-card-title">${n.title || ""}</div>
-        <div class="notice-card-desc">${n.content || ""}</div>
-      </div>
-      <div class="notice-card-footer">
-        <div class="notice-meta"><strong>${author}</strong> · ${dateStr}</div>
-        ${contactBtn}
-      </div>
-    </div>`;
-  }).join("");
-  initScrollReveal(); // newly injected cards need the observer re-run on them
-}
-
 // ═══ NOTIFICATION SYSTEM ═══
 const NOTIF_KEY="ngoliba_notifications";
 function getNotifications(){return JSON.parse(localStorage.getItem(NOTIF_KEY)||"[]");}
@@ -4789,295 +4863,6 @@ function seedInitialNotifications(){
 }
 
 // ═══ AD REQUEST CHAT ═══
-const AD_CHAT_KEY="ngoliba_ad_chat";
-function getAdChat(){return JSON.parse(localStorage.getItem(AD_CHAT_KEY)||"[]");}
-function saveAdChat(arr){localStorage.setItem(AD_CHAT_KEY,JSON.stringify(arr));}
-
-function initAdRequestChat(){
-  const openBtn=document.getElementById("openAdRequestBtn");
-  const closeBtn=document.getElementById("closeAdRequestBtn");
-  const panel=document.getElementById("adRequestPanel");
-  if(!openBtn)return;
-  openBtn.onclick=()=>{
-    panel.classList.toggle("hidden");
-    if(!panel.classList.contains("hidden")) {
-      // Auto-switch to history if user has prior requests, otherwise stay on new
-      switchAdPanel('new');
-    }
-  };
-  closeBtn.onclick=()=>panel.classList.add("hidden");
-}
-
-// ── Panel tab switching ──
-function switchAdPanel(tab) {
-  const newPane     = document.getElementById('adFormState');
-  const successPane = document.getElementById('adSuccessState');
-  const payPane     = document.getElementById('adPayState');
-  const histPane    = document.getElementById('adHistoryPane');
-  const tabNew      = document.getElementById('adPanelTabNew');
-  const tabHist     = document.getElementById('adPanelTabHistory');
-
-  if (tab === 'history') {
-    if (newPane)     newPane.style.display     = 'none';
-    if (successPane) successPane.style.display = 'none';
-    if (payPane)     payPane.style.display     = 'none';
-    if (histPane)    histPane.style.display    = 'block';
-    if (tabNew)  { tabNew.style.borderBottomColor  = 'transparent'; tabNew.style.color  = 'var(--mid-gray)'; }
-    if (tabHist) { tabHist.style.borderBottomColor = 'var(--forest)'; tabHist.style.color = 'var(--forest)'; }
-    loadMyAdRequests();
-  } else {
-    if (histPane) histPane.style.display = 'none';
-    // Restore whichever new-request state was active
-    const hasSuccess = lastAdRequestId && successPane?.innerHTML.trim();
-    if (newPane && !lastAdRequestId)  newPane.style.display = 'block';
-    if (successPane && lastAdRequestId) successPane.style.display = 'block';
-    if (tabNew)  { tabNew.style.borderBottomColor  = 'var(--forest)'; tabNew.style.color  = 'var(--forest)'; }
-    if (tabHist) { tabHist.style.borderBottomColor = 'transparent'; tabHist.style.color = 'var(--mid-gray)'; }
-  }
-}
-
-// ── Load & render history ──
-async function loadMyAdRequests() {
-  const list = document.getElementById('adHistoryList');
-  if (!list) return;
-  list.innerHTML = '<div style="text-align:center;padding:2rem 0;color:var(--mid-gray);font-size:0.82rem;">⏳ Loading…</div>';
-  try {
-    const res  = await fetch('/api/my-ad-requests');
-    const data = await res.json();
-    if (!data.success) throw new Error(data.error);
-    renderAdHistory(data.adRequests, list);
-  } catch (err) {
-    list.innerHTML = `<div style="text-align:center;padding:1.5rem 0;color:var(--red-accent);font-size:0.8rem;">⚠️ ${err.message}</div>`;
-  }
-}
-
-function renderAdHistory(requests, container) {
-  if (!requests.length) {
-    container.innerHTML = '<div style="text-align:center;padding:2rem 0;color:var(--mid-gray);font-size:0.82rem;">You have no ad requests yet.</div>';
-    return;
-  }
-
-  const statusConfig = {
-    pending:         { label: '⏳ Under Review',      bg: '#fff7ed', color: '#b45309' },
-    payment_pending: { label: '💳 Payment Required',  bg: '#f5f3ff', color: '#7c3aed' },
-    approved:        { label: '✅ Approved & Live',    bg: '#f0fdf4', color: '#15803d' },
-    rejected:        { label: '❌ Not Approved',       bg: '#fef2f2', color: '#b91c1c' },
-    completed:       { label: '🏁 Completed',          bg: '#eff6ff', color: '#1d4ed8' },
-  };
-
-  container.innerHTML = requests.map(r => {
-    const s   = statusConfig[r.status] || { label: r.status, bg: '#f3f4f6', color: '#6b7280' };
-    const dt  = new Date(r.submitted_at).toLocaleDateString('en-KE', { day:'numeric', month:'short', year:'numeric' });
-    const isPayable = r.status === 'payment_pending';
-
-    return `
-    <div style="border:1px solid var(--sand);border-radius:0.75rem;padding:0.9rem;margin-bottom:0.75rem;background:white;">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;margin-bottom:0.5rem;">
-        <div style="font-weight:700;font-size:0.85rem;color:var(--text-dark);flex:1;">${r.business_name}</div>
-        <span style="font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:50px;white-space:nowrap;background:${s.bg};color:${s.color};">${s.label}</span>
-      </div>
-      <div style="font-size:0.78rem;color:var(--mid-gray);margin-bottom:0.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${r.ad_content}</div>
-      <div style="display:flex;gap:1rem;font-size:0.72rem;color:var(--mid-gray);flex-wrap:wrap;margin-bottom:${isPayable || r.notes ? '0.65rem' : '0'};">
-        <span>⏱ ${r.duration}</span>
-        <span>📅 ${dt}</span>
-        ${r.fee ? `<span style="color:#7c3aed;font-weight:700;">KES ${r.fee.toLocaleString()}</span>` : ''}
-      </div>
-      ${r.notes ? `<div style="font-size:0.74rem;color:var(--text-mid);background:var(--cream-dark);border-radius:0.4rem;padding:0.4rem 0.6rem;margin-bottom:${isPayable ? '0.65rem' : '0'};">📝 ${r.notes}</div>` : ''}
-      ${isPayable ? `
-        <button onclick="openPayFromHistory('${r.id}', ${r.fee}, '${r.duration}')"
-          style="width:100%;display:flex;align-items:center;justify-content:center;gap:0.4rem;background:linear-gradient(135deg,#00a550,#007a3a);color:white;border:none;border-radius:50px;padding:0.5rem;font-size:0.8rem;font-weight:700;cursor:pointer;font-family:'Outfit',sans-serif;">
-          📲 Pay KES ${r.fee.toLocaleString()} via M-Pesa
-        </button>` : ''}
-    </div>`;
-  }).join('');
-}
-
-// Opens the pay pane from history tab (switching to new-request pane area)
-function openPayFromHistory(id, fee, duration) {
-  lastAdRequestId = id;
-  // Switch to the "new" tab area to show the pay pane
-  switchAdPanel('new');
-  document.getElementById('adFormState').style.display     = 'none';
-  document.getElementById('adSuccessState').style.display  = 'none';
-  document.getElementById('adPayState').style.display      = 'block';
-  document.getElementById('adPayAmount').textContent        = `KES ${fee.toLocaleString()}`;
-  document.getElementById('adPayDuration').textContent      = `Duration: ${duration}`;
-  document.getElementById('adAdminNotes').style.display     = 'none';
-  if (currentUser?.phone) {
-    const n = currentUser.phone.replace(/^0/, '').replace(/^254/, '').slice(0, 9);
-    document.getElementById('adPayPhone').value = n;
-  }
-}
-
-async function submitAdRequest(){
-  const businessName = document.getElementById("arBusinessName").value.trim();
-  const adContent    = document.getElementById("arAdContent").value.trim();
-  const category     = document.getElementById("arCategory").value;
-  const duration     = document.getElementById("arDuration").value;
-  const contactPhone = document.getElementById("arContactPhone").value.trim();
-  const contactEmail = document.getElementById("arContactEmail").value.trim();
-  const errEl        = document.getElementById("arError");
-  const btn          = document.getElementById("adRequestSendBtn");
-
-  // Validate
-  if (!businessName) { showArError("Please enter your business or organisation name."); return; }
-  if (!adContent)    { showArError("Please describe what you'd like to advertise."); return; }
-  if (!contactPhone) { showArError("Please enter a contact phone number."); return; }
-  errEl.style.display = "none";
-
-  // Loading state
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting…';
-
-  try {
-    const res = await fetch('/api/ad-requests', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ businessName, adContent, category, duration, contactPhone, contactEmail: contactEmail || undefined })
-    });
-    const data = await res.json();
-    if (res.status === 401) {
-      showArError('You must be logged in to submit an ad request. Please log in and try again.');
-      btn.disabled = false;
-      btn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Request';
-      return;
-    }
-    if (!data.success) throw new Error(data.error || 'Submission failed');
-
-    // Remember ID so user can check status / pay later
-    lastAdRequestId = data.id;
-
-    // Show success state
-    document.getElementById("adFormState").style.display    = "none";
-    document.getElementById("adSuccessState").style.display = "block";
-    addNotification({icon:"📣",iconCls:"ni-notice",text:"Your <strong>ad request</strong> was submitted. Admin will respond within 24 hours.",type:"notice"});
-
-  } catch(err) {
-    showArError("Failed to submit: " + err.message);
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Request';
-  }
-}
-
-function showArError(msg){
-  const el = document.getElementById("arError");
-  el.textContent = msg;
-  el.style.display = "block";
-}
-
-// Tracks the last submitted request ID so the user can check status
-let lastAdRequestId = null;
-
-async function checkAdRequestStatus() {
-  if (!lastAdRequestId) return;
-  try {
-    const res  = await fetch(`/api/ad-requests/${lastAdRequestId}`);
-    const data = await res.json();
-    if (!data.success) throw new Error(data.error);
-    const r = data.adRequest;
-
-    if (r.status === 'payment_pending') {
-      // Switch to pay state
-      document.getElementById('adSuccessState').style.display = 'none';
-      document.getElementById('adPayState').style.display    = 'block';
-      document.getElementById('adPayAmount').textContent     = `KES ${r.fee.toLocaleString()}`;
-      document.getElementById('adPayDuration').textContent   = `Duration: ${r.duration}`;
-
-      const notesEl = document.getElementById('adAdminNotes');
-      if (r.notes) { notesEl.textContent = `📝 Admin note: ${r.notes}`; notesEl.style.display = 'block'; }
-
-      // Pre-fill phone from profile if available
-      if (currentUser?.phone) {
-        const n = currentUser.phone.replace(/^0/, '').replace(/^254/, '').slice(0, 9);
-        document.getElementById('adPayPhone').value = n;
-      }
-    } else if (r.status === 'approved') {
-      showToast('🎉 Your ad has been approved and is now live!', 'success');
-    } else if (r.status === 'rejected') {
-      showToast('Your ad request was not approved. Please contact admin.', 'error');
-    } else {
-      showToast('⏳ Still under review — check back soon.', 'info');
-    }
-  } catch (err) {
-    showToast('Could not check status: ' + err.message, 'error');
-  }
-}
-
-async function initiateAdPayment() {
-  const raw = document.getElementById('adPayPhone').value.trim();
-  if (!/^\d{9}$/.test(raw)) {
-    const el = document.getElementById('adPayError');
-    el.textContent = 'Enter a valid 9-digit M-Pesa number e.g. 712 345 678';
-    el.style.display = 'block';
-    return;
-  }
-  document.getElementById('adPayError').style.display = 'none';
-
-  const btn = document.getElementById('adPayBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<div class="btn-spinner" style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.4);border-top-color:white;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;"></div> Sending STK Push…';
-
-  const fullPhone = '254' + raw;
-  try {
-    // Reuse the existing DARAJA engine (simulated / real in production)
-    await DARAJA.getAccessToken();
-    const stk = await DARAJA.initiateStkPush({ phone: fullPhone, amount: parseInt(document.getElementById('adPayAmount').textContent.replace(/[^\d]/g, '')), accountRef: 'NGOLIBA-AD' });
-    if (stk.ResponseCode !== '0') throw new Error(stk.ResponseDescription);
-
-    // Simulate PIN confirmation (same pattern as voting flow)
-    btn.innerHTML = '⏳ Waiting for M-Pesa PIN…';
-    const result = await DARAJA.simulateIpnCallback(stk.CheckoutRequestID, true);
-
-    if (result.ResultCode === 0) {
-      // Confirm payment on the server
-      const confirm = await fetch(`/api/ad-requests/${lastAdRequestId}/pay`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mpesaReceiptNumber: result.MpesaReceiptNumber, phone: fullPhone })
-      });
-      const confirmData = await confirm.json();
-      if (!confirmData.success) throw new Error(confirmData.error);
-
-      // Success UI
-      document.getElementById('adPayState').style.display = 'none';
-      document.getElementById('adSuccessState').style.display = 'block';
-      document.getElementById('adSuccessState').innerHTML = `
-        <div style="font-size:2.5rem;margin-bottom:0.75rem;">🎉</div>
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1rem;color:var(--text-dark);margin-bottom:0.4rem;">Ad Submitted <span style="font-size:0.7rem;font-weight:500;color:var(--mid-gray);">(Preview)</span></div>
-        <div style="font-size:0.82rem;color:var(--mid-gray);line-height:1.5;margin-bottom:0.75rem;">
-          Simulated receipt: <strong>${result.MpesaReceiptNumber}</strong><br>Your ad is now <strong>live</strong>. <em>No real M-Pesa charge occurred.</em>
-        </div>
-        <button onclick="resetAdForm()" style="display:inline-flex;align-items:center;gap:0.4rem;background:var(--cream-dark);border:1px solid var(--sand);border-radius:50px;padding:0.45rem 1.2rem;font-size:0.78rem;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif;color:var(--text-mid);">
-          Done
-        </button>`;
-      addNotification({ icon:'💳', iconCls:'ni-notice', text:`M-Pesa payment confirmed — your ad is now <strong>live</strong>! Receipt: ${result.MpesaReceiptNumber}`, type:'notice' });
-      // Refresh history so the status updates
-      loadMyAdRequests();
-    } else {
-      throw new Error(result.ResultDesc || 'Payment was not confirmed');
-    }
-  } catch (err) {
-    btn.disabled = false;
-    btn.innerHTML = '<span style="font-size:1rem;">📲</span> Pay via M-Pesa';
-    const el = document.getElementById('adPayError');
-    el.textContent = 'Payment failed: ' + err.message;
-    el.style.display = 'block';
-  }
-}
-
-function resetAdForm(){
-  ["arBusinessName","arContactPhone","arContactEmail"].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.value="";
-  });
-  const ta=document.getElementById("arAdContent"); if(ta) ta.value="";
-  document.getElementById("adFormState").style.display    = "block";
-  document.getElementById("adSuccessState").style.display = "none";
-  document.getElementById("adPayState").style.display     = "none";
-  document.getElementById("arError").style.display        = "none";
-  const btn=document.getElementById("adRequestSendBtn");
-  if(btn){ btn.disabled=false; btn.innerHTML='<i class="fas fa-paper-plane"></i> Submit Request'; }
-  lastAdRequestId = null;
-}
 
 // Phase 3B Polish: PROMISES previously held 20 hardcoded, fabricated
 // candidate pledges (Ngoliba-specific text with fake statuses/dates) and
@@ -5100,6 +4885,79 @@ function renderPromisesTab(){
   if(list) list.innerHTML="<div style='text-align:center;color:var(--mid-gray);padding:2rem;'>📋 Promise Tracker — Coming Soon</div>";
 }
 
+// ═══ RESULTS TAB — Phase 4B.22 ═══
+// Fetches current standings from /api/analytics/leaders and stats from /api/stats.
+// Uses ONLY existing backend endpoints — no new APIs introduced.
+async function renderResultsTab() {
+  var list = document.getElementById('resultsLeaderList');
+  var summary = document.getElementById('resultsStatsSummary');
+  if (!list) return;
+  list.innerHTML = '<div style="text-align:center;color:var(--mid-gray);padding:1.5rem;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+  try {
+    var cat = (typeof activePollCategory !== 'undefined' ? activePollCategory : null) || 'MCA';
+    var lbData = await apiCall('/api/analytics/leaders?category=' + encodeURIComponent(cat));
+    var leaders = (lbData && lbData.success && lbData.data && Array.isArray(lbData.data.current))
+      ? lbData.data.current : [];
+    var medals = ['🥇','🥈','🥉'];
+    list.innerHTML = leaders.length === 0
+      ? '<div style="text-align:center;color:var(--mid-gray);padding:2rem;">No standings yet — cast your vote!</div>'
+      : leaders.map(function(c, i){
+          var imgSrc = c.img || ('https://ui-avatars.com/api/?name=' + encodeURIComponent(c.name||'?') + '&size=40&background=2d6a4f&color=fff');
+          return '<div class="results-lb-row">' +
+            '<div class="results-lb-rank">' + (medals[i] || ('#'+(i+1))) + '</div>' +
+            '<img class="results-lb-img" src="' + imgSrc + '" alt="' + (c.name||'') + '" loading="lazy">' +
+            '<div class="results-lb-info"><div class="results-lb-name">' + (c.name||'') + '</div><div class="results-lb-party">' + (c.party||'') + '</div></div>' +
+            '<div class="results-lb-votes">' + (c.votes||0) + ' <span style="font-size:0.65rem;color:var(--mid-gray);">votes</span></div>' +
+          '</div>';
+        }).join('');
+    if (summary) {
+      var statsData = await apiCall('/api/stats');
+      var regVoters = (statsData && statsData.registeredVoters) ? statsData.registeredVoters : 0;
+      var totalVotes = (statsData && statsData.totalVotes) ? statsData.totalVotes
+        : leaders.reduce(function(a,c){ return a + (c.votes||0); }, 0);
+      summary.innerHTML =
+        '<div><div style="font-family:\'Syne\',sans-serif;font-weight:800;font-size:1.5rem;color:var(--forest-light);">' + regVoters + '</div>' +
+        '<div style="font-size:0.7rem;color:var(--mid-gray);text-transform:uppercase;letter-spacing:0.08em;">Registered Voters</div></div>' +
+        '<div><div style="font-family:\'Syne\',sans-serif;font-weight:800;font-size:1.5rem;color:var(--emerald);">' + totalVotes + '</div>' +
+        '<div style="font-size:0.7rem;color:var(--mid-gray);text-transform:uppercase;letter-spacing:0.08em;">Votes This Cycle</div></div>';
+    }
+  } catch(e) {
+    if (list) list.innerHTML = '<div style="text-align:center;color:var(--mid-gray);padding:2rem;">Results unavailable — please try again.</div>';
+  }
+}
+
+// ═══ CANDIDATES BROWSE TAB — Phase 4B.22 ═══
+// Renders a read-only candidate browse grid using the existing CANDIDATES array.
+// showCandidateProfile(cand) is the pre-existing modal function — untouched.
+function renderCandidatesTab() {
+  var grid = document.getElementById('candidatesBrowseGrid');
+  if (!grid) return;
+  var cands = (typeof CANDIDATES !== 'undefined' && CANDIDATES && CANDIDATES.length)
+    ? CANDIDATES
+    : (typeof CANDIDATES_DEFAULT !== 'undefined' ? CANDIDATES_DEFAULT : []);
+  if (!cands.length) {
+    grid.innerHTML = '<div style="text-align:center;color:var(--mid-gray);padding:2rem;">Loading candidates…</div>';
+    if (typeof loadCandidatesForCategory === 'function') {
+      loadCandidatesForCategory((typeof activePollCategory !== 'undefined' ? activePollCategory : null) || 'MCA')
+        .then(function(){ renderCandidatesTab(); });
+    }
+    return;
+  }
+  grid.innerHTML = cands.map(function(c, i){
+    return '<div class="candidate-browse-card">' +
+      '<div class="cbc-header">' +
+        '<img class="cbc-img" src="' + (c.img||'') + '" alt="' + (c.name||'') + '" loading="lazy" onerror="this.src=\'https://ui-avatars.com/api/?name=' + encodeURIComponent(c.name||'?') + '&size=52&background=2d6a4f&color=fff\'">' +
+        '<div><div class="cbc-name">' + (c.name||'') + (c.incumbent ? ' <span style="font-size:0.62rem;background:var(--gold);color:var(--forest);padding:0.1rem 0.45rem;border-radius:50px;vertical-align:middle;">Incumbent</span>' : '') + '</div>' +
+        '<div class="cbc-party">' + (c.party||'') + '</div></div>' +
+      '</div>' +
+      '<div class="cbc-bio">' + (c.bio||'') + '</div>' +
+      '<button class="cbc-profile-btn" onclick="showCandidateProfile(CANDIDATES[' + i + '] || CANDIDATES_DEFAULT[' + i + '])">' +
+        '<i class="fas fa-id-card"></i> Full Profile' +
+      '</button>' +
+    '</div>';
+  }).join('');
+}
+
 // ═══ AI INSIGHTS TAB ═══
 // Cleanup: AI_INSIGHTS and AI_ISSUES previously held fabricated,
 // ward-specific trends/alerts/predictions and invented issue percentages
@@ -5115,50 +4973,6 @@ function renderAIInsightsTab(){
   initScrollReveal();
 }
 
-async function handleAIAsk(){
-  const input=document.getElementById("aiPromptInput").value.trim();
-  if(!input){showToast("Enter a question first","error");return;}
-  const responseEl=document.getElementById("aiResponse");
-  responseEl.style.display="block";
-  responseEl.innerHTML='<div class="ai-typing"><span></span><span></span><span></span></div>';
-  document.getElementById("aiAskBtn").disabled=true;
-
-  // Call the real Anthropic API
-  try{
-    const agg=getCurrentPeriodAggregated();
-    const votesSummary=CANDIDATES.map(c=>`${c.name} (${c.party}): ${agg[c.id]?.total||0} votes`).join(", ");
-    const users=DB.getUsers();
-    const wardLabel  = (typeof currentUser!=='undefined'&&currentUser?.wardName)  || 'this ward';
-    const countyLabel= (typeof currentUser!=='undefined'&&currentUser?.countyName) || 'Kenya';
-    const subLabel   = SUBLOCATIONS.length>0 ? SUBLOCATIONS.join(', ') : 'various sublocations';
-    const context=`You are the AI analyst for InfoTrack, a ward-level opinion poll platform in ${wardLabel}, ${countyLabel}. The poll tracks ${CANDIDATES.length} MCA candidates. Current cycle vote totals: ${votesSummary}. Total registered voters: ${users.length}. Sublocations: ${subLabel}. Answer the user's question concisely and insightfully in 2-4 sentences. Be specific to ${wardLabel} context.`;
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,system:context,messages:[{role:"user",content:input}]})});
-    const data=await res.json();
-    const reply=data.content?.[0]?.text||"I could not generate a response. Please try again.";
-    responseEl.innerHTML=reply;
-  }catch(e){
-    // Fallback to local AI
-    responseEl.innerHTML=generateLocalAIResponse(input);
-  }
-  document.getElementById("aiAskBtn").disabled=false;
-}
-
-function generateLocalAIResponse(query){
-  // Phase 3B Polish: this fallback previously invented ward-specific
-  // statistics, percentages, and candidate claims whenever the live AI
-  // request failed. It no longer fabricates any data — it just tells the
-  // user live analysis isn't available right now, regardless of what they
-  // asked.
-  return "Live AI analysis is currently unavailable. Please try again in a moment — in the meantime, the Leaderboard and Notice Board tabs have up-to-date information.";
-}
-
-function getTimeToReset(){
-  if(!window.currentPeriodEnd) return "soon";
-  const diff=new Date(window.currentPeriodEnd)-Date.now();
-  if(diff<=0) return "now";
-  const m=Math.floor(diff/60000), s=Math.floor((diff%60000)/1000);
-  return `${m}m ${s}s`;
-}
 
 // ═══ PWA ═══
 function initPWAInstall(){
@@ -5729,8 +5543,10 @@ document.getElementById("notifMarkAll")?.addEventListener("click", function(e) {
   renderNotifBell();
 });
 
-// Feature tabs
+// Feature tabs (sub-nav items — all three sub-navs)
 document.querySelectorAll(".feature-tab").forEach(btn=>btn.addEventListener("click",()=>switchFeatureTab(btn.dataset.tab)));
+// Section pills — tier-1 nav (Phase 4B.22)
+document.querySelectorAll(".section-pill").forEach(btn=>btn.addEventListener("click",()=>switchSection(btn.dataset.section)));
 // OTP
 document.getElementById("forgotPasswordBtn").onclick=()=>openModal("otpModal");
 document.getElementById("sendOtpBtn").onclick=sendOtp;
@@ -5774,7 +5590,7 @@ document.querySelectorAll(".forum-filter").forEach(btn=>btn.addEventListener("cl
 // Analytics chart tabs
 document.querySelectorAll(".chart-tab").forEach(btn=>btn.addEventListener("click",()=>{document.querySelectorAll(".chart-tab").forEach(b=>b.classList.toggle("active",b.dataset.chart===btn.dataset.chart));renderAnalyticsChart(btn.dataset.chart);}));
 // AI
-document.getElementById("aiAskBtn").onclick=handleAIAsk;
+document.getElementById("aiAskBtn").onclick=function(){handleAIAsk();};
 document.getElementById("aiPromptInput").addEventListener("keydown",e=>{if(e.key==="Enter")handleAIAsk();});
 // PWA
 document.getElementById("pwaInstallBtn")?.addEventListener("click",async()=>{if(deferredPWAPrompt){deferredPWAPrompt.prompt();const{outcome}=await deferredPWAPrompt.userChoice;if(outcome==="accepted")showToast("📱 Installed!","success");deferredPWAPrompt=null;}document.getElementById("pwaInstallBanner").style.display="none";});
@@ -7586,5 +7402,6 @@ window.renderFaceoff = window.updateFaceoff;
 .strength-wrap{background:rgba(255,255,255,.12)!important;}
 </style>
 
+<script src="/js/community.js"></script>
 </body>
 </html>

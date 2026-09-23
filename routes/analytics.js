@@ -121,6 +121,7 @@ router.get('/api/analytics/leaders', async (req, res) => {
                 candidateId: candidate.id,
                 name: candidate.name,
                 party: candidate.party,
+                img: candidate.img,
                 votes: vote.votes,
                 percentage: totalVotes > 0 ? ((vote.votes / totalVotes) * 100).toFixed(1) : 0,
                 consistency: stats.consistency,
