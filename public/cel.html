@@ -2,38 +2,38 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NIT eTaifa Link (CEL) – Concept Prototype</title>
-<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--navy:#0f2a4a;--navy2:#1c4373;--green:#0e7c4a;--gl:#e3f3ea;--bg:#eef1f5;--card:#fff;--tx:#17202e;--mu:#5b6778;--ln:#dde2ea;--red:#b3261e;--amb:#a35d00;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d141f;--card:#16202e;--tx:#e8edf4;--mu:#9aa7ba;--ln:#2a374a;--gl:#123626}}
-:root[data-theme="dark"]{--bg:#0d141f;--card:#16202e;--tx:#e8edf4;--mu:#9aa7ba;--ln:#2a374a;--gl:#123626}
+:root{--navy:#0d2818;--navy2:#2d6a4f;--green:#2d6a4f;--gold:#e9c46a;--gold2:#c9a027;--gl:#e4f3ea;--bg:#faf7f0;--card:#fff;--tx:#111827;--mu:#6b7280;--ln:#e6dcc6;--red:#e63946;--amb:#a35d00;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--navy:#1a3f28;--bg:#0a1a11;--card:#12261a;--tx:#ecf3ee;--mu:#9db3a5;--ln:#24402f;--gl:#15382a}}
+:root[data-theme="dark"]{--navy:#1a3f28;--bg:#0a1a11;--card:#12261a;--tx:#ecf3ee;--mu:#9db3a5;--ln:#24402f;--gl:#15382a}
 *{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
-body{margin:0;font-family:'Public Sans',system-ui,sans-serif;background:var(--bg);color:var(--tx);font-size:15px;line-height:1.5}
-h1,h2,h3{margin:0;line-height:1.2}h1{font-size:28px;font-weight:800}h2{font-size:18px;font-weight:700}h3{font-size:15px;font-weight:700}
+body{margin:0;font-family:'Outfit',system-ui,sans-serif;background:var(--bg);color:var(--tx);font-size:15px;line-height:1.5}
+h1,h2,h3{margin:0;line-height:1.2;font-family:'Syne','Outfit',sans-serif}h1{font-size:28px;font-weight:800}h2{font-size:18px;font-weight:700}h3{font-size:15px;font-weight:700}
 p{margin:.3em 0}.mu{color:var(--mu);font-size:13px}button,input,select,textarea{font:inherit}
 :focus-visible{outline:3px solid #f2b705;outline-offset:2px}
 .shell{display:flex;min-height:100vh}
-aside{width:240px;background:var(--navy);color:#cdd9ea;padding:16px 10px;flex-shrink:0}
-.brand{color:#fff;font-weight:800;font-size:17px;padding:4px 10px 14px;border-bottom:1px solid #ffffff22;margin-bottom:10px}.brand small{display:block;font-weight:500;color:#9db3d1;font-size:11px}
-aside a{display:block;padding:9px 12px;border-radius:6px;color:#cdd9ea;text-decoration:none;cursor:pointer;font-weight:500;border-left:3px solid transparent}
-aside a:hover{background:#ffffff14}aside a.on{background:#ffffff1f;color:#fff;border-left-color:#3ecf8e}
+aside{width:240px;background:var(--navy);color:#cfe3d6;padding:16px 10px;flex-shrink:0}
+.brand{font-family:'Syne',sans-serif;color:#fff;font-weight:800;font-size:17px;padding:4px 10px 14px;border-bottom:1px solid #ffffff22;margin-bottom:10px}.brand small{display:block;font-weight:500;color:#a9c4b3;font-size:11px}
+aside a{display:block;padding:9px 12px;border-radius:6px;color:#cfe3d6;text-decoration:none;cursor:pointer;font-weight:500;border-left:3px solid transparent}
+aside a:hover{background:#ffffff14}aside a.on{background:#ffffff1f;color:#fff;border-left-color:#e9c46a}
 .main{flex:1;min-width:0}
 .top{display:flex;gap:12px;align-items:center;background:var(--card);border-bottom:1px solid var(--ln);padding:10px 24px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5;flex-wrap:wrap}
 .top input[type=search]{flex:1;min-width:140px;max-width:380px;padding:8px 12px;border:1px solid var(--ln);border-radius:6px;background:var(--bg);color:var(--tx)}
 .demo{background:#fff3cd;color:#664d03;border:1px solid #e6cf7a;border-radius:4px;font-size:11px;font-weight:700;padding:3px 8px}
 select{padding:7px 10px;border:1px solid var(--ln);border-radius:6px;background:var(--card);color:var(--tx)}
 .bell{position:relative;background:none;border:1px solid var(--ln);border-radius:6px;padding:7px 10px;cursor:pointer;color:var(--tx)}.bell b{position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;font-size:11px;border-radius:9px;padding:0 6px}
-.av{width:34px;height:34px;border-radius:50%;background:var(--green);color:#fff;display:grid;place-items:center;font-weight:700}
+.av{width:34px;height:34px;border-radius:50%;background:var(--gold);color:#0d2818;display:grid;place-items:center;font-weight:700}
 .pan{position:absolute;right:24px;top:56px;width:340px;max-width:92vw;background:var(--card);border:1px solid var(--ln);border-radius:8px;box-shadow:0 10px 30px #0003;padding:6px;z-index:9}
 .pan div{padding:10px;border-bottom:1px solid var(--ln);font-size:13px}.pan div:last-child{border:0}
 .page{padding:24px;max-width:1240px}
 .pg{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:18px;flex-wrap:wrap}
 .grid{display:grid;gap:16px}.g4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.g3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}.g2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
-.card{background:var(--card);border:1px solid var(--ln);border-radius:8px;padding:18px;box-shadow:0 1px 2px #0f2a4a14}
-.kpi .n{font-size:30px;font-weight:800;color:var(--navy2)}@media(prefers-color-scheme:dark){.kpi .n{color:#8fb6ee}}
-.btn{background:var(--navy);color:#fff;border:0;border-radius:6px;padding:10px 16px;font-weight:600;cursor:pointer;transition:background .15s;text-decoration:none;display:inline-block}
-.btn:hover{background:var(--navy2)}.btn.g{background:var(--green)}.btn.o{background:transparent;color:var(--navy);border:1.5px solid var(--navy)}
-@media(prefers-color-scheme:dark){.btn.o{color:#cfe0f7;border-color:#5b7ba6}}
+.card{background:var(--card);border:1px solid var(--ln);border-radius:14px;padding:18px;box-shadow:0 8px 30px -14px rgba(13,40,24,.25)}
+.kpi .n{font-family:'Syne',sans-serif;font-size:30px;font-weight:800;color:var(--navy2)}@media(prefers-color-scheme:dark){.kpi .n{color:#5ddb96}}
+.btn{background:var(--navy);color:#fff;border:0;border-radius:10px;padding:10px 16px;font-weight:600;cursor:pointer;transition:background .15s;text-decoration:none;display:inline-block}
+.btn:hover{background:#1a3f28}.btn.g{background:var(--gold);color:#0d2818}.btn.g:hover{background:var(--gold2)}.btn.o{background:transparent;color:var(--navy);border:1.5px solid var(--navy)}
+@media(prefers-color-scheme:dark){.btn.o{color:#cfe3d6;border-color:#5f8a72}}
 .btn.s{padding:5px 10px;font-size:13px}.btn.r{background:var(--red)}
 .bd{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700}
 .b-ok{background:#d9f2e3;color:#0a5a34}.b-wa{background:#fff0cc;color:#8a5200}.b-in{background:#dce9fb;color:#124a9a}.b-no{background:#fbdcd9;color:#8f1d16}.b-gr{background:#e6e9ee;color:#3d4757}
@@ -46,23 +46,23 @@ label{display:block;font-weight:600;font-size:13px;margin-bottom:4px}
 .file{display:flex;justify-content:space-between;align-items:center;border:1px dashed var(--ln);border-radius:6px;padding:10px 12px;margin-bottom:8px;gap:8px}
 .tl{list-style:none;margin:0;padding:0}.tl li{position:relative;padding:0 0 22px 38px}.tl li:before{content:"";position:absolute;left:11px;top:24px;bottom:0;width:2px;background:var(--ln)}.tl li:last-child:before{display:none}
 .tl i{position:absolute;left:0;top:0;width:24px;height:24px;border-radius:50%;background:var(--ln);display:grid;place-items:center;font-style:normal;font-size:12px;color:#fff}
-.tl .d i{background:var(--green)}.tl .c i{background:var(--navy);box-shadow:0 0 0 5px #1c437333}.tl .d:before{background:var(--green)}
+.tl .d i{background:var(--green)}.tl .c i{background:var(--navy);box-shadow:0 0 0 5px #2d6a4f33}.tl .d:before{background:var(--green)}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}.tabs button{border:1px solid var(--ln);background:var(--card);color:var(--tx);padding:7px 14px;border-radius:18px;cursor:pointer}.tabs .on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .bar{display:grid;grid-template-columns:130px 1fr 44px;gap:8px;align-items:center;margin:7px 0;font-size:13px}.bar div{height:14px;background:var(--ln);border-radius:3px;overflow:hidden}.bar div i{display:block;height:100%;background:var(--navy2)}
 .map{position:relative;height:250px;border-radius:8px;background:linear-gradient(90deg,#0000 49%,#c9d3df 49% 51%,#0000 51%),linear-gradient(0deg,#0000 60%,#c9d3df 60% 62%,#0000 62%),#dfe8dd;border:1px solid var(--ln)}
 .pin{position:absolute;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--red);border:2px solid #fff}.pin.p2{background:var(--amb)}.pin.p3{background:var(--green)}
 .hm{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.hm div{padding:14px 6px;text-align:center;border-radius:6px;color:#fff;font-size:12px;font-weight:600}
-.tg{float:right;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;background:#3ecf8e;color:#06331f}.tg.n{background:#ffffff33;color:#fff}.leg{font-size:11px;color:#9db3d1;padding:10px 12px}
+.tg{float:right;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;background:#e9c46a;color:#0d2818}.tg.n{background:#ffffff33;color:#fff}.leg{font-size:11px;color:#a9c4b3;padding:10px 12px}
 .toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:12px 20px;border-radius:8px;box-shadow:0 6px 20px #0005;z-index:20}
 .star{cursor:pointer;font-size:26px;background:none;border:0;color:#c9a100;padding:0 2px}
 .ok{text-align:center;padding:30px}.ok .ck{width:64px;height:64px;border-radius:50%;background:var(--green);color:#fff;font-size:34px;display:grid;place-items:center;margin:0 auto 12px}
 .ref{font-size:26px;font-weight:800;color:var(--green);letter-spacing:.5px}
 /* landing */
 .lh{background:var(--navy);color:#fff}.lh .in{max-width:1240px;margin:0 auto;padding:18px 24px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-.hero{background:linear-gradient(180deg,var(--navy) 0,#173a66 100%);color:#fff}.hero .in{max-width:1240px;margin:0 auto;padding:48px 24px 64px;display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
-.hero h1{font-size:42px;letter-spacing:-.5px}.hero p{color:#c8d6ea;font-size:17px;max-width:520px}
+.hero{background:linear-gradient(180deg,var(--navy) 0,#1a3f28 100%);color:#fff}.hero .in{max-width:1240px;margin:0 auto;padding:48px 24px 64px;display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
+.hero h1{font-size:42px;letter-spacing:-.5px}.hero p{color:#cfe3d6;font-size:17px;max-width:520px}
 .flow{background:#ffffff12;border:1px solid #ffffff30;border-radius:10px;padding:18px}
-.fb{background:#fff;color:var(--navy);border-radius:8px;padding:12px 14px;font-weight:700;text-align:center}.fb small{display:block;font-weight:500;color:#5b6778}.fb.c{background:#3ecf8e;color:#06331f}.ar{text-align:center;color:#9fe3c4;font-size:22px;line-height:1.4}
+.fb{background:#fff;color:var(--navy);border-radius:8px;padding:12px 14px;font-weight:700;text-align:center}.fb small{display:block;font-weight:500;color:#5b6778}.fb.c{background:#e9c46a;color:#0d2818}.ar{text-align:center;color:#5ddb96;font-size:22px;line-height:1.4}
 .ff{max-width:1240px;margin:0 auto;padding:32px 24px}
 @media(max-width:900px){.shell{flex-direction:column}aside{width:100%;display:flex;overflow-x:auto;gap:4px;padding:8px}.brand{display:none}aside a{white-space:nowrap;border-left:0}.hero .in{grid-template-columns:1fr}.hero h1{font-size:32px}.top,.page{padding:12px}.pan{right:8px}}
 </style></head><body><div id="app"></div><div id="toast"></div>
@@ -109,15 +109,15 @@ const home=()=>S.role=='admin'?'analytics':S.role=='officer'?'officer':'dash';
 
 /* charts */
 const bars=(d,c)=>{const m=Math.max(...d.map(x=>x[1]));return d.map(x=>`<div class="bar"><span>${x[0]}</span><div><i style="width:${x[1]/m*100}%;${c?'background:'+c:''}"></i></div><b>${x[1]}</b></div>`).join('')};
-const line=v=>{const m=Math.max(...v),w=400,h=140;const p=v.map((y,i)=>`${10+i*(w-20)/(v.length-1)},${h-10-y/m*(h-30)}`).join(' ');return `<svg viewBox="0 0 ${w} ${h+16}" width="100%" role="img" aria-label="Applications over time"><polyline fill="none" stroke="#1c4373" stroke-width="3" points="${p}"/><polyline fill="#1c437322" stroke="none" points="10,${h-10} ${p} ${w-10},${h-10}"/>${['Apr','May','Jun','Jul','Aug','Sep'].map((t,i)=>`<text x="${10+i*(w-20)/5}" y="${h+10}" font-size="10" text-anchor="middle" fill="#8894a5">${t}</text>`).join('')}</svg>`};
-const donut=d=>{const t=d.reduce((a,x)=>a+x[1],0);let o=0;const cs=['#0e7c4a','#1c4373','#e0a100','#b3261e'];return `<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><svg viewBox="0 0 42 42" width="150" role="img" aria-label="Application status">${d.map((x,i)=>{const s=x[1]/t*100,e=`<circle cx="21" cy="21" r="15.9" fill="none" stroke="${cs[i]}" stroke-width="7" stroke-dasharray="${s} ${100-s}" stroke-dashoffset="${25-o}"/>`;o+=s;return e}).join('')}</svg><div>${d.map((x,i)=>`<p class="mu"><span style="color:${cs[i]}">■</span> ${x[0]} — ${x[1]}%</p>`).join('')}</div></div>`};
-const heat=()=>{const w=[['Ngoliba',88],['Githunguri',74],['Kikuyu',69],['Limuru',61],['Ruiru',82],['Thika Town',77],['Juja',52],['Gatundu',44]];const c=v=>v>80?'#0b5f39':v>70?'#0e7c4a':v>60?'#3f9c73':v>50?'#7e97b8':'#5f7799';return `<div class="hm">${w.map(x=>`<div style="background:${c(x[1])}">${x[0]}<br>${x[1]}%</div>`).join('')}</div>`};
+const line=v=>{const m=Math.max(...v),w=400,h=140;const p=v.map((y,i)=>`${10+i*(w-20)/(v.length-1)},${h-10-y/m*(h-30)}`).join(' ');return `<svg viewBox="0 0 ${w} ${h+16}" width="100%" role="img" aria-label="Applications over time"><polyline fill="none" stroke="#2d6a4f" stroke-width="3" points="${p}"/><polyline fill="#2d6a4f22" stroke="none" points="10,${h-10} ${p} ${w-10},${h-10}"/>${['Apr','May','Jun','Jul','Aug','Sep'].map((t,i)=>`<text x="${10+i*(w-20)/5}" y="${h+10}" font-size="10" text-anchor="middle" fill="#8894a5">${t}</text>`).join('')}</svg>`};
+const donut=d=>{const t=d.reduce((a,x)=>a+x[1],0);let o=0;const cs=['#2d6a4f','#4361ee','#e9c46a','#e63946'];return `<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><svg viewBox="0 0 42 42" width="150" role="img" aria-label="Application status">${d.map((x,i)=>{const s=x[1]/t*100,e=`<circle cx="21" cy="21" r="15.9" fill="none" stroke="${cs[i]}" stroke-width="7" stroke-dasharray="${s} ${100-s}" stroke-dashoffset="${25-o}"/>`;o+=s;return e}).join('')}</svg><div>${d.map((x,i)=>`<p class="mu"><span style="color:${cs[i]}">■</span> ${x[0]} — ${x[1]}%</p>`).join('')}</div></div>`};
+const heat=()=>{const w=[['Ngoliba',88],['Githunguri',74],['Kikuyu',69],['Limuru',61],['Ruiru',82],['Thika Town',77],['Juja',52],['Gatundu',44]];const c=v=>v>80?'#0d2818':v>70?'#1a3f28':v>60?'#2d6a4f':v>50?'#4d7a63':'#6b8f7b';return `<div class="hm">${w.map(x=>`<div style="background:${c(x[1])}">${x[0]}<br>${x[1]}%</div>`).join('')}</div>`};
 
 /* views */
 const V={};
 const BF=()=>`<div class="f">${F('student','Student Name')}${F('inst','Institution')}${F('adm','Admission Number')}${F('course','Course / Class')}${F('guardian','Parent / Guardian Name')}${F('id','Guardian National ID')}${F('phone','Guardian Phone Number')}${F('ward','Ward')}${F('sub','Sub-location')}<div><label for="lvl">Level of Study</label><select id="lvl" data-f="lvl" style="width:100%"><option>TVET / College</option><option>Secondary school</option><option>University</option></select></div><div class="w"><label for="inc">Household Situation</label><select id="inc" data-f="inc" style="width:100%"><option>Low income</option><option>Orphan / single parent</option><option>Person with disability in household</option></select></div></div>`;
 V.landing=()=>`<div class="lh"><div class="in"><b style="font-size:18px">eTaifa Link — Kiambu County</b><span><button class="btn s o" style="color:#fff;border-color:#fff" data-go="investor">Investor overview</button> <span class="demo">Concept Prototype</span></span></div></div>
-<div class="hero"><div class="in"><div><p style="font-weight:600;color:#9fe3c4">Citizen Engagement Layer (CEL)</p><h1>One digital gateway for county services, information and civic engagement.</h1><p>Apply for services, track requests, receive official notices and participate in your community — all in one place.</p><p style="margin-top:22px"><button class="btn g" data-a="login" data-v="business">Access CEL</button> <button class="btn o" style="color:#fff;border-color:#fff" data-a="login" data-v="business" data-go="services">Explore Services</button></p><p class="mu" style="color:#9db3d1;margin-top:18px">NIT eTaifa Link · Evolved from Ngoliba InfoTrack (NIT) · Concept prototype with demo data. Not an official government website.</p></div>
+<div class="hero"><div class="in"><div><p style="font-weight:600;color:#5ddb96">Citizen Engagement Layer (CEL)</p><h1>One digital gateway for county services, information and civic engagement.</h1><p>Apply for services, track requests, receive official notices and participate in your community — all in one place.</p><p style="margin-top:22px"><button class="btn g" data-a="login" data-v="business">Access CEL</button> <button class="btn o" style="color:#fff;border-color:#fff" data-a="login" data-v="business" data-go="services">Explore Services</button></p><p class="mu" style="color:#a9c4b3;margin-top:18px">NIT eTaifa Link · Evolved from Ngoliba InfoTrack (NIT) · Concept prototype with demo data. Not an official government website.</p></div>
 <div class="flow" aria-label="How CEL connects citizens to county systems"><div class="fb">Residents & Businesses<small>Web · Mobile · USSD</small></div><div class="ar">↓</div><div class="fb c">Citizen Engagement Layer<small>Apply · Track · Notify · Engage</small></div><div class="ar">↓</div><div class="fb">County Services & Administration<small>ERP · Revenue · Licensing · Planning</small></div></div></div></div>
 <div class="ff"><div class="grid g4">${[['Apply for Services','Start permit, licence and bursary applications online.'],['Track Applications','See every stage from submission to approval.'],['Stay Informed','Official notices and alerts for your ward.'],['Engage Your Ward','Report issues and join local discussions.']].map(x=>`<div class="card"><h3>${x[0]}</h3><p class="mu">${x[1]}</p></div>`).join('')}</div>
 <div class="card" style="margin-top:22px"><h2>Built on NIT, the platform already running in Ngoliba Ward</h2><div class="grid g2" style="margin-top:10px"><div><b>Live in NIT today</b><p class="mu">Phone-based accounts · Noticeboard and business adverts · Community forum · M-Pesa payments · Civic scores · Ward analytics and heatmaps</p></div><div><b>New with CEL</b><p class="mu">Service applications · Live application tracker · Education bursaries · Officer and county review queues · Unlicensed-business reports · Ward-targeted alerts</p></div></div></div><p class="mu" style="margin-top:16px">Citizen engagement → data → county administration → better service delivery.</p></div>`;
@@ -167,7 +167,7 @@ V.admin=()=>`<div class="pg"><div><h1>Application Review</h1><p class="mu">${S.a
 V.users=()=>`<div class="pg"><h1>User Management</h1><span class="demo">Demo Data</span></div><div class="card tw"><table><tr><th>Name</th><th>Role</th><th>Ward</th><th>Status</th><th>Last Login</th></tr>${[['Martin Kambo','Business','Ngoliba','Active','30 Sep 2026'],['Grace Njeri','Resident','Kikuyu','Active','29 Sep 2026'],['J. Wanjiru','Ward Officer','Ngoliba','Active','30 Sep 2026'],['D. Kamau','County Admin','—','Active','30 Sep 2026'],['S. Otieno','Resident','Ruiru','Suspended','12 Sep 2026']].map(u=>`<tr><td><b>${u[0]}</b></td><td>${u[1]}</td><td>${u[2]}</td><td>${B(u[3]=='Active'?'Approved':'Rejected').replace(/Approved|Rejected/,u[3])}</td><td>${u[4]}</td></tr>`).join('')}</table></div>`;
 V.analytics=()=>`<div class="pg"><h1>County Analytics</h1><span class="demo">Demo Data</span></div><div class="grid g4">${[['12,842','Active Users'],[S.apps.length+3423,'Applications'],['78%','Application Completion'],['64%','Citizen Engagement'],['91%','Notice Delivery']].map(x=>`<div class="card kpi"><div class="n">${x[0]}</div><span class="mu">${x[1]}</span></div>`).join('')}</div>
 <div class="grid g2" style="margin-top:16px"><div class="card"><h2>Applications by Service</h2>${bars([['Business Permit',1420],['Liquor License',610],['Building Approval',702],['Change of Use',388],['Signage',308],['Education Bursary',960]])}</div><div class="card"><h2>Applications Over Time</h2>${line([420,510,480,620,700,698])}</div>
-<div class="card"><h2>Engagement by Ward</h2>${bars([['Ngoliba',88],['Ruiru',82],['Thika Town',77],['Githunguri',74],['Kikuyu',69]],'#0e7c4a')}</div><div class="card"><h2>Application Status</h2>${donut([['Approved',52],['Under Review',26],['Pending Documents',15],['Rejected',7]])}</div></div>
+<div class="card"><h2>Engagement by Ward</h2>${bars([['Ngoliba',88],['Ruiru',82],['Thika Town',77],['Githunguri',74],['Kikuyu',69]],'#2d6a4f')}</div><div class="card"><h2>Application Status</h2>${donut([['Approved',52],['Under Review',26],['Pending Documents',15],['Rejected',7]])}</div></div>
 <div class="card" style="margin-top:16px"><h2 style="margin-bottom:10px">Citizen Engagement Heatmap</h2>${heat()}</div>`;
 
 /* shell */
