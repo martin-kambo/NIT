@@ -2644,8 +2644,14 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
       <!-- ═══ SUB-NAV — Tier 2, Engagement ═══ -->
       <div class="sub-nav hidden" id="subNavEngagement">
+        <button class="feature-tab" data-tab="tabParticipate">&#128247; Participate &amp; Report</button>
         <button class="feature-tab" data-tab="tabForum">&#128172; Forum</button>
         <button class="feature-tab" data-tab="tabLeaderboard">&#128293; My Participation</button>
+      </div>
+
+      <!-- TAB: PUBLIC PARTICIPATION & REPORTING (CEL module, mock-up) -->
+      <div class="feature-pane" id="tabParticipate">
+        <iframe id="celPartFrame" title="Public Participation and Reporting" style="width:100%;height:calc(100vh - 170px);min-height:700px;border:1px solid rgba(0,0,0,0.1);border-radius:12px;background:#faf7f0"></iframe>
       </div>
 
       <!-- SUB-NAV -- Tier 2, County Services (CEL) -->
@@ -3806,6 +3812,7 @@ function switchFeatureTab(tabId){
   if(tabId==="tabForum") renderForumTab();
   if(tabId==="tabNotice") renderNoticeboardTab();
   if(tabId==="tabAI") renderAIInsightsTab();
+  if(tabId==="tabParticipate"){ const f=document.getElementById("celPartFrame"); if(f && !f.getAttribute("src")) f.src="/cel.html?embed=1&focus=1#/forum"; }
   if(tabId==="tabCEL"){ const f=document.getElementById("celFrame"); if(f && !f.getAttribute("src")) f.src="/cel.html?embed=1"; }
   if(tabId==="tabVote") {
     // Refresh candidates + faceoff for the active category whenever Vote tab is opened
@@ -3844,7 +3851,7 @@ function switchSection(sectionId) {
   if(strip) strip.classList.toggle("elections-hidden", !isElections);
   if(badge) badge.classList.toggle("elections-hidden", !isElections);
   // Navigate to the default pane for each section
-  var defaults = { community:"tabNotice", elections:"tabVote", engagement:"tabForum", services:"tabCEL" };
+  var defaults = { community:"tabNotice", elections:"tabVote", engagement:"tabParticipate", services:"tabCEL" };
   if(defaults[sectionId]) switchFeatureTab(defaults[sectionId]);
 }
 
