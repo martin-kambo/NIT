@@ -2644,14 +2644,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
       <!-- ═══ SUB-NAV — Tier 2, Engagement ═══ -->
       <div class="sub-nav hidden" id="subNavEngagement">
-        <button class="feature-tab" data-tab="tabParticipate">&#128247; Participate &amp; Report</button>
         <button class="feature-tab" data-tab="tabForum">&#128172; Forum</button>
         <button class="feature-tab" data-tab="tabLeaderboard">&#128293; My Participation</button>
-      </div>
-
-      <!-- TAB: PUBLIC PARTICIPATION & REPORTING (CEL module, mock-up) -->
-      <div class="feature-pane" id="tabParticipate">
-        <iframe id="celPartFrame" title="Public Participation and Reporting" style="width:100%;height:calc(100vh - 170px);min-height:700px;border:1px solid rgba(0,0,0,0.1);border-radius:12px;background:#faf7f0"></iframe>
       </div>
 
       <!-- SUB-NAV -- Tier 2, County Services (CEL) -->
@@ -2793,6 +2787,14 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
       <!-- TAB: FORUM -->
       <div class="feature-pane" id="tabForum">
+        <!-- ENGAGE: Forum | Consultations | Report an Issue | Community Reports -->
+        <div id="engageBar" role="tablist" aria-label="Community engagement">
+          <button type="button" data-eg="forum" class="active">&#128172; Forum</button>
+          <button type="button" data-eg="consult">&#128220; Consultations</button>
+          <button type="button" data-eg="report">&#128247; Report an Issue</button>
+          <button type="button" data-eg="reports">&#128203; Community Reports</button>
+        </div>
+        <div id="egForum">
         <div class="forum-compose glass-panel">
           <div class="forum-compose-header">
             <img id="forumComposeAvatar" class="forum-compose-avatar" src="" alt="">
@@ -2818,6 +2820,10 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
           <button class="forum-filter" data-filter="general">General</button>
         </div>
         <div class="forum-posts" id="forumPosts"></div>
+        </div><!-- /egForum (existing Forum, unchanged) -->
+        <div id="egConsult" style="display:none"></div>
+        <div id="egReport" style="display:none"></div>
+        <div id="egReports" style="display:none"></div>
       </div>
 
       <!-- TAB: NOTICEBOARD -->
@@ -3812,7 +3818,6 @@ function switchFeatureTab(tabId){
   if(tabId==="tabForum") renderForumTab();
   if(tabId==="tabNotice") renderNoticeboardTab();
   if(tabId==="tabAI") renderAIInsightsTab();
-  if(tabId==="tabParticipate"){ const f=document.getElementById("celPartFrame"); if(f && !f.getAttribute("src")) f.src="/cel.html?embed=1&focus=1#/forum"; }
   if(tabId==="tabCEL"){ const f=document.getElementById("celFrame"); if(f && !f.getAttribute("src")) f.src="/cel.html?embed=1"; }
   if(tabId==="tabVote") {
     // Refresh candidates + faceoff for the active category whenever Vote tab is opened
@@ -3851,7 +3856,7 @@ function switchSection(sectionId) {
   if(strip) strip.classList.toggle("elections-hidden", !isElections);
   if(badge) badge.classList.toggle("elections-hidden", !isElections);
   // Navigate to the default pane for each section
-  var defaults = { community:"tabNotice", elections:"tabVote", engagement:"tabParticipate", services:"tabCEL" };
+  var defaults = { community:"tabNotice", elections:"tabVote", engagement:"tabForum", services:"tabCEL" };
   if(defaults[sectionId]) switchFeatureTab(defaults[sectionId]);
 }
 
@@ -7422,5 +7427,178 @@ window.renderFaceoff = window.updateFaceoff;
 </style>
 
 <script src="/js/community.js"></script>
+<style>
+/* Engage extension (uses NIT design tokens) */
+#engageBar{display:flex;gap:.4rem;flex-wrap:wrap;margin:0 0 1rem;padding:.35rem;background:#fff;border:1px solid var(--sand);border-radius:var(--radius-lg);overflow-x:auto}
+#engageBar button{flex:0 0 auto;padding:.5rem .9rem;border:0;background:none;border-radius:calc(var(--radius-lg) - 4px);font:600 .8rem 'Outfit',sans-serif;color:var(--mid-gray);cursor:pointer;min-height:36px}
+#engageBar button.active{background:var(--forest);color:var(--gold)}
+.eg-card{background:#fff;border:1px solid var(--sand);border-radius:var(--radius-md);box-shadow:var(--shadow-card);padding:1rem 1.1rem;margin-bottom:.9rem;color:var(--text-dark)}
+.eg-card h2{font-family:'Syne',sans-serif;font-size:1.1rem;margin:0 0 .3rem}.eg-card h3{font-family:'Syne',sans-serif;font-size:.95rem;margin:.2rem 0}
+.eg-card label{display:block;font-weight:600;font-size:.78rem;margin:.7rem 0 .25rem}
+.eg-in{width:100%;padding:.55rem .75rem;border:1.5px solid var(--sand);border-radius:.6rem;font:.85rem 'Outfit',sans-serif;background:#fff;color:var(--text-dark)}
+.eg-mu{color:var(--mid-gray);font-size:.78rem}.eg-row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.5rem 0}
+.eg-btn{display:inline-block;padding:.45rem .9rem;border:1.5px solid var(--forest);background:#fff;color:var(--forest);border-radius:50px;font:600 .78rem 'Outfit',sans-serif;cursor:pointer;min-height:36px}
+.eg-btn.pri{background:var(--gold);border-color:var(--gold);color:var(--forest)}.eg-btn:disabled{opacity:.5;cursor:not-allowed}.eg-small{margin-top:.5rem;min-height:30px;font-size:.7rem}
+.eg-badge{display:inline-block;padding:.12rem .6rem;border-radius:50px;font-size:.7rem;font-weight:700;background:#e6e9ee;color:#374151}
+.eg-Open,.eg-Resolved{background:#d9f2e3;color:#0a5a34}.eg-Reported,.eg-UnderReview{background:#fff0cc;color:#8a5200}.eg-Assigned,.eg-InProgress{background:#dce9fb;color:#124a9a}.eg-Rejected{background:#fbdcd9;color:#8f1d16}
+.eg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:.9rem}.eg-thumbs{display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0}
+.eg-thumb{position:relative}.eg-thumb img,.eg-ph{width:88px;height:88px;object-fit:cover;border-radius:.6rem;border:1px solid var(--sand)}
+.eg-thumb button{position:absolute;top:2px;right:2px;border:0;background:var(--red-accent);color:#fff;border-radius:50%;width:22px;height:22px;cursor:pointer}
+.eg-ref{font:800 1.6rem 'Syne',sans-serif;color:var(--forest-light);margin:.2rem 0}.eg-ok{text-align:center}.eg-ok .eg-row{justify-content:center}
+.eg-tl{list-style:none;padding:0;margin:.6rem 0 0;font-size:.82rem}.eg-tl li{padding:.2rem 0;color:var(--mid-gray)}.eg-tl li.d{color:var(--text-dark)}.eg-tl li.c{font-weight:700;color:var(--forest-light)}.eg-tl b{display:inline-block;width:1.2rem}
+.eg-scroll{overflow-x:auto}.eg-tbl{width:100%;border-collapse:collapse;font-size:.78rem}.eg-tbl th,.eg-tbl td{padding:.4rem;border-bottom:1px solid var(--sand);text-align:left}.eg-chk{font-size:.8rem;margin:0!important}
+@media(max-width:600px){.eg-grid{grid-template-columns:1fr}}
+</style>
+<script>
+/* Engage extension: Consultations, Report an Issue, Community Reports (additive; Forum code untouched) */
+(function(){
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const CATS=['Roads & Transport','Waste Management','Water','Street Lighting','Public Safety','Unlicensed Business','Other'];
+const FLOW=['Reported','Under Review','Assigned','In Progress','Resolved'];
+const STATUSES=[...FLOW,'Rejected'];
+const S={view:'forum',imgs:[],openC:null,mine:false,statusF:'',officer:null,received:null,open:null,prefill:null};
+const fmt=d=>d?new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'';
+const toast=(m,t)=>typeof showToast==='function'?showToast(m,t||'info'):alert(m);
+async function api(url,opt){
+  const r=await fetch(url,Object.assign({credentials:'same-origin'},opt||{}));
+  let j={};try{j=await r.json()}catch(e){}
+  if(r.status===401){toast('Please log in to continue','error');throw new Error('auth')}
+  if(!r.ok||j.success===false)throw new Error(j.error||'Request failed');
+  return j;
+}
+const badge=s=>`<span class="eg-badge eg-${esc(s).replace(/\s/g,'')}">${esc(s)}</span>`;
+
+function setView(v){
+  S.view=v;
+  [['forum','egForum'],['consult','egConsult'],['report','egReport'],['reports','egReports']].forEach(([k,id])=>{$(id).style.display=k===v?'':'none'});
+  document.querySelectorAll('#engageBar [data-eg]').forEach(b=>b.classList.toggle('active',b.dataset.eg===v));
+  if(v==='consult')loadConsults();
+  if(v==='report')drawForm();
+  if(v==='reports')loadReports();
+}
+
+/* ---------- Consultations ---------- */
+async function loadConsults(){
+  const box=$('egConsult');box.innerHTML='<p class="eg-mu">Loading consultations...</p>';
+  try{
+    const {consultations:c}=await api('/api/consultations');
+    box.innerHTML=c.length?c.map(x=>`<div class="eg-card"><div class="eg-row">${badge(x.status==='Open'?'Open':'Closed')}<span class="eg-mu">${esc(x.ward)} · ${x.participants} participant${x.participants===1?'':'s'}</span></div>
+      <h3>${esc(x.title)}</h3><p>${esc(x.description)}</p><p class="eg-mu">Opens ${fmt(x.opensOn)} · Closes ${fmt(x.closesOn)}${x.venue?' · '+esc(x.venue):''}</p>
+      ${S.openC===x.id?`<textarea id="egView${x.id}" class="eg-in" rows="3" maxlength="1500" placeholder="Share your views..."></textarea><div class="eg-row"><button class="eg-btn pri" data-sv="${x.id}">Submit view</button><button class="eg-btn" data-cancel="1">Cancel</button></div>`
+      :`<div class="eg-row"><button class="eg-btn pri" data-gv="${x.id}" ${x.status!=='Open'?'disabled':''}>Give Your Views</button><button class="eg-btn" data-rsvp="${x.id}" ${x.rsvped||x.status!=='Open'?'disabled':''}>${x.rsvped?'RSVP\u2019d \u2713':'RSVP'}</button></div>`}</div>`).join(''):'<div class="eg-card"><p class="eg-mu">No open consultations for your ward right now.</p></div>';
+  }catch(e){box.innerHTML='<div class="eg-card"><p class="eg-mu">Could not load consultations.</p></div>'}
+}
+
+/* ---------- Report an Issue ---------- */
+function drawForm(){
+  const box=$('egReport');
+  if(S.received){const r=S.received;
+    box.innerHTML=`<div class="eg-card eg-ok"><h2>Report Received</h2><p class="eg-ref">${esc(r.reference)}</p>
+      <p class="eg-mu">${esc(r.category)} · ${esc(r.location||'Location not given')} · ${esc(r.ward)}</p><p>${badge(r.status)} <span class="eg-mu">Submitted ${fmt(r.createdAt)} · ${r.photos} photo${r.photos===1?'':'s'}</span></p>
+      <div class="eg-row"><button class="eg-btn pri" data-go="reports">View Community Reports</button><button class="eg-btn" data-new="1">Report another issue</button></div></div>`;return}
+  const p=S.prefill||{};
+  box.innerHTML=`<form class="eg-card" id="egForm" novalidate><h2>Report an Issue</h2><p class="eg-mu">Add photos so officers can see the problem. Reports are visible to your ward officer.</p>
+   <label for="egTitle">Issue title</label><input id="egTitle" class="eg-in" maxlength="140" placeholder="Blocked drainage along Ngoliba Road" value="${esc(p.title||'')}">
+   <label for="egCat">Category</label><select id="egCat" class="eg-in">${CATS.map(c=>`<option ${c===p.category?'selected':''}>${esc(c)}</option>`).join('')}</select>
+   <label for="egLoc">Location</label><input id="egLoc" class="eg-in" maxlength="200" placeholder="Landmark, road or area"><button type="button" class="eg-btn" data-geo="1">Use my location</button>
+   <label for="egWard">Ward</label><input id="egWard" class="eg-in" value="Your registered ward" readonly>
+   <label for="egDesc">Description</label><textarea id="egDesc" class="eg-in" rows="4" maxlength="2000" placeholder="Describe the problem and how long it has been going on">${esc(p.description||'')}</textarea>
+   <label>Photos (up to 4, images only, 5 MB each)</label>
+   <div class="eg-row"><label class="eg-btn" for="egFiles">Choose photos</label><input id="egFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+   <label class="eg-btn" for="egCam">Take photo</label><input id="egCam" type="file" accept="image/*" capture="environment" hidden></div>
+   <div class="eg-thumbs">${S.imgs.map((f,i)=>`<div class="eg-thumb"><img alt="Attached photo ${i+1}" src="${URL.createObjectURL(f)}"><button type="button" aria-label="Remove photo ${i+1}" data-rm="${i}">\u00d7</button></div>`).join('')}</div>
+   <p class="eg-mu">Please avoid faces and vehicle number plates.</p><button type="submit" class="eg-btn pri" id="egSend">Submit Report</button></form>`;
+  if(p.keep){$('egLoc').value=p.location||''}
+}
+function addFiles(list){
+  [...list].forEach(f=>{
+    if(S.imgs.length>=4){toast('Maximum 4 photos','error');return}
+    if(!/^image\/(jpeg|png|webp)$/.test(f.type)){toast(esc(f.name)+': only JPG, PNG or WEBP','error');return}
+    if(f.size>5*1024*1024){toast(esc(f.name)+' is over 5 MB','error');return}
+    S.imgs.push(f);
+  });keep();drawForm();
+}
+function keep(){const g=id=>$(id)&&$(id).value;S.prefill={title:g('egTitle'),category:g('egCat'),location:g('egLoc'),description:g('egDesc'),keep:1}}
+async function submitReport(){
+  const v=id=>$(id).value.trim();
+  if(v('egTitle').length<5)return toast('Add a title (at least 5 characters)','error');
+  if(v('egDesc').length<10)return toast('Add a description (at least 10 characters)','error');
+  const fd=new FormData();fd.append('title',v('egTitle'));fd.append('category',$('egCat').value);fd.append('location',v('egLoc'));fd.append('description',v('egDesc'));
+  S.imgs.forEach(f=>fd.append('photos',f));
+  const b=$('egSend');b.disabled=true;b.textContent='Submitting...';
+  try{const r=await api('/api/community-reports',{method:'POST',body:fd});
+    S.received={...r,ward:'Your ward'};S.imgs=[];S.prefill=null;drawForm();toast('Report '+r.reference+' received','success');
+  }catch(e){b.disabled=false;b.textContent='Submit Report';if(e.message!=='auth')toast(e.message,'error')}
+}
+
+/* ---------- Community Reports ---------- */
+function timeline(r,ev){
+  const idx=FLOW.indexOf(r.status),rej=r.status==='Rejected';
+  const dt=s=>{const e=(ev||[]).find(x=>x.status===s);return e?fmt(e.created_at):''};
+  const steps=[['Report Submitted',dt('Reported'),true],['Ward Officer Notified',dt('Reported'),true],
+    ...FLOW.slice(1).map((s,i)=>[s,dt(s),!rej&&idx>=i+1])];
+  return `<ul class="eg-tl">${steps.map((s,i)=>{const cur=!rej&&i>=2&&FLOW[i-1]===r.status&&r.status!=='Resolved';return `<li class="${s[2]?'d':''} ${cur?'c':''}"><b>${s[2]?'\u2713':cur?'\u25cf':'\u25cb'}</b> ${esc(s[0])}<span class="eg-mu"> ${esc(s[1])}${cur?' Current':''}</span></li>`}).join('')}${rej?'<li class="c"><b>\u2715</b> Rejected</li>':''}</ul>`;
+}
+async function loadReports(){
+  const box=$('egReports');box.innerHTML='<p class="eg-mu">Loading reports...</p>';
+  try{
+    const q=new URLSearchParams();if(S.statusF)q.set('status',S.statusF);if(S.mine)q.set('mine','1');
+    const {reports:rs}=await api('/api/community-reports?'+q);
+    let off='';
+    if(S.officer!==false){try{const o=await api('/api/admin/community-reports');S.officer=true;
+      off=`<div class="eg-card"><h3>Officer queue</h3><div class="eg-scroll"><table class="eg-tbl"><tr><th>Reference</th><th>Issue</th><th>Category</th><th>Date</th><th>Status</th><th>Action</th></tr>${o.reports.map(r=>`<tr><td>${esc(r.reference)}</td><td>${esc(r.title)}</td><td>${esc(r.category)}</td><td>${fmt(r.createdAt)}</td><td>${badge(r.status)}</td>
+        <td><select class="eg-in" id="st${r.id}">${STATUSES.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select> <button class="eg-btn" data-upd="${r.id}">Update</button></td></tr>`).join('')}</table></div></div>`;
+    }catch(e){if(e.message!=='auth')S.officer=false}}
+    box.innerHTML=`${off}<div class="eg-row"><select id="egSf" class="eg-in" style="width:auto"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===S.statusF?'selected':''}>${s}</option>`).join('')}</select>
+      <label class="eg-chk"><input type="checkbox" id="egMine" ${S.mine?'checked':''}> My reports</label></div>
+      <div class="eg-grid">${rs.length?rs.map(r=>`<div class="eg-card"><div class="eg-row"><h3>${esc(r.title)}</h3>${badge(r.status)}</div>
+      <p class="eg-mu">${esc(r.category)} · ${esc(r.location||'')} · ${esc(r.ward)}</p><p class="eg-mu"><code>${esc(r.reference)}</code>${r.demo?' · Demo data':''}</p>
+      <div class="eg-thumbs">${r.photos.filter(p=>/^\/uploads\/reports\//.test(p)).map(p=>`<img class="eg-ph" alt="Photo for ${esc(r.title)}" loading="lazy" src="${esc(p)}">`).join('')}</div>
+      <p>\u2764\ufe0f ${r.supporters} resident${r.supporters===1?'':'s'} support this issue</p>
+      <div class="eg-row"><button class="eg-btn ${r.supportedByMe?'pri':''}" data-sup="${r.id}">${r.supportedByMe?'Supported \u2713':'Support'}</button><button class="eg-btn" data-det="${r.id}" data-ref="${esc(r.reference)}">Details</button><button class="eg-btn" data-disc="${esc(r.reference)}" data-t="${esc(r.title)}">Discuss in Forum</button></div>
+      <div id="det${r.id}">${S.open===r.id&&S.detail?timeline(r,S.detail):''}</div></div>`).join(''):'<div class="eg-card"><p class="eg-mu">No reports found.</p></div>'}</div>`;
+  }catch(e){box.innerHTML='<div class="eg-card"><p class="eg-mu">Could not load reports.</p></div>'}
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click',async e=>{
+  const t=e.target.closest('button,label');if(!t)return;const d=t.dataset||{};
+  try{
+  if(d.eg)return setView(d.eg);
+  if(d.go)return setView(d.go);
+  if(d.new){S.received=null;return drawForm()}
+  if(d.gv){S.openC=+d.gv;return loadConsults()}
+  if(d.cancel){S.openC=null;return loadConsults()}
+  if(d.sv){const txt=$('egView'+d.sv).value.trim();if(txt.length<5)return toast('Please write a little more','error');
+    await api(`/api/consultations/${d.sv}/views`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})});S.openC=null;toast('Your view was submitted','success');return loadConsults()}
+  if(d.rsvp){await api(`/api/consultations/${d.rsvp}/rsvp`,{method:'POST'});toast('RSVP recorded','success');return loadConsults()}
+  if(d.geo){if(!navigator.geolocation)return toast('Location not available on this device','error');
+    return navigator.geolocation.getCurrentPosition(p=>{keep();S.prefill.location=`GPS ${p.coords.latitude.toFixed(5)}, ${p.coords.longitude.toFixed(5)}`;drawForm()},()=>toast('Could not get your location','error'))}
+  if(d.rm){keep();S.imgs.splice(+d.rm,1);return drawForm()}
+  if(d.sup){const r=await api(`/api/community-reports/${d.sup}/support`,{method:'POST'});return loadReports()}
+  if(d.det){const id=+d.det;if(S.open===id){S.open=null;return loadReports()}const j=await api('/api/community-reports/'+d.ref);S.open=id;S.detail=j.events;return loadReports()}
+  if(d.upd){await api(`/api/community-reports/${d.upd}/status`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('st'+d.upd).value})});toast('Status updated','success');return loadReports()}
+  if(d.disc){setView('forum');const ta=$('forumPostText');if(ta){ta.value=`Re: ${d.disc} \u2013 ${d.t}\n`;ta.focus()}return}
+  if(d.rep){keep();setView('report');return}
+  }catch(err){if(err.message!=='auth')toast(err.message,'error')}
+});
+document.addEventListener('change',e=>{
+  if(e.target.id==='egFiles'||e.target.id==='egCam'){keep();addFiles(e.target.files);e.target.value=''}
+  if(e.target.id==='egSf'){S.statusF=e.target.value;loadReports()}
+  if(e.target.id==='egMine'){S.mine=e.target.checked;loadReports()}
+});
+document.addEventListener('submit',e=>{if(e.target.id==='egForm'){e.preventDefault();submitReport()}});
+
+/* Forum -> Report link, added to rendered posts without touching forum code */
+const fp=$('forumPosts');
+if(fp)new MutationObserver(()=>{fp.querySelectorAll('.forum-post:not([data-egr])').forEach(p=>{p.dataset.egr=1;
+  const b=document.createElement('button');b.type='button';b.className='eg-btn eg-small';b.textContent='Report this issue';
+  b.addEventListener('click',()=>{const tx=(p.querySelector('.forum-post-text')||{}).textContent||'';
+    S.prefill={title:tx.trim().slice(0,80),description:tx.trim(),category:/water/i.test(tx)?'Water':/road|drain/i.test(tx)?'Roads & Transport':/waste|garbage/i.test(tx)?'Waste Management':'Other'};setView('report')});
+  p.appendChild(b)})}).observe(fp,{childList:true});
+setView('forum');
+})();
+</script>
 </body>
 </html>

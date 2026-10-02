@@ -39,6 +39,7 @@ async function startServer({
     await ensurePhase2Migrations();    // Phase 2: add ward_id columns, backfill existing rows, cache NGOLIBA_WARD_ID
     await ensureRBACFoundation();      // Phase 4A.1: add role + admin-scope columns to users, default VOTER (foundation only, not enforced)
     await ensureSuperAdminBootstrap();  // Phase 4A.2: one-time VOTER->SUPER_ADMIN promotion via SUPER_ADMIN_PHONE, idempotent
+    await require('../routes/community-reports').ensureCommunityReportsTables(); // Engage: additive tables + demo seed
     await ensureNoticesTable();        // Phase 3B Polish: moved after ensurePhase2Migrations() so the
                                         // notices.ward_id column and NGOLIBA_WARD_ID already exist before
                                         // this function's seed INSERT runs (was throwing “column ward_id

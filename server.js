@@ -6,6 +6,7 @@ const analyticsRouter = require('./routes/analytics');
 const candidatesRouter = require('./routes/candidates'); // Phase 4B.2B
 const noticesRouter = require('./routes/notices'); // Phase 4B.2C
 const forumRouter = require('./routes/forum'); // Phase 4B.2D
+const communityReportsRouter = require('./routes/community-reports'); // Engage: reports + consultations (additive)
 const authRouter = require('./routes/auth'); // Phase 4B.6
 const administratorsRouter = require('./routes/administrators'); // Phase 4B.6
 const geographyRouter = require('./routes/geography'); // Phase 4B.11
@@ -704,6 +705,7 @@ app.use(analyticsRouter);
 app.use(candidatesRouter); // Phase 4B.2B
 app.use(noticesRouter); // Phase 4B.2C
 app.use(forumRouter); // Phase 4B.2D
+app.use(communityReportsRouter); // Engage: reports + consultations (additive)
 app.use(authRouter); // Phase 4B.6
 app.use(administratorsRouter); // Phase 4B.6
 app.use(geographyRouter); // Phase 4B.11
