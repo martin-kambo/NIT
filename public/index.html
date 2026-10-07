@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>InfoTrack · Community Platform</title>
+<title>eTaifa Link · Community Platform</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -2393,7 +2393,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="logo-block">
         <div class="logo-mark">🗳️</div>
         <div>
-          <div class="logo-text">InfoTrack</div>
+          <div class="logo-text">eTaifa Link</div>
           <div class="logo-sub" id="logoWardSub">Community Platform</div>
         </div>
       </div>
@@ -2498,7 +2498,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
             <div class="anim-item" style="--i:0">
               <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.25rem;">
                 <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--forest-light),var(--emerald));display:flex;align-items:center;justify-content:center;font-size:1rem;">&#128611;</div>
-                <div style="font-family:'Syne',sans-serif;font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.18em;">Ngoliba InfoTrack</div>
+                <div style="font-family:'Syne',sans-serif;font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:none;letter-spacing:0.18em;">eTaifa Link</div>
               </div>
             </div>
             <div class="anim-item" style="--i:1">
@@ -2584,7 +2584,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
             <!-- Left overlay: shown on Login — prompt to Register -->
             <div class="auth-overlay-panel auth-overlay-left">
               <div class="overlay-logo">&#128611;</div>
-              <div class="overlay-title">New to<br><span class="gold">Ngoliba</span><br>InfoTrack?</div>
+              <div class="overlay-title">New to<br><span class="gold">eTaifa Link</span>?</div>
               <p class="overlay-sub">Register in 60 seconds and join ward residents shaping the future through verified voting.</p>
               <div class="overlay-candidate-strip" id="overlayCandStrip"></div>
               <div class="overlay-stats">
@@ -3243,7 +3243,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         <div class="mpesa-logo-sub">Preview Mode · Not a real payment</div>
       </div>
       <div class="mpesa-amount-display">KES 10</div>
-      <div class="mpesa-amount-label">Per Vote · Ngoliba InfoTrack</div>
+      <div class="mpesa-amount-label">Per Vote · eTaifa Link</div>
     </div>
     <div class="mpesa-body">
       <div class="mpesa-candidate-row">
@@ -3380,7 +3380,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-// NGOLIBA INFOTRACK v4.0 — FULL UNIFIED SCRIPT
+// eTaifa Link v4.0 — FULL UNIFIED SCRIPT
 // Features: DB Layer · Daraja M-Pesa · Analytics · Gamification
 //           Community Forum · Promise Tracker · AI Insights · PWA
 // Zero duplicate functions. All buttons wired.
@@ -4246,7 +4246,7 @@ function updateHeaderAvatar(){
   if (profSub) profSub.textContent = `${wardLabel} · Voter`;
 
   // Update page title to reflect the actual ward
-  document.title = `${wardLabel} InfoTrack`;
+  document.title = `${wardLabel} eTaifa Link`;
 }
 function updateHeaderBadge(){ const b=document.getElementById("headerBadge"); const badge=getUserVoterBadge(currentUser?.phone); if(badge){b.classList.remove("hidden");b.innerText=badge==="1st"?"🥇":badge==="2nd"?"🥈":"🥉";b.style.background={"1st":"#e9c46a","2nd":"#9ca3af","3rd":"#cd7f32"}[badge]||"#666";}else b.classList.add("hidden"); }
 
@@ -5988,7 +5988,7 @@ window.renderLeaderboardTab = async function(){
 
 console.log('✅ FINAL FIX: Leaderboard & Forum ready!');
 
-console.log("%c\n╔══════════════════════════════════════════╗\n║  NGOLIBA INFOTRACK v4.0               ║\n║  ✅ DB Layer + Daraja M-Pesa           ║\n║  ✅ Analytics + AI Insights            ║\n║  ✅ Gamification + Leaderboard         ║\n║  ✅ Community Forum                    ║\n║  ✅ Promise Tracker                    ║\n║  ✅ Live Ticker + PWA Ready            ║\n╚══════════════════════════════════════════╝\n","color:#40c27a;font-family:monospace;");
+console.log("%c\n╔══════════════════════════════════════════╗\n║  eTaifa Link v4.0                     ║\n║  ✅ DB Layer + Daraja M-Pesa           ║\n║  ✅ Analytics + AI Insights            ║\n║  ✅ Gamification + Leaderboard         ║\n║  ✅ Community Forum                    ║\n║  ✅ Promise Tracker                    ║\n║  ✅ Live Ticker + PWA Ready            ║\n╚══════════════════════════════════════════╝\n","color:#40c27a;font-family:monospace;");
 </script>
 <!-- ═══════════════════════════════════════════════════════════
      NGOLIBA UX BOOST v2 — fixes + richer auth animation
