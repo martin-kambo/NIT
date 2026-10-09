@@ -300,17 +300,30 @@ router.post('/api/consultations/:id/rsvp', async (req, res) => {
 // Scope comes from RBAC.resolveReadScope(req.user): WARD_ADMIN -> own admin ward, CONSTITUENCY_ADMIN -> own
 // constituency, COUNTY_ADMIN -> own county, SUPER_ADMIN -> everything. A VOTER/MODERATOR never reaches here
 // (requireMinRole). Residents have no read path to other residents' submissions.
+// Officer-facing consultation row. Dates are plain 'YYYY-MM-DD' strings (the column is a DATE; no timezone
+// shifting), counts are aggregates only, and no resident identity is ever selected.
+//   state: 'open'   = stored status Open and closing day not passed (residents can submit)
+//          'ended'  = stored status still Open but the closing day has passed (extend the date to reopen)
+//          'closed' = explicitly closed by an officer (final; cannot be edited or reopened)
+const adminConsultSql = (extraSelect) => `SELECT c.id, c.ward_id, c.title, c.description, c.venue, c.is_demo, w.name AS ward_name,
+    to_char(c.opens_on, 'YYYY-MM-DD') AS opens_on_s, to_char(c.closes_on, 'YYYY-MM-DD') AS closes_on_s,
+    (COALESCE(c.status, 'Open') = 'Open') AS stored_open, ${CONSULT_OPEN_SQL} AS is_open,
+    (SELECT COUNT(*) FROM consultation_views v WHERE v.consultation_id = c.id) AS views,
+    (SELECT COUNT(*) FROM consultation_rsvps r WHERE r.consultation_id = c.id) AS rsvps${extraSelect ? ', ' + extraSelect : ''}
+  FROM consultations c ${CONSULT_GEO_JOIN}`;
+function adminConsultation(c) {
+  return { id: c.id, wardId: c.ward_id, ward: c.ward_name || null, title: c.title, description: c.description, venue: c.venue,
+    opensOn: c.opens_on_s, closesOn: c.closes_on_s, status: c.is_open ? 'Open' : 'Closed',
+    state: c.is_open ? 'open' : (c.stored_open ? 'ended' : 'closed'), demo: !!c.is_demo,
+    views: parseInt(c.views) || 0, rsvps: parseInt(c.rsvps) || 0,
+    canEdit: !!c.stored_open && !c.is_demo, canClose: !!c.stored_open };
+}
 router.get('/api/admin/consultations', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
   try {
     const f = RBAC.buildScopeFilter(RBAC.resolveReadScope(req.user), CONSULT_SCOPE_COLS, []);
-    const { rows } = await pool.query(`SELECT c.id, c.title, c.opens_on, c.closes_on, c.venue, c.is_demo, w.name AS ward_name,
-        ${CONSULT_OPEN_SQL} AS is_open,
-        (SELECT COUNT(*) FROM consultation_views v WHERE v.consultation_id = c.id) AS views,
-        (SELECT COUNT(*) FROM consultation_rsvps r WHERE r.consultation_id = c.id) AS rsvps
-      FROM consultations c ${CONSULT_GEO_JOIN} ${f.clause ? 'WHERE ' + f.clause : ''}
+    const { rows } = await pool.query(`${adminConsultSql()} ${f.clause ? 'WHERE ' + f.clause : ''}
       ORDER BY c.closes_on DESC NULLS LAST, c.id DESC LIMIT 200`, f.params);
-    res.json({ success: true, consultations: rows.map((c) => ({ id: c.id, title: c.title, ward: c.ward_name || null, opensOn: c.opens_on, closesOn: c.closes_on,
-      venue: c.venue, status: c.is_open ? 'Open' : 'Closed', demo: !!c.is_demo, views: parseInt(c.views) || 0, rsvps: parseInt(c.rsvps) || 0 })) });
+    res.json({ success: true, consultations: rows.map(adminConsultation) });
   } catch (e) { console.error('GET /api/admin/consultations', e.message); res.status(500).json({ success: false, error: 'Failed to load consultations' }); }
 });
 
@@ -333,6 +346,148 @@ router.get('/api/admin/consultations/:id/views', RBAC.requireMinRole(RBAC.ROLES.
     res.json({ success: true, consultation: { id, title: c.rows[0].title, ward: c.rows[0].ward_name || null, status: c.rows[0].is_open ? 'Open' : 'Closed' },
       total: parseInt(tot.rows[0].n) || 0, limit, offset, views: rows.rows.map((v) => ({ id: v.id, text: v.body, createdAt: v.created_at })) });
   } catch (e) { console.error('GET /api/admin/consultations/:id/views', e.message); res.status(500).json({ success: false, error: 'Failed to load submissions' }); }
+});
+
+// ---------- consultation management: create / edit / close (WARD_ADMIN and above, geographically scoped) ----------
+// Authority is ALWAYS derived server-side: requireMinRole reads the caller's role from the users table (via the
+// session middleware), and the scope below comes from the same row (admin_ward_id / admin_constituency_id /
+// admin_county_id). Nothing about role or geography in the request body is trusted. A ward is only accepted if the
+// database confirms it exists AND lies inside the caller's scope; edit/close load the consultation's real ward from
+// the database. The schema is unchanged: openness stays "stored status = Open AND closes_on >= today (Nairobi)".
+//   - Close sets status = 'Closed' (explicit, final). There is no reopen.
+//   - Edit: title / description / venue / opening date / closing date. The ward can never be changed. A consultation
+//     that was explicitly closed, or that is demo data, cannot be edited. Views and RSVPs are never touched.
+//   - Dates are date-only (the column is DATE) and the closing day is inclusive. A future opening date is refused
+//     because the application has no "upcoming" state (opens_on does not affect whether residents can submit).
+const TODAY_SQL = `SELECT to_char((NOW() AT TIME ZONE 'Africa/Nairobi')::date, 'YYYY-MM-DD') AS today`;
+const WARD_SCOPE_COLS = { ward: 'w.id', constituency: 'w.constituency_id', county: 'con.county_id' };
+
+function validDate(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return y >= 2000 && y <= 2100 && t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+}
+function textField(v, label, min, max, required) {
+  if (v != null && typeof v !== 'string') return { error: `${label} must be text` };
+  const t = String(v == null ? '' : v).replace(/<[^>]*>/g, '').trim();
+  if (!t.length && !required) return { value: null };
+  if (t.length < min) return { error: `${label} must be at least ${min} characters` };
+  if (t.length > max) return { error: `${label} must be ${max} characters or fewer` };
+  return { value: t };
+}
+// Validates a create (current = null) or a partial edit (current = { opens, closes } as 'YYYY-MM-DD' or null).
+// Returns { error } or { fields } where fields only contains values that should be written.
+function readConsultationFields(b, today, current) {
+  const f = {}, has = (k) => b[k] !== undefined;
+  if (!current || has('title')) { const r = textField(b.title, 'Title', 5, 160, true); if (r.error) return r; f.title = r.value; }
+  if (!current || has('description')) { const r = textField(b.description, 'Description', 10, 2000, true); if (r.error) return r; f.description = r.value; }
+  if (has('venue')) { const r = textField(b.venue, 'Venue', 1, 160, false); if (r.error) return r; f.venue = r.value; }
+  if (has('opensOn') && b.opensOn !== null && b.opensOn !== '') {
+    if (!validDate(b.opensOn)) return { error: 'Opening date is not a valid date' };
+    if (!current || b.opensOn !== current.opens) {
+      if (b.opensOn > today) return { error: 'Opening date cannot be in the future. Scheduled (upcoming) consultations are not supported yet.' };
+      f.opensOn = b.opensOn;
+    }
+  } else if (!current) f.opensOn = today;
+  else if (has('opensOn')) return { error: 'Opening date cannot be cleared' };
+  if (has('closesOn') && b.closesOn !== null && b.closesOn !== '') {
+    if (!validDate(b.closesOn)) return { error: 'Closing date is not a valid date' };
+    if (!current || b.closesOn !== current.closes) {
+      if (b.closesOn < today) return { error: 'Closing date cannot be in the past. To end a consultation early, use Close.' };
+      f.closesOn = b.closesOn;
+    }
+  } else if (!current) return { error: 'Closing date is required' };
+  else if (has('closesOn')) return { error: 'Closing date cannot be cleared' };
+  const o = f.opensOn || (current && current.opens), c = f.closesOn || (current && current.closes);
+  if ((f.opensOn || f.closesOn) && o && c && c < o) return { error: 'Closing date must be on or after the opening date' };
+  return { fields: f };
+}
+const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) ? req.body : {};
+const logMgmt = (action, req, id, wardId) => console.log(`[consultations] ${action} id=${id} ward=${wardId} by user=${req.user && req.user.id} role=${req.user && req.user.role}`);
+
+// Loads the target consultation (with its real ward and aggregate counts) and enforces scope BEFORE anything is
+// changed. 400 bad id, 404 no such consultation, 403 outside the caller's scope (no consultation details leaked).
+async function managedConsultation(req, res) {
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ success: false, error: 'Invalid consultation id' }); return null; }
+  const f = RBAC.buildScopeFilter(RBAC.resolveReadScope(req.user), CONSULT_SCOPE_COLS, [id]);
+  const { rows } = await pool.query(`${adminConsultSql(`(${f.clause || 'true'}) AS in_scope`)} WHERE c.id = $1`, f.params);
+  if (!rows.length) { res.status(404).json({ success: false, error: 'Consultation not found' }); return null; }
+  if (!rows[0].in_scope) { res.status(403).json({ success: false, error: 'Not authorised for this consultation' }); return null; }
+  return rows[0];
+}
+const fetchAdminConsultation = async (id) => adminConsultation((await pool.query(`${adminConsultSql()} WHERE c.id = $1`, [id])).rows[0]);
+
+// Wards the caller may create consultations for (drives the ward picker; the server re-checks on create).
+router.get('/api/admin/consultation-wards', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
+  try {
+    const f = RBAC.buildScopeFilter(RBAC.resolveReadScope(req.user), WARD_SCOPE_COLS, []);
+    const { rows } = await pool.query(`SELECT w.id, w.name, con.name AS constituency FROM wards w
+      LEFT JOIN constituencies con ON con.id = w.constituency_id ${f.clause ? 'WHERE ' + f.clause : ''} ORDER BY con.name, w.name LIMIT 1500`, f.params);
+    res.json({ success: true, wards: rows.map((w) => ({ id: w.id, name: w.name, constituency: w.constituency || null })) });
+  } catch (e) { console.error('GET /api/admin/consultation-wards', e.message); res.status(500).json({ success: false, error: 'Failed to load wards' }); }
+});
+
+router.post('/api/admin/consultations', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
+  try {
+    const b = bodyOf(req);
+    const today = (await pool.query(TODAY_SQL)).rows[0].today;
+    const v = readConsultationFields(b, today, null);
+    if (v.error) return res.status(400).json({ success: false, error: v.error });
+    const scope = RBAC.resolveReadScope(req.user);
+    let wardId = b.wardId == null || b.wardId === '' ? null : parseId(b.wardId);
+    if (b.wardId != null && b.wardId !== '' && !wardId) return res.status(400).json({ success: false, error: 'Choose a valid ward' });
+    if (!wardId && scope.level === 'ward') {                      // a ward admin acts on their own assigned ward by default
+      if (scope.id == null) return res.status(403).json({ success: false, error: 'No ward is assigned to your account' });
+      wardId = scope.id;
+    }
+    if (!wardId) return res.status(400).json({ success: false, error: 'Choose a ward' });
+    const wf = RBAC.buildScopeFilter(scope, WARD_SCOPE_COLS, [wardId]);
+    const w = await pool.query(`SELECT w.id, (${wf.clause || 'true'}) AS in_scope FROM wards w
+      LEFT JOIN constituencies con ON con.id = w.constituency_id WHERE w.id = $1`, wf.params);
+    if (!w.rows.length) return res.status(400).json({ success: false, error: 'Choose a valid ward' });
+    if (!w.rows[0].in_scope) return res.status(403).json({ success: false, error: 'You cannot manage consultations for that ward' });
+    const x = v.fields;
+    const ins = await pool.query(`INSERT INTO consultations (ward_id, title, description, opens_on, closes_on, venue, status, is_demo)
+      VALUES ($1,$2,$3,$4,$5,$6,'Open',false) RETURNING id`, [wardId, x.title, x.description, x.opensOn, x.closesOn, x.venue || null]);
+    logMgmt('create', req, ins.rows[0].id, wardId);
+    res.status(201).json({ success: true, consultation: await fetchAdminConsultation(ins.rows[0].id) });
+  } catch (e) { console.error('POST /api/admin/consultations', e.message); res.status(500).json({ success: false, error: 'Failed to create consultation' }); }
+});
+
+router.patch('/api/admin/consultations/:id', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
+  try {
+    const t = await managedConsultation(req, res); if (!t) return;
+    const b = bodyOf(req);
+    if (!t.stored_open) return res.status(409).json({ success: false, error: 'This consultation has been closed and can no longer be edited' });
+    if (t.is_demo) return res.status(409).json({ success: false, error: 'Demo consultations cannot be edited. You can close it instead.' });
+    if (b.wardId != null && b.wardId !== '' && parseId(b.wardId) !== t.ward_id) return res.status(400).json({ success: false, error: "A consultation's ward cannot be changed" });
+    const today = (await pool.query(TODAY_SQL)).rows[0].today;
+    const v = readConsultationFields(b, today, { opens: t.opens_on_s, closes: t.closes_on_s });
+    if (v.error) return res.status(400).json({ success: false, error: v.error });
+    const COLS = { title: 'title', description: 'description', venue: 'venue', opensOn: 'opens_on', closesOn: 'closes_on' };   // fixed whitelist
+    const keys = Object.keys(v.fields);
+    if (!keys.length) return res.status(400).json({ success: false, error: 'Nothing to update' });
+    const params = keys.map((k) => v.fields[k]);
+    const set = keys.map((k, i) => `${COLS[k]} = $${i + 1}`).join(', ');
+    params.push(t.id);
+    // The WHERE re-checks "still open and not demo" so a concurrent close cannot be overwritten.
+    const upd = await pool.query(`UPDATE consultations SET ${set} WHERE id = $${params.length} AND COALESCE(status, 'Open') = 'Open' AND is_demo IS NOT TRUE RETURNING id`, params);
+    if (!upd.rowCount) return res.status(409).json({ success: false, error: 'This consultation was closed or changed by someone else. Please refresh.' });
+    logMgmt('edit', req, t.id, t.ward_id);
+    res.json({ success: true, consultation: await fetchAdminConsultation(t.id) });
+  } catch (e) { console.error('PATCH /api/admin/consultations/:id', e.message); res.status(500).json({ success: false, error: 'Failed to update consultation' }); }
+});
+
+// Idempotent: closing an already-closed consultation returns 200 with alreadyClosed:true and changes nothing.
+router.post('/api/admin/consultations/:id/close', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
+  try {
+    const t = await managedConsultation(req, res); if (!t) return;
+    const upd = await pool.query(`UPDATE consultations SET status = 'Closed' WHERE id = $1 AND COALESCE(status, 'Open') = 'Open' RETURNING id`, [t.id]);
+    if (upd.rowCount) logMgmt('close', req, t.id, t.ward_id);
+    res.json({ success: true, alreadyClosed: !upd.rowCount, consultation: await fetchAdminConsultation(t.id) });
+  } catch (e) { console.error('POST /api/admin/consultations/:id/close', e.message); res.status(500).json({ success: false, error: 'Failed to close consultation' }); }
 });
 
 // ---------- My Ward (resident overview, read-only) ----------

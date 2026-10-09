@@ -7475,7 +7475,17 @@ window.renderFaceoff = window.updateFaceoff;
 .eg-wrow .eg-mu{display:block;overflow-wrap:anywhere}.eg-wrow .eg-ph{width:56px;height:56px;flex:0 0 auto}
 .eg-wi{padding:.55rem 0;border-bottom:1px solid var(--sand)}.eg-wi .eg-wt{display:block;font-weight:700;font-size:.85rem;overflow-wrap:anywhere}
 .eg-subm{margin:.5rem 0 0;padding:.5rem .7rem;background:var(--light-gray);border-radius:.6rem;font-size:.8rem}.eg-subm ul{margin:.4rem 0 0;padding-left:1.1rem}.eg-subm li{margin:.3rem 0;overflow-wrap:anywhere}
+/* Consultation management (Phase 4B.31F) */
+.eg-cm-head{display:flex;justify-content:space-between;align-items:flex-start;gap:.6rem;flex-wrap:wrap}.eg-cm-head h2{margin:0}
+.eg-cm-item{padding:.7rem 0;border-bottom:1px solid var(--sand)}.eg-cm-item:last-child{border-bottom:0}
+.eg-cm-item .eg-wt{display:block;font-weight:700;font-size:.9rem;overflow-wrap:anywhere}.eg-cm-item p{margin:.25rem 0;overflow-wrap:anywhere}
+.eg-cm-form{background:var(--light-gray);border-radius:.8rem;padding:.1rem .9rem .9rem;margin:.7rem 0}
+.eg-cm-dates{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.eg-cm-warn{margin:.5rem 0;padding:.6rem .8rem;background:#fff0cc;border-radius:.6rem;font-size:.8rem;color:#5c3700}.eg-cm-warn p{margin:0 0 .3rem}
+.eg-cm-err{margin:.6rem 0 0;padding:.5rem .7rem;background:#fbdcd9;border-radius:.6rem;font-size:.8rem;color:#8f1d16}
+.eg-Ended{background:#fff0cc;color:#8a5200}
 @media(max-width:600px){.eg-grid{grid-template-columns:1fr}}
+@media(max-width:480px){.eg-cm-dates{grid-template-columns:1fr}}
 </style>
 <script>
 /* Engage extension: My Ward, Consultations, Report an Issue, Community Reports (additive; Forum code untouched) */
@@ -7485,14 +7495,14 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const CATS=['Roads & Transport','Waste Management','Water','Street Lighting','Public Safety','Unlicensed Business','Other'];
 const FLOW=['Reported','Under Review','Assigned','In Progress','Resolved'];
 const STATUSES=[...FLOW,'Rejected'];
-const S={view:'forum',imgs:[],openC:null,mine:false,statusF:'',officer:null,received:null,open:null,prefill:null,subm:null,submData:null};
+const S={view:'forum',imgs:[],openC:null,mine:false,statusF:'',officer:null,received:null,open:null,prefill:null,subm:null,submData:null,cm:{on:null,list:[],wards:null,form:null,confirm:null,busy:false,loadErr:false}};
 const fmt=d=>d?new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'';
 const toast=(m,t)=>typeof showToast==='function'?showToast(m,t||'info'):alert(m);
 async function api(url,opt){
   const r=await fetch(url,Object.assign({credentials:'same-origin'},opt||{}));
   let j={};try{j=await r.json()}catch(e){}
   if(r.status===401){toast('Please log in to continue','error');throw new Error('auth')}
-  if(!r.ok||j.success===false)throw new Error(j.error||'Request failed');
+  if(!r.ok||j.success===false){const er=new Error(j.error||'Request failed');er.status=r.status;throw er}
   return j;
 }
 const badge=s=>`<span class="eg-badge eg-${esc(s).replace(/\s/g,'')}">${esc(s)}</span>`;
@@ -7511,18 +7521,121 @@ function setView(v){
 function submissions(d){
   return `<div class="eg-subm">${d.views.length?`<p class="eg-mu">Showing ${d.views.length} of ${d.total} submission${d.total===1?'':'s'}, newest first. Submitter identities are not shown.</p><ul>${d.views.map(v=>`<li>${esc(v.text)} <span class="eg-mu">${fmt(v.createdAt)}</span></li>`).join('')}</ul>`:'<p class="eg-mu">No submissions yet.</p>'}</div>`;
 }
+
+/* ---------- Consultation management (Phase 4B.31F) ----------
+   Officer-only panel at the top of the Consultations pane. This is a convenience layer only: every
+   /api/admin/consultations* request is re-authorised on the server from the session (role + assigned geography,
+   target loaded from the database), and nothing here sends or relies on a role or on a ward the server has not
+   checked. A resident or logged-out visitor gets 403 from the list probe and sees no panel. */
+const nbToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Nairobi'});
+const pd=s=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(s||''))return'';const[y,m,d]=s.split('-').map(Number);return new Date(Date.UTC(y,m-1,d)).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})};
+const CM_STATE={open:'Open',ended:'Ended',closed:'Closed'};
+const cmMsg=e=>e.status===403&&e.message==='Forbidden'?'You do not have permission to manage consultations.':e.message;
+const plural=(n,w)=>n+' '+w+(n===1?'':'s');
+async function cmLoad(){
+  const m=S.cm;
+  try{const o=await api('/api/admin/consultations');m.on=true;m.list=o.consultations;m.loadErr=false}
+  catch(e){
+    if(e.status===403||e.message==='auth'){m.on=false;m.list=[];m.form=null;m.confirm=null;m.loadErr=false}   /* not an officer (or logged out): no panel */
+    else{m.loadErr=true}                                                                              /* server/network problem: say so, offer retry */
+  }
+}
+function cmItem(x){
+  const m=S.cm,hid=m.confirm===x.id;
+  const note=x.state==='ended'?'Closing date has passed. Edit the closing date to reopen it, or close it for good.'
+    :x.state==='closed'?'Closed. Views and RSVPs are kept for the record.'
+    :(!x.canEdit&&x.demo)?'Demo consultation: it can be closed but not edited.':'';
+  return `<div class="eg-cm-item"><div class="eg-row">${badge(CM_STATE[x.state]||'Closed')}<span class="eg-mu">${esc(x.ward||('Ward '+x.wardId))}${x.demo?' · Demo data':''}</span></div>
+    <span class="eg-wt">${esc(x.title)}</span>
+    <p class="eg-mu">${x.opensOn?'Opens '+pd(x.opensOn)+' · ':''}${x.closesOn?'Closes '+pd(x.closesOn):'No closing date'}${x.venue?' · '+esc(x.venue):''}</p>
+    <p class="eg-mu">${plural(x.views,'view')} · ${plural(x.rsvps,'RSVP')}</p>${note?`<p class="eg-mu">${esc(note)}</p>`:''}
+    <div class="eg-row"><button type="button" class="eg-btn" data-subm="${x.id}">${S.subm===x.id?'Hide':'View'} submissions (${x.views})</button>${x.canEdit?`<button type="button" class="eg-btn" data-cmedit="${x.id}">Edit</button>`:''}${x.canClose&&!hid?`<button type="button" class="eg-btn" data-cmclose="${x.id}">Close</button>`:''}</div>
+    ${hid?`<div class="eg-cm-warn" role="alertdialog" aria-label="Confirm close"><p>Close “${esc(x.title)}”? Residents will no longer be able to give views or RSVP. Existing views and RSVPs are kept. This cannot be undone.</p><div class="eg-row"><button type="button" class="eg-btn pri" data-cmclose2="${x.id}" ${m.busy?'disabled':''}>${m.busy?'Closing...':'Yes, close it'}</button><button type="button" class="eg-btn" data-cmkeep="1" ${m.busy?'disabled':''}>Keep it open</button></div></div>`:''}
+    ${S.subm===x.id&&S.submData?submissions(S.submData):''}</div>`;
+}
+function cmFormHtml(){
+  const m=S.cm,f=m.form;if(!f)return'';
+  const edit=!!f.id,w=m.wards||[],v=f.v,today=nbToday();
+  const wardPart=edit?`<p class="eg-mu">Ward: ${esc(f.ward||'')} (a consultation's ward cannot be changed)</p>`
+    :w.length>1?`<label for="egCmWard">Ward</label><select id="egCmWard" class="eg-in"><option value="">Choose a ward…</option>${w.map(x=>`<option value="${x.id}" ${String(x.id)===String(v.wardId)?'selected':''}>${esc(x.name)}${x.constituency?' ('+esc(x.constituency)+')':''}</option>`).join('')}</select>`
+    :w.length===1?`<p class="eg-mu">Ward: ${esc(w[0].name)}</p>`:'<p class="eg-cm-err">No ward is available to your account, so you cannot create a consultation.</p>';
+  return `<form class="eg-cm-form" id="egCmFormEl" novalidate><h3>${edit?'Edit consultation':'New consultation'}</h3>${f.err?`<p class="eg-cm-err" role="alert">${esc(f.err)}</p>`:''}${wardPart}
+    <label for="egCmTitle">Title</label><input id="egCmTitle" class="eg-in" maxlength="160" value="${esc(v.title)}">
+    <label for="egCmDesc">Details</label><textarea id="egCmDesc" class="eg-in" rows="4" maxlength="2000">${esc(v.description)}</textarea>
+    <label for="egCmVenue">Venue (optional)</label><input id="egCmVenue" class="eg-in" maxlength="160" value="${esc(v.venue)}">
+    <div class="eg-cm-dates"><div><label for="egCmOpen">Opens</label><input type="date" id="egCmOpen" class="eg-in" max="${today}" value="${esc(v.opensOn)}"></div>
+    <div><label for="egCmClose">Closes</label><input type="date" id="egCmClose" class="eg-in" min="${today}" value="${esc(v.closesOn)}"></div></div>
+    <p class="eg-mu">Dates are in Nairobi time. A consultation stays open until the end of its closing day.</p>
+    <div class="eg-row"><button type="submit" class="eg-btn pri" id="egCmSave" ${f.busy||(!edit&&!w.length)?'disabled':''}>${f.busy?'Saving...':edit?'Save changes':'Create consultation'}</button><button type="button" class="eg-btn" data-cmcancel="1" ${f.busy?'disabled':''}>Cancel</button></div></form>`;
+}
+function cmListHtml(){
+  const l=S.cm.list;
+  return l.length?l.map(cmItem).join(''):'<p class="eg-mu">No consultations in your area yet. Use “New consultation” to start one.</p>';
+}
+function drawManage(){
+  const box=$('egManage'),m=S.cm;if(!box)return;
+  if(m.on===false){box.innerHTML='';return}
+  if(m.loadErr){box.innerHTML='<div class="eg-card"><h3>Manage consultations</h3><p class="eg-mu">Could not load consultation management.</p><div class="eg-row"><button type="button" class="eg-btn" data-cmretry="1">Try again</button></div></div>';return}
+  box.innerHTML=`<div class="eg-card"><div class="eg-cm-head"><div><h2>Manage consultations</h2><p class="eg-mu">Consultations within your area. Residents see the consultations of their own ward.</p></div>${m.form?'':'<button type="button" class="eg-btn pri" data-cmnew="1">New consultation</button>'}</div>
+    <div id="egCmForm">${cmFormHtml()}</div><div id="egCmList">${cmListHtml()}</div></div>`;
+}
+function drawCmForm(){const el=$('egCmForm');if(el){el.innerHTML=cmFormHtml()}}
+function drawCmList(){const el=$('egCmList');if(el)el.innerHTML=cmListHtml()}
+function readCmForm(){   /* keep what the officer typed when the pane is redrawn or a save fails */
+  const f=S.cm.form;if(!f||!$('egCmFormEl'))return;const g=id=>$(id)?$(id).value:'';
+  f.v={wardId:$('egCmWard')?g('egCmWard'):f.v.wardId,title:g('egCmTitle').trim(),description:g('egCmDesc').trim(),venue:g('egCmVenue').trim(),opensOn:g('egCmOpen'),closesOn:g('egCmClose')};
+}
+async function cmNew(){
+  const m=S.cm;
+  if(!m.wards){const j=await api('/api/admin/consultation-wards');m.wards=j.wards}
+  m.confirm=null;m.form={id:null,ward:null,v:{wardId:'',title:'',description:'',venue:'',opensOn:nbToday(),closesOn:''},orig:null,err:'',busy:false};
+  drawManage();const t=$('egCmTitle');if(t)t.focus();
+}
+function cmEdit(id){
+  const x=S.cm.list.find(c=>c.id===id);if(!x)return;
+  const v={title:x.title||'',description:x.description||'',venue:x.venue||'',opensOn:x.opensOn||'',closesOn:x.closesOn||''};
+  S.cm.confirm=null;S.cm.form={id:x.id,ward:x.ward,v:Object.assign({wardId:''},v),orig:v,err:'',busy:false};
+  drawManage();const t=$('egCmTitle');if(t)t.focus();
+}
+async function cmSave(){
+  const m=S.cm,f=m.form;if(!f||f.busy)return;
+  readCmForm();f.err='';const v=f.v;let body;
+  if(f.id){
+    body={};['title','description','venue','opensOn','closesOn'].forEach(k=>{if(v[k]!==f.orig[k])body[k]=v[k]});   /* only what changed; the ward is never sent on edit */
+    if(!Object.keys(body).length){f.err='There are no changes to save.';return drawCmForm()}
+  }else{
+    const w=m.wards||[];const wardId=w.length===1?w[0].id:(v.wardId?+v.wardId:null);
+    if(!wardId){f.err='Choose a ward.';return drawCmForm()}
+    body={wardId,title:v.title,description:v.description,venue:v.venue,closesOn:v.closesOn};if(v.opensOn)body.opensOn=v.opensOn;
+  }
+  f.busy=true;drawCmForm();
+  try{
+    await api(f.id?`/api/admin/consultations/${f.id}`:'/api/admin/consultations',{method:f.id?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    m.form=null;toast(f.id?'Consultation updated':'Consultation created','success');return loadConsults();
+  }catch(e){
+    f.busy=false;if(e.message!=='auth')f.err=cmMsg(e);drawCmForm();
+    if(e.status===404||e.status===409){await cmLoad();drawCmList()}   /* it changed under us: show the current state behind the form */
+  }
+}
+async function cmClose(id){
+  const m=S.cm;if(m.busy)return;m.busy=true;drawCmList();
+  try{
+    const j=await api(`/api/admin/consultations/${id}/close`,{method:'POST'});
+    toast(j.alreadyClosed?'That consultation was already closed':'Consultation closed','success');
+  }catch(e){if(e.message!=='auth')toast(cmMsg(e),'error')}
+  m.busy=false;m.confirm=null;return loadConsults();
+}
+
 async function loadConsults(){
+  readCmForm();
   const box=$('egConsult');box.innerHTML='<p class="eg-mu">Loading consultations...</p>';
   try{
-    const {consultations:c}=await api('/api/consultations');
-    /* Officers (WARD_ADMIN and above, within their own scope) also get submission counts; residents get a 403 and see nothing extra. */
-    let adm=null;
-    if(S.officer!==false){try{const o=await api('/api/admin/consultations');S.officer=true;adm=new Map(o.consultations.map(x=>[x.id,x]))}catch(e){if(e.message!=='auth')S.officer=false}}
-    box.innerHTML=c.length?c.map(x=>{const a=adm&&adm.get(x.id);return `<div class="eg-card"><div class="eg-row">${badge(x.status==='Open'?'Open':'Closed')}<span class="eg-mu">${esc(x.ward)} · ${x.participants} participant${x.participants===1?'':'s'}${x.demo?' · Demo data':''}</span></div>
+    const [{consultations:c}]=await Promise.all([api('/api/consultations'),cmLoad()]);
+    box.innerHTML='<div id="egManage"></div>'+(c.length?c.map(x=>`<div class="eg-card"><div class="eg-row">${badge(x.status==='Open'?'Open':'Closed')}<span class="eg-mu">${esc(x.ward)} · ${x.participants} participant${x.participants===1?'':'s'}${x.demo?' · Demo data':''}</span></div>
       <h3>${esc(x.title)}</h3><p>${esc(x.description)}</p><p class="eg-mu">Opens ${fmt(x.opensOn)} · Closes ${fmt(x.closesOn)}${x.venue?' · '+esc(x.venue):''}</p>
       ${S.openC===x.id?`<textarea id="egView${x.id}" class="eg-in" rows="3" maxlength="1500" placeholder="Share your views..."></textarea><div class="eg-row"><button class="eg-btn pri" data-sv="${x.id}">Submit view</button><button class="eg-btn" data-cancel="1">Cancel</button></div>`
-      :`<div class="eg-row"><button class="eg-btn pri" data-gv="${x.id}" ${x.status!=='Open'?'disabled':''}>Give Your Views</button><button class="eg-btn" data-rsvp="${x.id}" ${x.rsvped||x.status!=='Open'?'disabled':''}>${x.rsvped?'RSVP’d ✓':'RSVP'}</button></div>`}
-      ${a?`<div class="eg-row"><button class="eg-btn" data-subm="${x.id}">${S.subm===x.id?'Hide':'View'} submissions (${a.views})</button><span class="eg-mu">${a.rsvps} RSVP${a.rsvps===1?'':'s'}</span></div>${S.subm===x.id&&S.submData?submissions(S.submData):''}`:''}</div>`}).join(''):'<div class="eg-card"><p class="eg-mu">No open consultations for your ward right now.</p></div>';
+      :`<div class="eg-row"><button class="eg-btn pri" data-gv="${x.id}" ${x.status!=='Open'?'disabled':''}>Give Your Views</button><button class="eg-btn" data-rsvp="${x.id}" ${x.rsvped||x.status!=='Open'?'disabled':''}>${x.rsvped?'RSVP’d ✓':'RSVP'}</button></div>`}</div>`).join(''):'<div class="eg-card"><p class="eg-mu">No open consultations for your ward right now.</p></div>');
+    drawManage();
   }catch(e){box.innerHTML='<div class="eg-card"><p class="eg-mu">Could not load consultations.</p></div>'}
 }
 
@@ -7644,7 +7757,14 @@ document.addEventListener('click',async e=>{
   if(d.wrep){const j=await api('/api/community-reports/'+d.ref);S.statusF='';S.mine=false;S.open=+d.wrep;S.detail=j.events;return setView('reports')}
   if(d.wgv){S.openC=+d.wgv;return setView('consult')}
   if(d.wnotice)return typeof switchSection==='function'?switchSection('community'):undefined;
-  if(d.subm){const id=+d.subm;if(S.subm===id){S.subm=null;S.submData=null;return loadConsults()}const j=await api(`/api/admin/consultations/${id}/views`);S.subm=id;S.submData=j;return loadConsults()}
+  if(d.subm){const id=+d.subm;if(S.subm===id){S.subm=null;S.submData=null;return drawCmList()}const j=await api(`/api/admin/consultations/${id}/views`);S.subm=id;S.submData=j;return drawCmList()}
+  if(d.cmnew)return cmNew();
+  if(d.cmedit)return cmEdit(+d.cmedit);
+  if(d.cmcancel){readCmForm();S.cm.form=null;return drawManage()}
+  if(d.cmclose){S.cm.confirm=+d.cmclose;return drawCmList()}
+  if(d.cmkeep){S.cm.confirm=null;return drawCmList()}
+  if(d.cmclose2)return cmClose(+d.cmclose2);
+  if(d.cmretry)return loadConsults();
   if(d.new){S.received=null;return drawForm()}
   if(d.gv){S.openC=+d.gv;return loadConsults()}
   if(d.cancel){S.openC=null;return loadConsults()}
@@ -7666,7 +7786,7 @@ document.addEventListener('change',e=>{
   if(e.target.id==='egSf'){S.statusF=e.target.value;loadReports()}
   if(e.target.id==='egMine'){S.mine=e.target.checked;loadReports()}
 });
-document.addEventListener('submit',e=>{if(e.target.id==='egForm'){e.preventDefault();submitReport()}});
+document.addEventListener('submit',e=>{if(e.target.id==='egForm'){e.preventDefault();submitReport()}if(e.target.id==='egCmFormEl'){e.preventDefault();cmSave()}});
 
 /* Forum -> Report link, added to rendered posts without touching forum code */
 const fp=$('forumPosts');
