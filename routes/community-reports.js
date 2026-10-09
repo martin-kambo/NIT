@@ -98,10 +98,28 @@ const clean = (s, max) => String(s || '').replace(/<[^>]*>/g, '').trim().slice(0
 const session = (req) => verifySession(req.headers.cookie || '');
 const isOfficer = (req) => req.user && RBAC.rankOf ? RBAC.rankOf(req.user.role) >= RBAC.rankOf(RBAC.ROLES.WARD_ADMIN) : false;
 
-function publicReport(r, photos, mine) {
+// Strict positive int32 id parser: '12' -> 12; '12abc', '-1', '0', '1e3', '99999999999' -> null.
+function parseId(raw) {
+  const s = String(raw);
+  if (!/^\d{1,10}$/.test(s)) return null;
+  const n = Number(s);
+  return n >= 1 && n <= 2147483647 ? n : null;
+}
+
+// Consultation lifecycle (Phase 4B.31). ONE definition, used by the resident list, the write
+// guards and the officer list, so what the UI shows as "Open" is exactly what the API accepts.
+// Open = stored status is 'Open' AND the closing day has not finished. The closing day is
+// inclusive and is evaluated on the Africa/Nairobi calendar date, independent of server/DB timezone.
+const CONSULT_OPEN_SQL = `(COALESCE(c.status, 'Open') = 'Open' AND (c.closes_on IS NULL OR c.closes_on >= (NOW() AT TIME ZONE 'Africa/Nairobi')::date))`;
+// Geography joins + scope columns for officer reads (same pattern as GET /api/admin/notices).
+const CONSULT_GEO_JOIN = `LEFT JOIN wards w ON w.id = c.ward_id LEFT JOIN constituencies con ON con.id = w.constituency_id`;
+const CONSULT_SCOPE_COLS = { ward: 'c.ward_id', constituency: 'w.constituency_id', county: 'con.county_id' };
+
+function publicReport(r, photos, mine, latest) {
   return { id: r.id, reference: ref(r.id), title: r.title, category: r.category, location: r.location,
-    description: r.description, status: r.status, ward: r.ward_name || 'Ngoliba Ward', demo: r.is_demo,
+    description: r.description, status: r.status, ward: r.ward_name || 'Your ward', demo: r.is_demo,
     createdAt: r.created_at, supporters: parseInt(r.supporters) || 0, supportedByMe: !!mine,
+    latestUpdate: latest || null,   // { status, note, at } from community_report_events, or null
     photos: photos || [] };   // no reporter identity is ever exposed
 }
 
@@ -115,7 +133,11 @@ async function hydrate(rows, userId) {
   const ph = await pool.query('SELECT report_id, path FROM community_report_photos WHERE report_id = ANY($1) ORDER BY id', [ids]);
   const sup = userId ? await pool.query('SELECT report_id FROM community_report_supports WHERE user_id = $1 AND report_id = ANY($2)', [userId, ids]) : { rows: [] };
   const sset = new Set(sup.rows.map((x) => x.report_id));
-  return rows.map((r) => publicReport(r, ph.rows.filter((p) => p.report_id === r.id).map((p) => p.path), sset.has(r.id)));
+  // Latest status-history entry per report (one batched query; no schema change).
+  const lt = await pool.query(`SELECT DISTINCT ON (report_id) report_id, status, note, created_at
+    FROM community_report_events WHERE report_id = ANY($1) ORDER BY report_id, id DESC`, [ids]);
+  const latest = new Map(lt.rows.map((x) => [x.report_id, { status: x.status, note: x.note, at: x.created_at }]));
+  return rows.map((r) => publicReport(r, ph.rows.filter((p) => p.report_id === r.id).map((p) => p.path), sset.has(r.id), latest.get(r.id)));
 }
 
 // ---------- uploads (validated: type, size, count, magic bytes) ----------
@@ -225,25 +247,124 @@ router.patch('/api/community-reports/:id/status', RBAC.requireMinRole(RBAC.ROLES
 router.get('/api/consultations', async (req, res) => {
   try {
     const s = session(req);
-    const { rows } = await pool.query(`SELECT c.*, (SELECT COUNT(DISTINCT u) FROM (SELECT user_id u FROM consultation_views WHERE consultation_id = c.id
-      UNION SELECT user_id FROM consultation_rsvps WHERE consultation_id = c.id) x) AS participants,
-      ${s ? `EXISTS (SELECT 1 FROM consultation_rsvps WHERE consultation_id = c.id AND user_id = '${String(s.userId).replace(/[^0-9a-f-]/gi, '')}')` : 'false'} AS rsvped
-      FROM consultations c WHERE c.ward_id = $1 ORDER BY c.closes_on`, [req.wardId]);
+    const params = [req.wardId];
+    if (s) params.push(s.userId);
+    const { rows } = await pool.query(`SELECT c.*, w.name AS ward_name, ${CONSULT_OPEN_SQL} AS is_open,
+      (SELECT COUNT(DISTINCT u) FROM (SELECT user_id u FROM consultation_views WHERE consultation_id = c.id
+        UNION SELECT user_id FROM consultation_rsvps WHERE consultation_id = c.id) x) AS participants,
+      ${s ? 'EXISTS (SELECT 1 FROM consultation_rsvps WHERE consultation_id = c.id AND user_id = $2)' : 'false'} AS rsvped
+      FROM consultations c LEFT JOIN wards w ON w.id = c.ward_id WHERE c.ward_id = $1 ORDER BY c.closes_on`, params);
     res.json({ success: true, consultations: rows.map((c) => ({ id: c.id, title: c.title, description: c.description, opensOn: c.opens_on, closesOn: c.closes_on,
-      venue: c.venue, status: new Date(c.closes_on) < new Date() ? 'Closed' : c.status, participants: parseInt(c.participants) || 0, rsvped: c.rsvped, ward: 'Ngoliba Ward' })) });
+      venue: c.venue, status: c.is_open ? 'Open' : 'Closed', participants: parseInt(c.participants) || 0, rsvped: c.rsvped,
+      ward: c.ward_name || 'Your ward', demo: !!c.is_demo })) });
   } catch (e) { res.status(500).json({ success: false, error: 'Failed to load consultations' }); }
 });
+
+// Shared guard for consultation WRITES (views, RSVP). Sends the error response itself and returns null on
+// any failure; otherwise returns { s, id }. Checks, in order: authenticated session -> valid id ->
+// consultation exists IN THE CALLER'S OWN WARD (server-derived req.wardId; a consultation of another ward
+// is reported as 404, never confirmed) -> consultation is open.
+async function consultationWriteGuard(req, res) {
+  const s = session(req);
+  if (!s) { res.status(401).json({ success: false, error: 'Login required' }); return null; }
+  if (!req.user) { res.status(503).json({ success: false, error: 'Could not verify your account. Please try again.' }); return null; }
+  const id = parseId(req.params.id);
+  if (!id) { res.status(400).json({ success: false, error: 'Invalid consultation id' }); return null; }
+  const { rows } = await pool.query(`SELECT c.id, ${CONSULT_OPEN_SQL} AS is_open FROM consultations c WHERE c.id = $1 AND c.ward_id = $2`, [id, req.wardId]);
+  if (!rows.length) { res.status(404).json({ success: false, error: 'Consultation not found' }); return null; }
+  if (!rows[0].is_open) { res.status(409).json({ success: false, error: 'This consultation is closed' }); return null; }
+  return { s, id };
+}
+const writeError = (res, e, msg) => e && e.code === '23503'   // FK violation: session is valid but the user row is gone
+  ? res.status(401).json({ success: false, error: 'Your session is no longer valid. Please log in again.' })
+  : res.status(500).json({ success: false, error: msg });
+
 router.post('/api/consultations/:id/views', async (req, res) => {
-  const s = session(req); if (!s) return res.status(401).json({ success: false, error: 'Login required' });
-  const body = clean(req.body && req.body.text, 1500);
-  if (body.length < 5) return res.status(400).json({ success: false, error: 'Please write at least 5 characters' });
-  try { await pool.query('INSERT INTO consultation_views (consultation_id, user_id, body) VALUES ($1,$2,$3)', [parseInt(req.params.id, 10), s.userId, body]); res.status(201).json({ success: true }); }
-  catch (e) { res.status(500).json({ success: false, error: 'Failed to submit view' }); }
+  try {
+    const g = await consultationWriteGuard(req, res); if (!g) return;
+    const body = clean(req.body && req.body.text, 1500);
+    if (body.length < 5) return res.status(400).json({ success: false, error: 'Please write at least 5 characters' });
+    await pool.query('INSERT INTO consultation_views (consultation_id, user_id, body) VALUES ($1,$2,$3)', [g.id, g.s.userId, body]);
+    res.status(201).json({ success: true });
+  } catch (e) { writeError(res, e, 'Failed to submit view'); }
 });
 router.post('/api/consultations/:id/rsvp', async (req, res) => {
-  const s = session(req); if (!s) return res.status(401).json({ success: false, error: 'Login required' });
-  try { await pool.query('INSERT INTO consultation_rsvps (consultation_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [parseInt(req.params.id, 10), s.userId]); res.json({ success: true }); }
-  catch (e) { res.status(500).json({ success: false, error: 'Failed to RSVP' }); }
+  try {
+    const g = await consultationWriteGuard(req, res); if (!g) return;
+    const ins = await pool.query('INSERT INTO consultation_rsvps (consultation_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [g.id, g.s.userId]);
+    res.json({ success: true, alreadyRsvped: !ins.rowCount });
+  } catch (e) { writeError(res, e, 'Failed to RSVP'); }
+});
+
+// ---------- consultation officer read path (WARD_ADMIN and above, scoped) ----------
+// Scope comes from RBAC.resolveReadScope(req.user): WARD_ADMIN -> own admin ward, CONSTITUENCY_ADMIN -> own
+// constituency, COUNTY_ADMIN -> own county, SUPER_ADMIN -> everything. A VOTER/MODERATOR never reaches here
+// (requireMinRole). Residents have no read path to other residents' submissions.
+router.get('/api/admin/consultations', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
+  try {
+    const f = RBAC.buildScopeFilter(RBAC.resolveReadScope(req.user), CONSULT_SCOPE_COLS, []);
+    const { rows } = await pool.query(`SELECT c.id, c.title, c.opens_on, c.closes_on, c.venue, c.is_demo, w.name AS ward_name,
+        ${CONSULT_OPEN_SQL} AS is_open,
+        (SELECT COUNT(*) FROM consultation_views v WHERE v.consultation_id = c.id) AS views,
+        (SELECT COUNT(*) FROM consultation_rsvps r WHERE r.consultation_id = c.id) AS rsvps
+      FROM consultations c ${CONSULT_GEO_JOIN} ${f.clause ? 'WHERE ' + f.clause : ''}
+      ORDER BY c.closes_on DESC NULLS LAST, c.id DESC LIMIT 200`, f.params);
+    res.json({ success: true, consultations: rows.map((c) => ({ id: c.id, title: c.title, ward: c.ward_name || null, opensOn: c.opens_on, closesOn: c.closes_on,
+      venue: c.venue, status: c.is_open ? 'Open' : 'Closed', demo: !!c.is_demo, views: parseInt(c.views) || 0, rsvps: parseInt(c.rsvps) || 0 })) });
+  } catch (e) { console.error('GET /api/admin/consultations', e.message); res.status(500).json({ success: false, error: 'Failed to load consultations' }); }
+});
+
+// Submitted views for ONE consultation. No user identifier of any kind is returned (no id, name, phone).
+router.get('/api/admin/consultations/:id/views', RBAC.requireMinRole(RBAC.ROLES.WARD_ADMIN), async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ success: false, error: 'Invalid consultation id' });
+    const f = RBAC.buildScopeFilter(RBAC.resolveReadScope(req.user), CONSULT_SCOPE_COLS, [id]);
+    const c = await pool.query(`SELECT c.id, c.title, w.name AS ward_name, ${CONSULT_OPEN_SQL} AS is_open, (${f.clause || 'true'}) AS in_scope
+      FROM consultations c ${CONSULT_GEO_JOIN} WHERE c.id = $1`, f.params);
+    if (!c.rows.length) return res.status(404).json({ success: false, error: 'Consultation not found' });
+    if (!c.rows[0].in_scope) return res.status(403).json({ success: false, error: 'Not authorised for this consultation' });
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const [tot, rows] = await Promise.all([
+      pool.query('SELECT COUNT(*) AS n FROM consultation_views WHERE consultation_id = $1', [id]),
+      pool.query('SELECT id, body, created_at FROM consultation_views WHERE consultation_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3', [id, limit, offset]),
+    ]);
+    res.json({ success: true, consultation: { id, title: c.rows[0].title, ward: c.rows[0].ward_name || null, status: c.rows[0].is_open ? 'Open' : 'Closed' },
+      total: parseInt(tot.rows[0].n) || 0, limit, offset, views: rows.rows.map((v) => ({ id: v.id, text: v.body, createdAt: v.created_at })) });
+  } catch (e) { console.error('GET /api/admin/consultations/:id/views', e.message); res.status(500).json({ success: false, error: 'Failed to load submissions' }); }
+});
+
+// ---------- My Ward (resident overview, read-only) ----------
+// Ward identity is NEVER taken from the client: it is req.wardId (the logged-in user's own ward_id, resolved by
+// the session middleware in server.js). The lists on the My Ward screen come from the existing endpoints
+// (/api/community-reports, /api/consultations, /api/notices); this route supplies identity, headline counts and
+// the recent-activity feed, all from existing tables. Reports carry no coordinates today, so there is no map data.
+router.get('/api/my-ward', async (req, res) => {
+  if (!session(req)) return res.status(401).json({ success: false, error: 'Login required' });
+  try {
+    const w = await pool.query(`SELECT w.id, w.name, con.name AS constituency, cty.name AS county
+      FROM wards w LEFT JOIN constituencies con ON con.id = w.constituency_id LEFT JOIN counties cty ON cty.id = con.county_id
+      WHERE w.id = $1`, [req.wardId]);
+    if (!w.rows.length) return res.status(404).json({ success: false, error: 'Ward not found' });
+    const [sum, act, cons] = await Promise.all([
+      pool.query(`SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'Resolved') AS resolved,
+          COUNT(*) FILTER (WHERE status NOT IN ('Resolved','Rejected')) AS active, COUNT(*) FILTER (WHERE is_demo) AS demo
+        FROM community_reports WHERE ward_id = $1`, [req.wardId]),
+      pool.query(`SELECT * FROM (
+          SELECT DISTINCT ON (e.report_id) e.report_id, e.status, e.note, e.created_at, r.title, r.is_demo
+          FROM community_report_events e JOIN community_reports r ON r.id = e.report_id
+          WHERE r.ward_id = $1 ORDER BY e.report_id, e.id DESC) x
+        ORDER BY x.created_at DESC, x.report_id DESC LIMIT 6`, [req.wardId]),
+      pool.query(`SELECT COUNT(*) AS n FROM consultations c WHERE c.ward_id = $1 AND ${CONSULT_OPEN_SQL}`, [req.wardId]),
+    ]);
+    const k = sum.rows[0];
+    res.json({ success: true,
+      ward: { id: w.rows[0].id, name: w.rows[0].name, constituency: w.rows[0].constituency || null, county: w.rows[0].county || null },
+      summary: { reports: { total: parseInt(k.total) || 0, active: parseInt(k.active) || 0, resolved: parseInt(k.resolved) || 0, demo: parseInt(k.demo) || 0 },
+        consultationsOpen: parseInt(cons.rows[0].n) || 0 },
+      activity: act.rows.map((a) => ({ reference: ref(a.report_id), title: a.title, status: a.status, note: a.note, at: a.created_at, demo: !!a.is_demo })) });
+  } catch (e) { console.error('GET /api/my-ward', e.message); res.status(500).json({ success: false, error: 'Failed to load your ward' }); }
 });
 
 module.exports = router;

@@ -12,8 +12,54 @@ let activeNoticeFilter = "all";
 let _noticeCache = [];
 
 const NOTICE_EMOJI = {
-  business: "🛒", event: "🎉", public: "📢", jobs: "💼", general: "📌"
+  business: "🛒", event: "🎉", public: "📢", jobs: "💼", general: "📌", service: "🛠️", payment: "💳"
 };
+
+// ── Presentation taxonomy (Phase 4B.31D) ─────────────────────────────────
+// DISPLAY ONLY. notices.category values in the database are unchanged
+// (public | event | business | jobs | general, plus the free-text values
+// 'service' and 'payment' that the column has always accepted). "Alerts" is
+// not a category: it is the existing priority = 'high' flag.
+// One record, several surfaces: the Notice Board tab and My Ward → Recent
+// Notices both read /api/notices and label notices through these helpers.
+const NOTICE_CATS = {
+  public:   { label: "Official Notice",  cls: "ncat-public"  },
+  service:  { label: "Service Update",   cls: "ncat-service" },
+  payment:  { label: "Payment Reminder", cls: "ncat-payment" },
+  event:    { label: "Community Event",  cls: "ncat-event"   },
+  business: { label: "Business",         cls: "ncat-business"},
+  jobs:     { label: "Jobs",             cls: "ncat-jobs"    },
+  general:  { label: "General",          cls: ""             }
+};
+// Short, honest notes shown under the chips for the two categories people may
+// misread. These are public ward notices — no personal accounts or balances.
+const NOTICE_FILTER_NOTES = {
+  service: "Public service information from your ward office. Applications and personal records are not handled here.",
+  payment: "Public payment reminders from your ward office. Personal balances and receipts are not shown here."
+};
+// Paid ads share the feed but are never presented as official: an ad filed under
+// "public" keeps the neutral "Public Notice" label, and ads never match the
+// official-only filters (Official Notices, Alerts, Service Updates, Payment Reminders).
+const NOTICE_OFFICIAL_ONLY = ["public", "service", "payment"];
+function noticeCategoryInfo(n) {
+  const c = (n && n.category) || "general";
+  if (n && n.is_ad && c === "public") return { label: "Public Notice", cls: "ncat-public" };
+  return NOTICE_CATS[c] || { label: c, cls: "" };
+}
+function noticeIsAlert(n) { return !!n && n.priority === "high" && !n.is_ad; }
+function noticeMatchesFilter(n, key) {
+  if (!key || key === "all") return true;
+  if (key === "alerts") return noticeIsAlert(n);
+  if (n.is_ad && NOTICE_OFFICIAL_ONLY.includes(key)) return false;
+  return n.category === key;
+}
+function syncNoticeFilterNote() {
+  const el = document.getElementById("noticeFilterNote");
+  if (!el) return;
+  const t = NOTICE_FILTER_NOTES[activeNoticeFilter] || "";
+  el.textContent = t;
+  el.classList.toggle("hidden", !t);
+}
 
 async function renderNoticeboardTab() {
   // Wire filter buttons
@@ -22,6 +68,7 @@ async function renderNoticeboardTab() {
       activeNoticeFilter = btn.dataset.nf;
       document.querySelectorAll(".notice-filter").forEach(b =>
         b.classList.toggle("active", b.dataset.nf === activeNoticeFilter));
+      syncNoticeFilterNote();
       buildNotices(_noticeCache);
     };
   });
@@ -50,9 +97,7 @@ function buildNotices(notices) {
   const empty = document.getElementById("noticeEmpty");
   if (!grid) return;
 
-  const filtered = activeNoticeFilter === "all"
-    ? notices
-    : notices.filter(n => n.category === activeNoticeFilter);
+  const filtered = notices.filter(n => noticeMatchesFilter(n, activeNoticeFilter));
 
   if (!filtered.length) {
     grid.innerHTML = "";
@@ -61,18 +106,10 @@ function buildNotices(notices) {
   }
   if (empty) empty.classList.add("hidden");
 
-  const catMap = {
-    business: { label: "Business",      cls: "ncat-business" },
-    event:    { label: "Event",          cls: "ncat-event"    },
-    public:   { label: "Public Notice",  cls: "ncat-public"   },
-    jobs:     { label: "Jobs",           cls: "ncat-jobs"     },
-    general:  { label: "General",        cls: ""              }
-  };
-
   grid.innerHTML = filtered.map(n => {
-    const cm       = catMap[n.category] || { label: n.category, cls: "" };
+    const cm       = noticeCategoryInfo(n);
     const emoji    = NOTICE_EMOJI[n.category] || "📌";
-    const isUrgent = n.priority === "high";
+    const isUrgent = noticeIsAlert(n);
     const isAd     = !!n.is_ad;
 
     // Smart relative date
@@ -430,7 +467,7 @@ async function handleAIAsk(){
     const wardLabel  = (typeof currentUser!=='undefined'&&currentUser?.wardName)  || 'this ward';
     const countyLabel= (typeof currentUser!=='undefined'&&currentUser?.countyName) || 'Kenya';
     const subLabel   = SUBLOCATIONS.length>0 ? SUBLOCATIONS.join(', ') : 'various sublocations';
-    const context=`You are the AI analyst for InfoTrack, a ward-level opinion poll platform in ${wardLabel}, ${countyLabel}. The poll tracks ${CANDIDATES.length} MCA candidates. Current cycle vote totals: ${votesSummary}. Total registered voters: ${users.length}. Sublocations: ${subLabel}. Answer the user's question concisely and insightfully in 2-4 sentences. Be specific to ${wardLabel} context.`;
+    const context=`You are the AI analyst for eTaifa Link, a ward-level opinion poll platform in ${wardLabel}, ${countyLabel}. The poll tracks ${CANDIDATES.length} MCA candidates. Current cycle vote totals: ${votesSummary}. Total registered voters: ${users.length}. Sublocations: ${subLabel}. Answer the user's question concisely and insightfully in 2-4 sentences. Be specific to ${wardLabel} context.`;
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,system:context,messages:[{role:"user",content:input}]})});
     const data=await res.json();
     const reply=data.content?.[0]?.text||"I could not generate a response. Please try again.";

@@ -605,9 +605,11 @@
                                     <label for="category">Category <span style="color: var(--danger);">*</span></label>
                                     <select id="category" required>
                                         <option value="general">General</option>
+                                        <option value="public">📋 Official Notice (public)</option>
+                                        <option value="service">🛠️ Service Update (public info only)</option>
+                                        <option value="payment">💳 Payment Reminder (public notice only)</option>
+                                        <option value="event">🎉 Community Event</option>
                                         <option value="business">🏪 Business</option>
-                                        <option value="event">🎉 Event</option>
-                                        <option value="public">📋 Public</option>
                                         <option value="jobs">💼 Jobs</option>
                                     </select>
                                 </div>
@@ -616,7 +618,7 @@
                                     <label for="priority">Priority <span style="color: var(--danger);">*</span></label>
                                     <select id="priority" required>
                                         <option value="normal">Normal</option>
-                                        <option value="high">🔴 High</option>
+                                        <option value="high">🔴 High (shown as an Alert)</option>
                                         <option value="low">🟢 Low</option>
                                     </select>
                                 </div>

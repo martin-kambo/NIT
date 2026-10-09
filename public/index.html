@@ -2227,6 +2227,15 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 .ncat-event    { background: rgba(233,196,106,0.15); color: var(--gold-dark); }
 .ncat-public   { background: rgba(64,194,122,0.12); color: var(--forest-light); }
 .ncat-jobs     { background: rgba(139,92,246,0.1); color: #7c3aed; }
+.ncat-service  { background: rgba(14,165,233,0.12); color: #0369a1; }
+.ncat-payment  { background: rgba(245,158,11,0.15); color: #b45309; }
+/* Eight category chips: keep them on ONE scrollable row on phones. The existing (max-width:768px) rule for
+   .notice-filters sits earlier in the file than the base rule, so it never took effect; the id selector wins. */
+@media (max-width: 768px) {
+  #noticeFilters { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 4px; }
+  #noticeFilters::-webkit-scrollbar { display: none; }
+  #noticeFilters .notice-filter { flex: 0 0 auto; }
+}
 .notice-sponsored {
   font-size: 0.58rem; font-weight: 700; text-transform: uppercase;
   letter-spacing: 0.08em; color: var(--mid-gray);
@@ -2787,8 +2796,9 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
       <!-- TAB: FORUM -->
       <div class="feature-pane" id="tabForum">
-        <!-- ENGAGE: Forum | Consultations | Report an Issue | Community Reports -->
+        <!-- ENGAGE: My Ward | Forum | Consultations | Report an Issue | Community Reports -->
         <div id="engageBar" role="tablist" aria-label="Community engagement">
+          <button type="button" data-eg="ward">&#127960;&#65039; My Ward</button>
           <button type="button" data-eg="forum" class="active">&#128172; Forum</button>
           <button type="button" data-eg="consult">&#128220; Consultations</button>
           <button type="button" data-eg="report">&#128247; Report an Issue</button>
@@ -2821,6 +2831,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         </div>
         <div class="forum-posts" id="forumPosts"></div>
         </div><!-- /egForum (existing Forum, unchanged) -->
+        <div id="egMyWard" style="display:none"></div>
         <div id="egConsult" style="display:none"></div>
         <div id="egReport" style="display:none"></div>
         <div id="egReports" style="display:none"></div>
@@ -2967,12 +2978,18 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
         <!-- Category filter -->
         <div class="notice-filters" id="noticeFilters">
+          <!-- Presentation taxonomy (Phase 4B.31D). data-nf maps onto the unchanged notices.category values,
+               except "alerts" which is the existing priority='high' flag. See NOTICE_FILTERS in js/community.js. -->
           <button class="notice-filter active" data-nf="all">All</button>
+          <button class="notice-filter" data-nf="public">📢 Official Notices</button>
+          <button class="notice-filter" data-nf="alerts">🚨 Alerts</button>
+          <button class="notice-filter" data-nf="service">🛠️ Service Updates</button>
+          <button class="notice-filter" data-nf="payment">💳 Payment Reminders</button>
+          <button class="notice-filter" data-nf="event">🎉 Community Events</button>
           <button class="notice-filter" data-nf="business">🏪 Business</button>
-          <button class="notice-filter" data-nf="event">🎉 Event</button>
-          <button class="notice-filter" data-nf="public">📢 Public Notice</button>
           <button class="notice-filter" data-nf="jobs">💼 Jobs</button>
         </div>
+        <p class="hidden" id="noticeFilterNote" style="font-size:0.74rem;color:var(--mid-gray);margin:-0.4rem 0 0.8rem;"></p>
 
         <!-- Notices grid -->
         <div class="notices-grid" id="noticesGrid"></div>
@@ -7447,17 +7464,28 @@ window.renderFaceoff = window.updateFaceoff;
 .eg-ref{font:800 1.6rem 'Syne',sans-serif;color:var(--forest-light);margin:.2rem 0}.eg-ok{text-align:center}.eg-ok .eg-row{justify-content:center}
 .eg-tl{list-style:none;padding:0;margin:.6rem 0 0;font-size:.82rem}.eg-tl li{padding:.2rem 0;color:var(--mid-gray)}.eg-tl li.d{color:var(--text-dark)}.eg-tl li.c{font-weight:700;color:var(--forest-light)}.eg-tl b{display:inline-block;width:1.2rem}
 .eg-scroll{overflow-x:auto}.eg-tbl{width:100%;border-collapse:collapse;font-size:.78rem}.eg-tbl th,.eg-tbl td{padding:.4rem;border-bottom:1px solid var(--sand);text-align:left}.eg-chk{font-size:.8rem;margin:0!important}
+/* My Ward (Phase 4B.31C) */
+.eg-wh{display:flex;justify-content:space-between;align-items:flex-end;gap:.6rem;flex-wrap:wrap}.eg-wh .eg-wn{font:800 1.35rem 'Syne',sans-serif;color:var(--forest-light);margin:0}
+.eg-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin:0 0 .9rem}
+.eg-stat{background:#fff;border:1px solid var(--sand);border-radius:var(--radius-md);box-shadow:var(--shadow-card);padding:.6rem .5rem;text-align:center}
+.eg-stat b{display:block;font:800 1.3rem 'Syne',sans-serif;color:var(--forest-light)}.eg-stat span{font-size:.7rem;color:var(--mid-gray)}
+.eg-qa{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem;margin:0 0 .9rem}.eg-qa .eg-btn{width:100%;text-align:center}
+.eg-wlist{margin:.3rem 0 0}.eg-wrow{display:flex;gap:.6rem;align-items:flex-start;width:100%;text-align:left;border:0;border-bottom:1px solid var(--sand);background:none;padding:.55rem 0;cursor:pointer;font:inherit;color:inherit}
+.eg-wlist>:last-child{border-bottom:0}.eg-wrow .eg-wb{flex:1;min-width:0}.eg-wrow .eg-wt{display:block;font-weight:700;font-size:.85rem;overflow-wrap:anywhere}
+.eg-wrow .eg-mu{display:block;overflow-wrap:anywhere}.eg-wrow .eg-ph{width:56px;height:56px;flex:0 0 auto}
+.eg-wi{padding:.55rem 0;border-bottom:1px solid var(--sand)}.eg-wi .eg-wt{display:block;font-weight:700;font-size:.85rem;overflow-wrap:anywhere}
+.eg-subm{margin:.5rem 0 0;padding:.5rem .7rem;background:var(--light-gray);border-radius:.6rem;font-size:.8rem}.eg-subm ul{margin:.4rem 0 0;padding-left:1.1rem}.eg-subm li{margin:.3rem 0;overflow-wrap:anywhere}
 @media(max-width:600px){.eg-grid{grid-template-columns:1fr}}
 </style>
 <script>
-/* Engage extension: Consultations, Report an Issue, Community Reports (additive; Forum code untouched) */
+/* Engage extension: My Ward, Consultations, Report an Issue, Community Reports (additive; Forum code untouched) */
 (function(){
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const CATS=['Roads & Transport','Waste Management','Water','Street Lighting','Public Safety','Unlicensed Business','Other'];
 const FLOW=['Reported','Under Review','Assigned','In Progress','Resolved'];
 const STATUSES=[...FLOW,'Rejected'];
-const S={view:'forum',imgs:[],openC:null,mine:false,statusF:'',officer:null,received:null,open:null,prefill:null};
+const S={view:'forum',imgs:[],openC:null,mine:false,statusF:'',officer:null,received:null,open:null,prefill:null,subm:null,submData:null};
 const fmt=d=>d?new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'';
 const toast=(m,t)=>typeof showToast==='function'?showToast(m,t||'info'):alert(m);
 async function api(url,opt){
@@ -7471,23 +7499,68 @@ const badge=s=>`<span class="eg-badge eg-${esc(s).replace(/\s/g,'')}">${esc(s)}<
 
 function setView(v){
   S.view=v;
-  [['forum','egForum'],['consult','egConsult'],['report','egReport'],['reports','egReports']].forEach(([k,id])=>{$(id).style.display=k===v?'':'none'});
+  [['ward','egMyWard'],['forum','egForum'],['consult','egConsult'],['report','egReport'],['reports','egReports']].forEach(([k,id])=>{$(id).style.display=k===v?'':'none'});
   document.querySelectorAll('#engageBar [data-eg]').forEach(b=>b.classList.toggle('active',b.dataset.eg===v));
+  if(v==='ward')loadWard();
   if(v==='consult')loadConsults();
   if(v==='report')drawForm();
   if(v==='reports')loadReports();
 }
 
 /* ---------- Consultations ---------- */
+function submissions(d){
+  return `<div class="eg-subm">${d.views.length?`<p class="eg-mu">Showing ${d.views.length} of ${d.total} submission${d.total===1?'':'s'}, newest first. Submitter identities are not shown.</p><ul>${d.views.map(v=>`<li>${esc(v.text)} <span class="eg-mu">${fmt(v.createdAt)}</span></li>`).join('')}</ul>`:'<p class="eg-mu">No submissions yet.</p>'}</div>`;
+}
 async function loadConsults(){
   const box=$('egConsult');box.innerHTML='<p class="eg-mu">Loading consultations...</p>';
   try{
     const {consultations:c}=await api('/api/consultations');
-    box.innerHTML=c.length?c.map(x=>`<div class="eg-card"><div class="eg-row">${badge(x.status==='Open'?'Open':'Closed')}<span class="eg-mu">${esc(x.ward)} · ${x.participants} participant${x.participants===1?'':'s'}</span></div>
+    /* Officers (WARD_ADMIN and above, within their own scope) also get submission counts; residents get a 403 and see nothing extra. */
+    let adm=null;
+    if(S.officer!==false){try{const o=await api('/api/admin/consultations');S.officer=true;adm=new Map(o.consultations.map(x=>[x.id,x]))}catch(e){if(e.message!=='auth')S.officer=false}}
+    box.innerHTML=c.length?c.map(x=>{const a=adm&&adm.get(x.id);return `<div class="eg-card"><div class="eg-row">${badge(x.status==='Open'?'Open':'Closed')}<span class="eg-mu">${esc(x.ward)} · ${x.participants} participant${x.participants===1?'':'s'}${x.demo?' · Demo data':''}</span></div>
       <h3>${esc(x.title)}</h3><p>${esc(x.description)}</p><p class="eg-mu">Opens ${fmt(x.opensOn)} · Closes ${fmt(x.closesOn)}${x.venue?' · '+esc(x.venue):''}</p>
       ${S.openC===x.id?`<textarea id="egView${x.id}" class="eg-in" rows="3" maxlength="1500" placeholder="Share your views..."></textarea><div class="eg-row"><button class="eg-btn pri" data-sv="${x.id}">Submit view</button><button class="eg-btn" data-cancel="1">Cancel</button></div>`
-      :`<div class="eg-row"><button class="eg-btn pri" data-gv="${x.id}" ${x.status!=='Open'?'disabled':''}>Give Your Views</button><button class="eg-btn" data-rsvp="${x.id}" ${x.rsvped||x.status!=='Open'?'disabled':''}>${x.rsvped?'RSVP\u2019d \u2713':'RSVP'}</button></div>`}</div>`).join(''):'<div class="eg-card"><p class="eg-mu">No open consultations for your ward right now.</p></div>';
+      :`<div class="eg-row"><button class="eg-btn pri" data-gv="${x.id}" ${x.status!=='Open'?'disabled':''}>Give Your Views</button><button class="eg-btn" data-rsvp="${x.id}" ${x.rsvped||x.status!=='Open'?'disabled':''}>${x.rsvped?'RSVP’d ✓':'RSVP'}</button></div>`}
+      ${a?`<div class="eg-row"><button class="eg-btn" data-subm="${x.id}">${S.subm===x.id?'Hide':'View'} submissions (${a.views})</button><span class="eg-mu">${a.rsvps} RSVP${a.rsvps===1?'':'s'}</span></div>${S.subm===x.id&&S.submData?submissions(S.submData):''}`:''}</div>`}).join(''):'<div class="eg-card"><p class="eg-mu">No open consultations for your ward right now.</p></div>';
   }catch(e){box.innerHTML='<div class="eg-card"><p class="eg-mu">Could not load consultations.</p></div>'}
+}
+
+/* ---------- My Ward ---------- */
+/* Everything here is read from existing backend records: identity/counts/activity from /api/my-ward (ward = the
+   logged-in user's own ward, resolved server-side), issues from /api/community-reports, consultations from
+   /api/consultations, notices from /api/notices. No client-supplied ward id, no sample data: an empty list says so.
+   Map slot: reports carry no coordinates today (location is free text), so there is deliberately no map; a real map
+   belongs in this screen once community_reports has lat/lng. */
+const ago=d=>{if(!d)return'';const m=Math.floor((Date.now()-new Date(d).getTime())/60000);return m<1?'Just now':m<60?m+'m ago':m<1440?Math.floor(m/60)+'h ago':m<10080?Math.floor(m/1440)+'d ago':fmt(d)};
+const noticeLabel=n=>typeof noticeCategoryInfo==='function'?noticeCategoryInfo(n).label:'Notice';
+const wardCard=(h,body)=>`<div class="eg-card"><h3>${h}</h3>${body}</div>`;
+async function loadWard(){
+  const box=$('egMyWard');box.innerHTML='<p class="eg-mu">Loading your ward...</p>';
+  const get=u=>api(u).then(v=>({v}),e=>({e}));
+  const [w,rp,cs,nt]=await Promise.all([get('/api/my-ward'),get('/api/community-reports'),get('/api/consultations'),get('/api/notices')]);
+  if(w.e){box.innerHTML=`<div class="eg-card"><h2>My Ward</h2><p class="eg-mu">${w.e.message==='auth'?'Please log in to see your ward.':'Could not load your ward right now. Please try again.'}</p></div>`;return}
+  const {ward,summary,activity}=w.v,sr=summary.reports;
+  const loc=[ward.constituency,ward.county?ward.county+' County':null].filter(Boolean).map(esc).join(' · ');
+  const head=`<div class="eg-card"><div class="eg-wh"><div><h2>My Ward</h2><p class="eg-wn">${esc(ward.name)}</p><p class="eg-mu">${loc}</p></div></div></div>
+    <div class="eg-stats"><div class="eg-stat"><b>${sr.total}</b><span>Issues reported</span></div><div class="eg-stat"><b>${sr.resolved}</b><span>Resolved</span></div><div class="eg-stat"><b>${summary.consultationsOpen}</b><span>Open consultations</span></div></div>
+    ${sr.demo?`<p class="eg-mu" style="margin:-.5rem 0 .9rem">Counts include ${sr.demo} demo report${sr.demo===1?'':'s'}.</p>`:''}
+    <div class="eg-qa"><button type="button" class="eg-btn pri" data-wnew="1">Report an Issue</button><button type="button" class="eg-btn" data-go="reports">View Community Reports</button><button type="button" class="eg-btn" data-go="consult">View Consultations</button><button type="button" class="eg-btn" data-go="forum">Join Discussion</button></div>`;
+  const issues=rp.e?wardCard('Community Issues','<p class="eg-mu">Could not load issues.</p>'):wardCard('Community Issues',
+    (rp.v.reports.length?`<div class="eg-wlist">${rp.v.reports.slice(0,5).map(r=>{const ph=r.photos.find(p=>/^\/uploads\/reports\//.test(p)),lu=r.latestUpdate;
+      return `<button type="button" class="eg-wrow" data-wrep="${r.id}" data-ref="${esc(r.reference)}">${ph?`<img class="eg-ph" alt="" loading="lazy" src="${esc(ph)}">`:''}<span class="eg-wb"><span class="eg-wt">${esc(r.title)}</span>
+        <span class="eg-mu">${esc(r.category)}${r.location?' · '+esc(r.location):''}</span><span class="eg-mu"><code>${esc(r.reference)}</code> · ${fmt(r.createdAt)}${r.demo?' · Demo data':''}</span>
+        <span class="eg-mu">❤️ ${r.supporters}${lu?' · Latest: '+esc(lu.status)+(lu.note?' – '+esc(lu.note):''):''}</span></span>${badge(r.status)}</button>`}).join('')}</div>`
+      :'<p class="eg-mu">No issues have been reported in your ward yet.</p>')+'<div class="eg-row"><button type="button" class="eg-btn" data-go="reports">View all reports</button></div>');
+  const open=cs.e?null:cs.v.consultations.filter(x=>x.status==='Open').slice(0,3);
+  const consults=cs.e?wardCard('Consultations','<p class="eg-mu">Could not load consultations.</p>'):wardCard('Consultations',
+    (open.length?`<div class="eg-wlist">${open.map(x=>`<div class="eg-wi"><span class="eg-wt">${esc(x.title)}</span><span class="eg-mu">${x.closesOn?'Closes '+fmt(x.closesOn):'No closing date'} · ${x.participants} participant${x.participants===1?'':'s'}${x.demo?' · Demo data':''}</span>
+      <div class="eg-row"><button type="button" class="eg-btn pri" data-wgv="${x.id}">Give Your Views</button></div></div>`).join('')}</div>`:'<p class="eg-mu">No open consultations for your ward right now.</p>')+'<div class="eg-row"><button type="button" class="eg-btn" data-go="consult">View all consultations</button></div>');
+  const notes=nt.e?null:nt.v.notices.filter(n=>!n.is_ad).slice(0,4);
+  const notices=nt.e?wardCard('Recent Notices','<p class="eg-mu">Could not load notices.</p>'):wardCard('Recent Notices',
+    (notes.length?`<div class="eg-wlist">${notes.map(n=>`<button type="button" class="eg-wrow" data-wnotice="1"><span class="eg-wb"><span class="eg-wt">${esc(n.title)}</span><span class="eg-mu">${esc(noticeLabel(n))}${n.priority==='high'?' · Urgent':''} · ${ago(n.created_at)}</span></span></button>`).join('')}</div>`:'<p class="eg-mu">No recent notices for your ward.</p>')+'<div class="eg-row"><button type="button" class="eg-btn" data-wnotice="1">Open Notice Board</button></div>');
+  const act=wardCard('Recent Activity',activity.length?`<div class="eg-wlist">${activity.slice(0,5).map(a=>`<div class="eg-wi"><span class="eg-wt">${esc(a.title)}</span><span class="eg-mu"><code>${esc(a.reference)}</code> ${badge(a.status)}${a.note?' '+esc(a.note):''} · ${ago(a.at)}${a.demo?' · Demo data':''}</span></div>`).join('')}</div>`:'<p class="eg-mu">No ward activity yet.</p>');
+  box.innerHTML=head+`<div class="eg-grid">${issues}${consults}${notices}${act}</div>`;
 }
 
 /* ---------- Report an Issue ---------- */
@@ -7567,6 +7640,11 @@ document.addEventListener('click',async e=>{
   try{
   if(d.eg)return setView(d.eg);
   if(d.go)return setView(d.go);
+  if(d.wnew){S.received=null;return setView('report')}
+  if(d.wrep){const j=await api('/api/community-reports/'+d.ref);S.statusF='';S.mine=false;S.open=+d.wrep;S.detail=j.events;return setView('reports')}
+  if(d.wgv){S.openC=+d.wgv;return setView('consult')}
+  if(d.wnotice)return typeof switchSection==='function'?switchSection('community'):undefined;
+  if(d.subm){const id=+d.subm;if(S.subm===id){S.subm=null;S.submData=null;return loadConsults()}const j=await api(`/api/admin/consultations/${id}/views`);S.subm=id;S.submData=j;return loadConsults()}
   if(d.new){S.received=null;return drawForm()}
   if(d.gv){S.openC=+d.gv;return loadConsults()}
   if(d.cancel){S.openC=null;return loadConsults()}
