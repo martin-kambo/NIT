@@ -905,16 +905,16 @@
                         <h3>${escapeHTML(notice.title)}</h3>
                         <p>${escapeHTML(notice.content.substring(0, 100))}...</p>
                         <div class="notice-badges">
-                            <span class="badge">${notice.category}</span>
-                            <span class="badge">${notice.priority}</span>
+                            <span class="badge">${escapeHTML(notice.category)}</span>
+                            <span class="badge">${escapeHTML(notice.priority)}</span>
                             ${notice.isArchived ? '<span class="badge" style="background: #fecaca; color: #991b1b;">Archived</span>' : ''}
                         </div>
                     </div>
                     <div class="notice-actions">
-                        <button class="btn btn-secondary btn-small" onclick="editNotice('${notice.id}')">
+                        <button class="btn btn-secondary btn-small" data-notice-action="edit" data-notice-id="${escapeHTML(notice.id)}">
                             Edit
                         </button>
-                        <button class="btn btn-danger btn-small" onclick="openDeleteModal('${notice.id}')">
+                        <button class="btn btn-danger btn-small" data-notice-action="delete" data-notice-id="${escapeHTML(notice.id)}">
                             Delete
                         </button>
                     </div>
@@ -970,10 +970,17 @@
             }, 5000);
         }
 
+        // 4B.32: encodes & < > " ' so the result is safe in HTML text AND in quoted attributes.
+        // (The previous textContent->innerHTML round-trip left quotes untouched.)
         function escapeHTML(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            return String(text == null ? '' : text).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
+        // 4B.32: reduce a free-text value to a single safe CSS class token.
+        function cssToken(value) {
+            return String(value == null ? '' : value).replace(/[^A-Za-z0-9_-]+/g, '-');
         }
 
         function openDeleteModal(id) {
@@ -1039,7 +1046,9 @@
                 }
                 renderAdRequests();
             } catch (err) {
-                container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">⚠️</div><p>${err.message}</p></div>`;
+                // 4B.32: err.message can carry server-supplied text - set as text, never parse as HTML
+                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><p></p></div>';
+                container.querySelector('p').textContent = err.message;
             }
         }
 
@@ -1070,26 +1079,27 @@
             };
 
             container.innerHTML = list.map(r => {
-                const suggestedFee = DURATION_FEES[r.duration] || 500;
-                const currentFee   = r.fee || suggestedFee;
+                const suggestedFee = Object.prototype.hasOwnProperty.call(DURATION_FEES, r.duration) ? DURATION_FEES[r.duration] : 500;
+                const currentFee   = Number(r.fee) || suggestedFee;   // 4B.32: always numeric inside value="..."
+                const rid          = escapeHTML(r.id);                // 4B.32: encoded for attribute context
                 const isPending    = r.status === 'pending';
                 const isAwaitingPay = r.status === 'payment_pending';
                 const isActive     = isPending || isAwaitingPay;
 
                 return `
-                <div class="ar-card status-${r.status} ${r.is_hidden ? 'is-hidden-card' : ''}" id="arCard-${r.id}">
+                <div class="ar-card status-${cssToken(r.status)} ${r.is_hidden ? 'is-hidden-card' : ''}" id="arCard-${rid}">
                     <div class="ar-card-header">
                         <div class="ar-business-name">🏢 ${escapeHTML(r.business_name)}${r.is_hidden ? ' <span style="font-size:11px;color:#9ca3af;font-weight:400;">(hidden)</span>' : ''}</div>
                         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                            <span class="ar-status-badge ${r.status}">${statusLabel[r.status] || r.status}</span>
+                            <span class="ar-status-badge ${cssToken(r.status)}">${Object.prototype.hasOwnProperty.call(statusLabel, r.status) ? statusLabel[r.status] : escapeHTML(r.status)}</span>
                             <button
-                                onclick="toggleHideAdRequest('${r.id}', ${!r.is_hidden})"
+                                data-ar-action="toggle-hide" data-ar-id="${rid}" data-ar-hide="${!r.is_hidden}"
                                 title="${r.is_hidden ? 'Unhide' : 'Hide'}"
                                 style="padding:3px 8px;font-size:12px;border:1px solid var(--border);border-radius:5px;background:white;cursor:pointer;color:var(--text-light);transition:all 0.15s;">
                                 ${r.is_hidden ? '👁 Unhide' : '🙈 Hide'}
                             </button>
                             <button
-                                onclick="deleteAdRequest('${r.id}', '${escapeHTML(r.business_name)}')"
+                                data-ar-action="delete" data-ar-id="${rid}"
                                 title="Delete permanently"
                                 style="padding:3px 8px;font-size:12px;border:1px solid #fca5a5;border-radius:5px;background:#fef2f2;cursor:pointer;color:var(--danger);transition:all 0.15s;">
                                 🗑
@@ -1098,8 +1108,8 @@
                     </div>
                     <div class="ar-content">${escapeHTML(r.ad_content)}</div>
                     <div class="ar-meta">
-                        <span>📁 ${r.category || '—'}</span>
-                        <span>⏱ ${r.duration || '7 days'}</span>
+                        <span>📁 ${escapeHTML(r.category || '—')}</span>
+                        <span>⏱ ${escapeHTML(r.duration || '7 days')}</span>
                         <span>📞 ${escapeHTML(r.contact_phone)}</span>
                         ${r.contact_email ? `<span>✉️ ${escapeHTML(r.contact_email)}</span>` : ''}
                         <span>📅 Submitted: ${new Date(r.submitted_at).toLocaleDateString('en-KE', {day:'numeric',month:'short',year:'numeric'})}</span>
@@ -1118,20 +1128,20 @@
                         <!-- Fee row -->
                         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
                             <label style="font-size:13px;font-weight:600;white-space:nowrap;">
-                                Ad Fee (KES) <span style="font-weight:400;color:var(--text-light);">· ${r.duration}</span>
+                                Ad Fee (KES) <span style="font-weight:400;color:var(--text-light);">· ${escapeHTML(r.duration)}</span>
                             </label>
                             <div style="display:flex;align-items:center;gap:6px;">
                                 <span style="font-size:13px;color:var(--text-light);">KES</span>
                                 <input
                                     type="number" min="0" step="50"
-                                    id="arFee-${r.id}"
+                                    id="arFee-${rid}"
                                     value="${currentFee}"
                                     style="width:90px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;"
                                 >
                             </div>
                             <div style="display:flex;gap:6px;">
                                 ${Object.entries(DURATION_FEES).map(([d,f]) =>
-                                    `<button onclick="document.getElementById('arFee-${r.id}').value=${f}"
+                                    `<button data-ar-action="fee-preset" data-ar-id="${rid}" data-ar-fee="${Number(f)}"
                                         style="padding:3px 8px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:white;cursor:pointer;font-family:inherit;">
                                         ${d}: KES ${f}
                                     </button>`
@@ -1141,7 +1151,7 @@
 
                         <!-- Notes row -->
                         <textarea
-                            id="arNotes-${r.id}"
+                            id="arNotes-${rid}"
                             rows="2"
                             placeholder="Optional notes for the requester (e.g. 'Ad approved, pay to go live')…"
                             style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;"
@@ -1149,13 +1159,13 @@
 
                         <!-- Action buttons -->
                         <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                            <button class="btn btn-success btn-small" onclick="updateAdRequest('${r.id}','payment_pending')">
+                            <button class="btn btn-success btn-small" data-ar-action="status" data-ar-id="${rid}" data-ar-status="payment_pending">
                                 💳 Request Payment
                             </button>
-                            <button class="btn btn-secondary btn-small" onclick="updateAdRequest('${r.id}','approved')">
+                            <button class="btn btn-secondary btn-small" data-ar-action="status" data-ar-id="${rid}" data-ar-status="approved">
                                 ✅ Approve Free
                             </button>
-                            <button class="btn btn-danger btn-small" onclick="updateAdRequest('${r.id}','rejected')">
+                            <button class="btn btn-danger btn-small" data-ar-action="status" data-ar-id="${rid}" data-ar-status="rejected">
                                 ❌ Reject
                             </button>
                         </div>
@@ -1163,7 +1173,7 @@
                     ` : r.status === 'approved' ? `
                     <!-- ── APPROVED: mark complete ── -->
                     <div style="display:flex;gap:8px;margin-top:6px;">
-                        <button class="btn btn-secondary btn-small" onclick="updateAdRequest('${r.id}','completed')">
+                        <button class="btn btn-secondary btn-small" data-ar-action="status" data-ar-id="${rid}" data-ar-status="completed">
                             🏁 Mark Completed
                         </button>
                     </div>
@@ -1240,6 +1250,11 @@
 
         // ─── Permanently delete a request ───
         async function deleteAdRequest(id, businessName) {
+            // 4B.32: the name is no longer smuggled through an inline-handler argument; look it up locally
+            if (businessName === undefined) {
+                const rec = allAdRequests.find(x => String(x.id) === String(id));
+                businessName = rec ? rec.business_name : '';
+            }
             if (!confirm(`Permanently delete the ad request from "${businessName}"?\n\nThis cannot be undone.`)) return;
             try {
                 const res = await fetch(`/api/admin/ad-requests/${id}`, {
@@ -1263,6 +1278,41 @@
                 showAlert('adRequestAlert', 'Delete failed: ' + err.message, 'error');
             }
         }
+
+        // ─────────────────────────────────────────
+        // EVENT DELEGATION (4B.32)
+        // Record ids are read from data-* attributes - never interpolated into inline JS.
+        // ─────────────────────────────────────────
+
+        document.getElementById('noticesContainer').addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-notice-action]');
+            if (!btn) return;
+            const id = btn.getAttribute('data-notice-id');   // string, exactly as the old inline handler passed it
+            if (btn.getAttribute('data-notice-action') === 'edit') editNotice(id);
+            else if (btn.getAttribute('data-notice-action') === 'delete') openDeleteModal(id);
+        });
+
+        document.getElementById('adRequestsContainer').addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-ar-action]');
+            if (!btn) return;
+            const id = btn.getAttribute('data-ar-id');
+            switch (btn.getAttribute('data-ar-action')) {
+                case 'toggle-hide':
+                    toggleHideAdRequest(id, btn.getAttribute('data-ar-hide') === 'true');
+                    break;
+                case 'delete':
+                    deleteAdRequest(id);
+                    break;
+                case 'fee-preset': {
+                    const feeInput = document.getElementById('arFee-' + id);
+                    if (feeInput) feeInput.value = Number(btn.getAttribute('data-ar-fee'));
+                    break;
+                }
+                case 'status':
+                    updateAdRequest(id, btn.getAttribute('data-ar-status'));
+                    break;
+            }
+        });
 
         // ─────────────────────────────────────────
         // CHARACTER COUNTERS

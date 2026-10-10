@@ -61,6 +61,33 @@ function syncNoticeFilterNote() {
   el.classList.toggle("hidden", !t);
 }
 
+// ── Safe output helpers (Phase 4B.32) ────────────────────────────────────
+// Notice and advertisement fields are untrusted (an advertiser is any logged-in
+// user, and an admin approving an ad does not make its text safe). Notice cards
+// are therefore built with DOM APIs (textContent / addEventListener); no notice
+// value is ever concatenated into HTML, an attribute or an inline handler.
+// escHtml() exists only for the few places that must hand a string to an API that
+// itself parses HTML (showToast, and the ad-history template below).
+function escHtml(v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+// tel: link from a free-text contact number: optional leading +, then digits only
+// (7-15 of them). Anything else -> "" and the card shows the More button instead.
+// Never a javascript:/data: URL, never a quote or angle bracket in the attribute.
+function safeTelHref(raw) {
+  const s = String(raw == null ? "" : raw).trim();
+  if (!/^\+?[0-9\s().-]{7,20}$/.test(s)) return "";
+  const digits = s.replace(/[^0-9]/g, "");
+  if (digits.length < 7 || digits.length > 15) return "";
+  return "tel:" + (s.charAt(0) === "+" ? "+" : "") + digits;
+}
+function noticeEl(tag, cls, text) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text != null) el.textContent = text;
+  return el;
+}
+
 async function renderNoticeboardTab() {
   // Wire filter buttons
   document.querySelectorAll(".notice-filter").forEach(btn => {
@@ -92,6 +119,79 @@ async function renderNoticeboardTab() {
   }
 }
 
+// One notice/ad card. Same structure, classes and inline styles as before; every
+// notice-controlled value goes in through textContent or a validated property.
+function buildNoticeCard(n) {
+  const cm       = noticeCategoryInfo(n);
+  const emoji    = NOTICE_EMOJI[n.category] || "📌";
+  const isUrgent = noticeIsAlert(n);
+  const isAd     = !!n.is_ad;
+
+  // Smart relative date
+  let dateStr = "";
+  if (n.created_at) {
+    const ts   = new Date(n.created_at).getTime();
+    const diff = Date.now() - ts;
+    const mins = Math.floor(diff / 60000);
+    const hrs  = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (diff < 60000)      dateStr = "Just now";
+    else if (mins < 60)    dateStr = `${mins}m ago`;
+    else if (hrs < 24)     dateStr = `${hrs}h ago`;
+    else if (days === 1)   dateStr = "Yesterday";
+    else if (days < 7)     dateStr = `${days}d ago`;
+    else                   dateStr = new Date(n.created_at).toLocaleDateString("en-KE", { day:"numeric", month:"short" });
+  }
+
+  const author = n.author || (isAd ? "Sponsored" : "Admin");
+  const title  = n.title == null ? "" : String(n.title);
+
+  const card = noticeEl("div", "notice-card scroll-reveal" + (isAd ? " notice-card--ad" : ""));
+
+  const top = noticeEl("div", "notice-card-top");
+  const em  = noticeEl("span", "", emoji);
+  em.style.cssText = "font-size:0.85rem;line-height:1;margin-right:0.1rem";
+  top.appendChild(em);
+  top.appendChild(noticeEl("span", "notice-cat-badge " + cm.cls, cm.label));
+  if (isAd) top.appendChild(noticeEl("span", "notice-sponsored", "Ad"));
+  if (isUrgent && !isAd) {
+    const urgent = noticeEl("span", "notice-sponsored", "⚠ Urgent");
+    urgent.style.cssText = "background:#e63946;color:#fff;border:none";
+    top.appendChild(urgent);
+  }
+  card.appendChild(top);
+
+  const body = noticeEl("div", "notice-card-body");
+  body.appendChild(noticeEl("div", "notice-card-title", title));
+  body.appendChild(noticeEl("div", "notice-card-desc", n.content == null ? "" : String(n.content)));
+  card.appendChild(body);
+
+  const footer = noticeEl("div", "notice-card-footer");
+  const meta   = noticeEl("div", "notice-meta");
+  meta.appendChild(noticeEl("strong", "", String(author)));
+  meta.appendChild(document.createTextNode(" · " + dateStr));
+  footer.appendChild(meta);
+
+  // Ads with a usable phone number get a Call link; everything else gets More.
+  // More shows the notice title in a toast, exactly as before. showToast() renders
+  // HTML, so the title is escaped for that sink; the handler is attached with
+  // addEventListener and closes over this card's own notice (no inline JS).
+  const tel = isAd ? safeTelHref(n.contact_phone) : "";
+  let cta;
+  if (tel) {
+    cta = noticeEl("a", "notice-cta-btn", "📞 Call");
+    cta.href = tel;
+    cta.style.textDecoration = "none";
+  } else {
+    cta = noticeEl("button", "notice-cta-btn", "More →");
+    cta.type = "button";
+    cta.addEventListener("click", () => showToast("📌 " + escHtml(title), "info"));
+  }
+  footer.appendChild(cta);
+  card.appendChild(footer);
+  return card;
+}
+
 function buildNotices(notices) {
   const grid  = document.getElementById("noticesGrid");
   const empty = document.getElementById("noticeEmpty");
@@ -106,51 +206,10 @@ function buildNotices(notices) {
   }
   if (empty) empty.classList.add("hidden");
 
-  grid.innerHTML = filtered.map(n => {
-    const cm       = noticeCategoryInfo(n);
-    const emoji    = NOTICE_EMOJI[n.category] || "📌";
-    const isUrgent = noticeIsAlert(n);
-    const isAd     = !!n.is_ad;
-
-    // Smart relative date
-    let dateStr = "";
-    if (n.created_at) {
-      const ts   = new Date(n.created_at).getTime();
-      const diff = Date.now() - ts;
-      const mins = Math.floor(diff / 60000);
-      const hrs  = Math.floor(diff / 3600000);
-      const days = Math.floor(diff / 86400000);
-      if (diff < 60000)      dateStr = "Just now";
-      else if (mins < 60)    dateStr = `${mins}m ago`;
-      else if (hrs < 24)     dateStr = `${hrs}h ago`;
-      else if (days === 1)   dateStr = "Yesterday";
-      else if (days < 7)     dateStr = `${days}d ago`;
-      else                   dateStr = new Date(n.created_at).toLocaleDateString("en-KE", { day:"numeric", month:"short" });
-    }
-
-    const author   = n.author || (isAd ? "Sponsored" : "Admin");
-    const safeTitle = (n.title || "").replace(/'/g, "\'");
-    const contactBtn = isAd && n.contact_phone
-      ? `<a class="notice-cta-btn" href="tel:${n.contact_phone}" style="text-decoration:none">📞 Call</a>`
-      : `<button class="notice-cta-btn" onclick="showToast('📌 ${safeTitle}','info')">More →</button>`;
-
-    return `<div class="notice-card scroll-reveal${isAd ? ' notice-card--ad' : ''}">
-      <div class="notice-card-top">
-        <span style="font-size:0.85rem;line-height:1;margin-right:0.1rem">${emoji}</span>
-        <span class="notice-cat-badge ${cm.cls}">${cm.label}</span>
-        ${isAd ? '<span class="notice-sponsored">Ad</span>' : ""}
-        ${isUrgent && !isAd ? '<span class="notice-sponsored" style="background:#e63946;color:#fff;border:none">⚠ Urgent</span>' : ""}
-      </div>
-      <div class="notice-card-body">
-        <div class="notice-card-title">${n.title || ""}</div>
-        <div class="notice-card-desc">${n.content || ""}</div>
-      </div>
-      <div class="notice-card-footer">
-        <div class="notice-meta"><strong>${author}</strong> · ${dateStr}</div>
-        ${contactBtn}
-      </div>
-    </div>`;
-  }).join("");
+  const frag = document.createDocumentFragment();
+  filtered.forEach(n => frag.appendChild(buildNoticeCard(n)));
+  grid.textContent = "";
+  grid.appendChild(frag);
   initScrollReveal(); // newly injected cards need the observer re-run on them
 }
 
@@ -216,7 +275,7 @@ async function loadMyAdRequests() {
     if (!data.success) throw new Error(data.error);
     renderAdHistory(data.adRequests, list);
   } catch (err) {
-    list.innerHTML = `<div style="text-align:center;padding:1.5rem 0;color:var(--red-accent);font-size:0.8rem;">⚠️ ${err.message}</div>`;
+    list.innerHTML = `<div style="text-align:center;padding:1.5rem 0;color:var(--red-accent);font-size:0.8rem;">⚠️ ${escHtml(err.message)}</div>`;
   }
 }
 
@@ -234,31 +293,37 @@ function renderAdHistory(requests, container) {
     completed:       { label: '🏁 Completed',          bg: '#eff6ff', color: '#1d4ed8' },
   };
 
-  container.innerHTML = requests.map(r => {
-    const s   = statusConfig[r.status] || { label: r.status, bg: '#f3f4f6', color: '#6b7280' };
+  // Every request field below is advertiser- or admin-supplied text: escHtml() for text, and the
+  // Pay button gets its data from the request object via addEventListener (no inline handler).
+  container.innerHTML = requests.map((r, i) => {
+    const s   = Object.prototype.hasOwnProperty.call(statusConfig, r.status) ? statusConfig[r.status] : { label: r.status, bg: '#f3f4f6', color: '#6b7280' };
     const dt  = new Date(r.submitted_at).toLocaleDateString('en-KE', { day:'numeric', month:'short', year:'numeric' });
     const isPayable = r.status === 'payment_pending';
 
     return `
     <div style="border:1px solid var(--sand);border-radius:0.75rem;padding:0.9rem;margin-bottom:0.75rem;background:white;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;margin-bottom:0.5rem;">
-        <div style="font-weight:700;font-size:0.85rem;color:var(--text-dark);flex:1;">${r.business_name}</div>
-        <span style="font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:50px;white-space:nowrap;background:${s.bg};color:${s.color};">${s.label}</span>
+        <div style="font-weight:700;font-size:0.85rem;color:var(--text-dark);flex:1;">${escHtml(r.business_name)}</div>
+        <span style="font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:50px;white-space:nowrap;background:${s.bg};color:${s.color};">${escHtml(s.label)}</span>
       </div>
-      <div style="font-size:0.78rem;color:var(--mid-gray);margin-bottom:0.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${r.ad_content}</div>
+      <div style="font-size:0.78rem;color:var(--mid-gray);margin-bottom:0.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escHtml(r.ad_content)}</div>
       <div style="display:flex;gap:1rem;font-size:0.72rem;color:var(--mid-gray);flex-wrap:wrap;margin-bottom:${isPayable || r.notes ? '0.65rem' : '0'};">
-        <span>⏱ ${r.duration}</span>
+        <span>⏱ ${escHtml(r.duration)}</span>
         <span>📅 ${dt}</span>
-        ${r.fee ? `<span style="color:#7c3aed;font-weight:700;">KES ${r.fee.toLocaleString()}</span>` : ''}
+        ${r.fee ? `<span style="color:#7c3aed;font-weight:700;">KES ${(Number(r.fee) || 0).toLocaleString()}</span>` : ''}
       </div>
-      ${r.notes ? `<div style="font-size:0.74rem;color:var(--text-mid);background:var(--cream-dark);border-radius:0.4rem;padding:0.4rem 0.6rem;margin-bottom:${isPayable ? '0.65rem' : '0'};">📝 ${r.notes}</div>` : ''}
+      ${r.notes ? `<div style="font-size:0.74rem;color:var(--text-mid);background:var(--cream-dark);border-radius:0.4rem;padding:0.4rem 0.6rem;margin-bottom:${isPayable ? '0.65rem' : '0'};">📝 ${escHtml(r.notes)}</div>` : ''}
       ${isPayable ? `
-        <button onclick="openPayFromHistory('${r.id}', ${r.fee}, '${r.duration}')"
+        <button type="button" data-ad-pay="${i}"
           style="width:100%;display:flex;align-items:center;justify-content:center;gap:0.4rem;background:linear-gradient(135deg,#00a550,#007a3a);color:white;border:none;border-radius:50px;padding:0.5rem;font-size:0.8rem;font-weight:700;cursor:pointer;font-family:'Outfit',sans-serif;">
-          📲 Pay KES ${r.fee.toLocaleString()} via M-Pesa
+          📲 Pay KES ${(Number(r.fee) || 0).toLocaleString()} via M-Pesa
         </button>` : ''}
     </div>`;
   }).join('');
+  container.querySelectorAll('[data-ad-pay]').forEach(btn => btn.addEventListener('click', () => {
+    const r = requests[Number(btn.dataset.adPay)];
+    if (r) openPayFromHistory(r.id, Number(r.fee) || 0, r.duration);
+  }));
 }
 
 // Opens the pay pane from history tab (switching to new-request pane area)

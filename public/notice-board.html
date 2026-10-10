@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Notice Board - Ngoliba InfoTrack</title>
+    <title>Notice Board - eTaifa Link</title>
     <style>
         * {
             margin: 0;
@@ -664,14 +664,20 @@
                     </div>`;
                 }
 
+                // 4B.32: category/priority are free-text columns - treat as untrusted.
+                // Null-safe, and encoded per context (class token vs. HTML text).
+                const cat = String(notice.category == null ? '' : notice.category);
+                const pri = String(notice.priority == null ? '' : notice.priority);
+                const priLabel = pri ? pri.charAt(0).toUpperCase() + pri.slice(1) : '';
+
                 return `
-                <div class="notice-card ${notice.category}">
+                <div class="notice-card ${cssToken(cat)}">
                     <div class="notice-header">
                         <h3 class="notice-title">${escapeHTML(notice.title)}</h3>
                         <div class="notice-badges">
-                            <span class="badge badge-category">${notice.category}</span>
-                            <span class="badge badge-priority-${notice.priority}">
-                                ${notice.priority.charAt(0).toUpperCase() + notice.priority.slice(1)}
+                            <span class="badge badge-category">${escapeHTML(cat)}</span>
+                            <span class="badge badge-priority-${cssToken(pri)}">
+                                ${escapeHTML(priLabel)}
                             </span>
                         </div>
                     </div>
@@ -683,7 +689,7 @@
                             <div>📅 ${postedStr}</div>
                             ${expiryHTML}
                         </div>
-                        <div>${notice.created_by || ''}</div>
+                        <div>${escapeHTML(notice.created_by || '')}</div>
                     </div>
                 </div>`;
             }).join('');
@@ -780,7 +786,11 @@
         function showStatus(message, type = 'info') {
             const statusEl = document.getElementById('statusMessage');
             statusEl.className = `status-message ${type}`;
-            statusEl.innerHTML = `<span>${message}</span>`;
+            // 4B.32: message can carry server-supplied text (error.message) - never parse as HTML
+            statusEl.textContent = '';
+            const msgSpan = document.createElement('span');
+            msgSpan.textContent = message;
+            statusEl.appendChild(msgSpan);
             statusEl.classList.remove('hidden');
 
             // Auto-hide after 5 seconds
@@ -789,10 +799,17 @@
             }, 5000);
         }
 
+        // 4B.32: encodes & < > " ' so the result is safe in HTML text AND in quoted attributes.
+        // (The previous textContent->innerHTML round-trip left quotes untouched.)
         function escapeHTML(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            return String(text == null ? '' : text).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
+        // 4B.32: reduce a free-text value to a single safe CSS class token.
+        function cssToken(value) {
+            return String(value == null ? '' : value).replace(/[^A-Za-z0-9_-]+/g, '-');
         }
 
         function formatDate(dateString) {
