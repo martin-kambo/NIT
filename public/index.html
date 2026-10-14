@@ -2629,8 +2629,8 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
       <!-- ═══ SECTION NAV — Tier 1 ═══ -->
       <div class="section-nav" id="sectionNav">
-        <button class="section-pill" data-section="engagement">&#128172; Engage</button>
-        <button class="section-pill active" data-section="community">&#127968; Community</button>
+        <button class="section-pill active" data-section="engagement">&#128172; Engage</button>
+        <button class="section-pill" data-section="community">&#127968; Community</button>
         <button class="section-pill" data-section="elections">&#128611; Elections</button>
         <button class="section-pill" data-section="services">&#127963; Services</button>
       </div>
@@ -3809,7 +3809,7 @@ function enterDashboard(){
   ["authContainer"].forEach(id=>document.getElementById(id)?.classList.add("hidden"));
   ["heroBand","countdownStrip","headerNav","avatarWrap"].forEach(id=>document.getElementById(id)?.classList.remove("hidden"));
   showPane("dashboardContent");
-  switchSection("community"); // Phase 4B.22: initialize 3-tier nav; hides countdown strip & hero badge
+  switchSection("engagement"); // Phase 4B.22: initialize 3-tier nav; hides countdown strip & hero badge
   renderDashboard();
   showWelcomePopup();
   faceoffInterval=setInterval(()=>{checkAndResetPeriod();updateFaceoff();},3000);
@@ -7800,6 +7800,20 @@ if(fp)new MutationObserver(()=>{fp.querySelectorAll('.forum-post:not([data-egr])
    The first time the Engage pill is used, load My Ward; after that the selected view persists as before. */
 const egPill=document.querySelector('.section-pill[data-section="engagement"]');
 if(egPill)egPill.addEventListener('click',()=>{if(S.view==='ward'&&!$('egMyWard').firstChild)loadWard()});
+/* The app opens on Engage. The enterDashboard() that actually runs is the one assigned late in the main script (the
+   earlier definition, which calls switchSection, is replaced) and it never switches section, so the landing is applied
+   here by wrapping the final enterDashboard, as the vote-stream patch does. This runs for session restore and for
+   login. Engage opens on My Ward, which is loaded here because the pill listener above only fires on a real click. */
+const enterPrev=window.enterDashboard;
+if(typeof enterPrev==='function')window.enterDashboard=function(){
+  try{return enterPrev.apply(this,arguments)}
+  finally{
+    if(typeof currentUser!=='undefined'&&currentUser&&typeof switchSection==='function'){
+      switchSection('engagement');
+      if(S.view==='ward'&&!$('egMyWard').firstChild)loadWard();
+    }
+  }
+};
 })();
 </script>
 </body>
