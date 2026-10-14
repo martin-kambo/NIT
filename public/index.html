@@ -2629,9 +2629,9 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
 
       <!-- ═══ SECTION NAV — Tier 1 ═══ -->
       <div class="section-nav" id="sectionNav">
+        <button class="section-pill" data-section="engagement">&#128172; Engage</button>
         <button class="section-pill active" data-section="community">&#127968; Community</button>
         <button class="section-pill" data-section="elections">&#128611; Elections</button>
-        <button class="section-pill" data-section="engagement">&#128172; Engage</button>
         <button class="section-pill" data-section="services">&#127963; Services</button>
       </div>
 
@@ -2798,13 +2798,13 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
       <div class="feature-pane" id="tabForum">
         <!-- ENGAGE: My Ward | Forum | Consultations | Report an Issue | Community Reports -->
         <div id="engageBar" role="tablist" aria-label="Community engagement">
-          <button type="button" data-eg="ward">&#127960;&#65039; My Ward</button>
-          <button type="button" data-eg="forum" class="active">&#128172; Forum</button>
+          <button type="button" data-eg="ward" class="active">&#127960;&#65039; My Ward</button>
+          <button type="button" data-eg="forum">&#128172; Forum</button>
           <button type="button" data-eg="consult">&#128220; Consultations</button>
           <button type="button" data-eg="report">&#128247; Report an Issue</button>
           <button type="button" data-eg="reports">&#128203; Community Reports</button>
         </div>
-        <div id="egForum">
+        <div id="egForum" style="display:none">
         <div class="forum-compose glass-panel">
           <div class="forum-compose-header">
             <img id="forumComposeAvatar" class="forum-compose-avatar" src="" alt="">
@@ -2831,7 +2831,7 @@ select.field-input { appearance: none; background-image: url("data:image/svg+xml
         </div>
         <div class="forum-posts" id="forumPosts"></div>
         </div><!-- /egForum (existing Forum, unchanged) -->
-        <div id="egMyWard" style="display:none"></div>
+        <div id="egMyWard"></div>
         <div id="egConsult" style="display:none"></div>
         <div id="egReport" style="display:none"></div>
         <div id="egReports" style="display:none"></div>
@@ -7495,7 +7495,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const CATS=['Roads & Transport','Waste Management','Water','Street Lighting','Public Safety','Unlicensed Business','Other'];
 const FLOW=['Reported','Under Review','Assigned','In Progress','Resolved'];
 const STATUSES=[...FLOW,'Rejected'];
-const S={view:'forum',imgs:[],openC:null,mine:false,statusF:'',officer:null,received:null,open:null,prefill:null,subm:null,submData:null,cm:{on:null,list:[],wards:null,form:null,confirm:null,busy:false,loadErr:false}};
+const S={view:'ward',imgs:[],openC:null,mine:false,statusF:'',officer:null,received:null,open:null,prefill:null,subm:null,submData:null,cm:{on:null,list:[],wards:null,form:null,confirm:null,busy:false,loadErr:false}};
 const fmt=d=>d?new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'';
 const toast=(m,t)=>typeof showToast==='function'?showToast(m,t||'info'):alert(m);
 async function api(url,opt){
@@ -7795,7 +7795,11 @@ if(fp)new MutationObserver(()=>{fp.querySelectorAll('.forum-post:not([data-egr])
   b.addEventListener('click',()=>{const tx=(p.querySelector('.forum-post-text')||{}).textContent||'';
     S.prefill={title:tx.trim().slice(0,80),description:tx.trim(),category:/water/i.test(tx)?'Water':/road|drain/i.test(tx)?'Roads & Transport':/waste|garbage/i.test(tx)?'Waste Management':'Other'};setView('report')});
   p.appendChild(b)})}).observe(fp,{childList:true});
-setView('forum');
+/* Engage opens on My Ward. The initial state (S.view above, the active button and the visible panel in the markup) is
+   already My Ward, so there is no setView() call here: setView('ward') would fetch, and this script runs before login.
+   The first time the Engage pill is used, load My Ward; after that the selected view persists as before. */
+const egPill=document.querySelector('.section-pill[data-section="engagement"]');
+if(egPill)egPill.addEventListener('click',()=>{if(S.view==='ward'&&!$('egMyWard').firstChild)loadWard()});
 })();
 </script>
 </body>

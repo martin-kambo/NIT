@@ -24,9 +24,11 @@ const {
   createNoticeWithDays,
   createNoticeWithExpiresAt,
   getNoticeWard,
+  getNoticeWardAndCategory,
   updateNotice,
   deleteNotice,
 } = require('../lib/notices');
+const NoticeValidation = require('../lib/notice-validation');
 
 const router = express.Router();
 
@@ -162,29 +164,107 @@ router.get('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), asyn
 // response shape below is byte-for-byte identical to the original
 // inline version (line endings normalized from CRLF to LF to match
 // this file's existing convention -- content otherwise unchanged).
+//
+// Phase 4B.36 then hardened the five WRITE routes below (not the GET routes,
+// not the ad-request routes):
+//   * request bodies are validated and normalised by lib/notice-validation.js
+//     BEFORE any database access (400 on bad input);
+//   * SG1  an existing notice with no ward can only be changed or deleted by a
+//          SUPER_ADMIN;
+//   * SG2  a notice is never created with a NULL ward: if no ward was named
+//          and the founding ward is unresolved the request gets a 503;
+//   * SG3  a supplied wardId must be a canonical positive integer (400), and is
+//          never silently replaced by the founding ward;
+//   * SG4  a well-formed wardId that names no ward gets a 400 instead of a 500;
+//   * a 500 no longer returns the raw error text (it is logged instead).
+// lib/rbac.js is deliberately untouched: hasPermission() is shared by many
+// unrelated routes, so every safeguard here is local to this file.
 // ────────────────────────────────────────────────────────────────────────────
+
+const GENERIC_SERVER_ERROR = 'Internal server error';
+const FOUNDING_WARD_UNAVAILABLE = 'The default ward is not available right now. Please try again later.';
+const UNKNOWN_WARD = 'wardId does not match an existing ward';
+
+// The foreign key notices_ward_id_fk (bootstrap/migrations.js,
+// ensurePhase2Migrations) rejects a ward_id that is not in wards. Matches only
+// that exact failure: SQLSTATE 23503 on that constraint. Anything else is not
+// a "nonexistent ward" and stays a generic 500.
+function isUnknownWardError(err) {
+  return Boolean(err) && err.code === '23503' && err.constraint === 'notices_ward_id_fk';
+}
+
+function sendBadRequest(res, error) {
+  return res.status(400).json({ success: false, error });
+}
+
+// Raw error text (SQL, constraint names, driver messages) goes to the server
+// log only; the client gets a fixed message.
+function sendServerError(res) {
+  return res.status(500).json({ success: false, error: GENERIC_SERVER_ERROR });
+}
+
+// SG1 + the existing exact-ward rule, for a notice that ALREADY exists.
+// `currentWard` is its ward_id: a number, or null for a notice with no ward.
+// lib/rbac.js hasPermission() skips the ward comparison when the target ward
+// is null, so without this guard ANY MODERATOR+ administrator could change or
+// delete such a notice. Here only SUPER_ADMIN may; everyone else gets 403.
+// Real wards are unchanged: requirePermission() decides, exactly as before.
+function authorizeExistingNotice(req, res, currentWard) {
+  const hasNoWard = currentWard === null || currentWard === undefined;
+  if (hasNoWard && !(req.user && req.user.role === RBAC.ROLES.SUPER_ADMIN)) {
+    res.status(403).json({ success: false, error: 'Forbidden' });
+    return false;
+  }
+  return requirePermission(req, res, { wardId: currentWard });
+}
+
+// SG2 + SG3 for the two create routes. Returns
+//   { wardId, supplied }   the ward to create the notice in, or
+//   null                   a response (400 / 503) has already been sent.
+// Order: wardId syntax (400) -> founding-ward fallback (503) -> the caller
+// then runs requirePermission() on the result, as before.
+function resolveCreateWard(res, rawWardId) {
+  const parsed = NoticeValidation.parseWardId(rawWardId);
+  if (!parsed.ok) {
+    sendBadRequest(res, parsed.error);
+    return null;
+  }
+  if (parsed.supplied) return { wardId: parsed.wardId, supplied: true };
+
+  const foundingWardId = getFoundingWardId();
+  if (foundingWardId === null || foundingWardId === undefined) {
+    res.status(503).json({ success: false, error: FOUNDING_WARD_UNAVAILABLE });
+    return null;
+  }
+  return { wardId: foundingWardId, supplied: false };
+}
 
 // ══════════════════════════════════════════════
 // POST /api/notices — admin: add a new notice
 // ══════════════════════════════════════════════
 // Phase 4A.2: MODERATOR+, scope-checked against the target ward. Replaces
 // the legacy body.adminSecret === process.env.ADMIN_SECRET check.
+// Phase 4B.36: `days` is validated (omitted/null/0 -> 30, otherwise a whole
+// number 1..365); this route ignores `expiresAt`, as before.
 router.post('/api/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  let ward = null;
   try {
-    const { title, content, category, priority, days, wardId } = req.body;
-    if (!title || !content) {
-      return res.status(400).json({ success: false, error: 'title and content are required' });
-    }
-    // Phase 3A Task 9: was hardcoded getFoundingWardId(). wardId now read from
-    // body, falling back so existing callers that don't send it keep working.
-    const resolvedWardId = parseInt(wardId, 10) || getFoundingWardId();
-    if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
+    const input = NoticeValidation.validateNoticeCreate(req.body, { expiry: 'days' });
+    if (!input.ok) return sendBadRequest(res, input.error);
+    const { title, content, category, priority, days } = input.value;
+
+    // Phase 3A Task 9: wardId is read from the body. Phase 4B.36: no more
+    // silent fallback for a bad value, and never a NULL ward (SG2/SG3).
+    ward = resolveCreateWard(res, req.body && req.body.wardId);
+    if (!ward) return;
+    if (!requirePermission(req, res, { wardId: ward.wardId })) return;
     // Phase 4B.2C: SQL moved to lib/notices.js createNoticeWithDays().
-    const notice = await createNoticeWithDays(pool, { title, content, category, priority, days, wardId: resolvedWardId });
+    const notice = await createNoticeWithDays(pool, { title, content, category, priority, days, wardId: ward.wardId });
     res.json({ success: true, notice });
   } catch (error) {
     console.error('/api/notices POST error:', error);
-    res.status(500).json({ success: false, error: error.message });
+    if (ward && ward.supplied && isUnknownWardError(error)) return sendBadRequest(res, UNKNOWN_WARD);
+    sendServerError(res);
   }
 });
 
@@ -193,72 +273,98 @@ router.post('/api/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (re
 // when it exists. If it doesn't exist, there's nothing to scope-check —
 // falls through to the original no-op-delete-then-success behavior so the
 // response contract for that case is unchanged from before this phase.
+// Phase 4B.36: a notice with no ward can only be deleted by a SUPER_ADMIN (SG1).
 router.delete('/api/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/deleteNotice().
     const currentWard = await getNoticeWard(pool, req.params.id);
-    if (currentWard !== undefined && !requirePermission(req, res, { wardId: currentWard })) return;
+    if (currentWard !== undefined && !authorizeExistingNotice(req, res, currentWard)) return;
 
     await deleteNotice(pool, req.params.id);
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('/api/notices DELETE error:', error.message);
+    sendServerError(res);
   }
 });
 
 // Phase 4A.2: MODERATOR+, scope-checked against the target ward.
+// Phase 4B.36: body validated first (400); expiresAt omitted/null means no
+// expiry on create; then ward resolution (400/503), then the permission check.
 router.post('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
-  const { title, content, category, priority, expiresAt, wardId } = req.body;
-  if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
-  // Phase 3A Task 9: was hardcoded getFoundingWardId(). wardId now read from
-  // body, falling back so existing callers that don't send it keep working.
-  const resolvedWardId = parseInt(wardId, 10) || getFoundingWardId();
-  if (!requirePermission(req, res, { wardId: resolvedWardId })) return;
+  let ward = null;
   try {
+    const input = NoticeValidation.validateNoticeCreate(req.body, { expiry: 'expiresAt' });
+    if (!input.ok) return sendBadRequest(res, input.error);
+    const { title, content, category, priority, expiresAt } = input.value;
+
+    // Phase 3A Task 9: wardId is read from the body. Phase 4B.36: no more
+    // silent fallback for a bad value, and never a NULL ward (SG2/SG3).
+    ward = resolveCreateWard(res, req.body && req.body.wardId);
+    if (!ward) return;
+    if (!requirePermission(req, res, { wardId: ward.wardId })) return;
+
     // Phase 4B.2C: SQL moved to lib/notices.js createNoticeWithExpiresAt().
-    const notice = await createNoticeWithExpiresAt(pool, { title, content, category, priority, expiresAt, wardId: resolvedWardId });
+    const notice = await createNoticeWithExpiresAt(pool, { title, content, category, priority, expiresAt, wardId: ward.wardId });
     res.json({ success: true, notice });
   } catch (err) {
     console.error('POST /api/admin/notices error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    if (ward && ward.supplied && isUnknownWardError(err)) return sendBadRequest(res, UNKNOWN_WARD);
+    sendServerError(res);
   }
 });
 
 // Phase 4A.2: MODERATOR+, scope-checked against the notice's current ward
 // (this route doesn't accept wardId in the body at all, so the only way to
 // scope-check is against the existing record).
+// Phase 4B.36, in this order:
+//   1. everything that does not need the stored notice is validated (400);
+//   2. ONE statement loads the notice's ward and category (404 if missing);
+//   3. permission: SG1 for a ward-less notice, exact-ward rule otherwise (403);
+//   4. only now the category rule that needs the stored category: legacy
+//      `health` may be kept, never introduced, never silently rewritten (400)
+//      -- after the permission check so the stored category is not revealed to
+//      a caller who may not touch the notice;
+//   5. the UPDATE. `expiresAt` omitted keeps the stored expiry, null clears
+//      it, a timestamp replaces it. The `health` rule is re-checked inside the
+//      UPDATE itself (lib/notices.js), so there is no check-then-write gap.
 router.put('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
-  const { title, content, category, priority, expiresAt } = req.body;
-  if (!title || !content) return res.status(400).json({ success: false, error: 'title and content are required' });
+  const input = NoticeValidation.validateNoticeUpdate(req.body);
+  if (!input.ok) return sendBadRequest(res, input.error);
+  const { title, content, categoryInput, priority, expiresAt } = input.value;
   try {
-    // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/updateNotice().
-    const currentWard = await getNoticeWard(pool, req.params.id);
-    if (currentWard === undefined) return res.status(404).json({ success: false, error: 'Notice not found' });
-    if (!requirePermission(req, res, { wardId: currentWard })) return;
+    // Phase 4B.2C/4B.36: SQL in lib/notices.js getNoticeWardAndCategory()/updateNotice().
+    const existing = await getNoticeWardAndCategory(pool, req.params.id);
+    if (existing === undefined) return res.status(404).json({ success: false, error: 'Notice not found' });
+    if (!authorizeExistingNotice(req, res, existing.wardId)) return;
 
-    const notice = await updateNotice(pool, req.params.id, { title, content, category, priority, expiresAt });
+    const resolved = NoticeValidation.resolveUpdateCategory(categoryInput, existing.category);
+    if (!resolved.ok) return sendBadRequest(res, resolved.error);
+
+    const notice = await updateNotice(pool, req.params.id, { title, content, category: resolved.category, priority, expiresAt });
     if (!notice) return res.status(404).json({ success: false, error: 'Notice not found' });
     res.json({ success: true, notice });
   } catch (err) {
     console.error('PUT /api/admin/notices error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    sendServerError(res);
   }
 });
 
 // Phase 4A.2: MODERATOR+, scope-checked against the notice's current ward
 // when it exists (falls through to the original no-op-then-success
 // behavior when it doesn't, matching the pre-existing response contract).
+// Phase 4B.36: a notice with no ward can only be deleted by a SUPER_ADMIN (SG1).
 router.delete('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/deleteNotice().
     const currentWard = await getNoticeWard(pool, req.params.id);
-    if (currentWard !== undefined && !requirePermission(req, res, { wardId: currentWard })) return;
+    if (currentWard !== undefined && !authorizeExistingNotice(req, res, currentWard)) return;
 
     await deleteNotice(pool, req.params.id);
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /api/admin/notices error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    sendServerError(res);
   }
 });
 
