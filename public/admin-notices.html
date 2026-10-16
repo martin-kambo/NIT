@@ -713,7 +713,8 @@
             isAuthenticated: false,   // Phase 4A.3D: no more raw password held in
             notices: [],              // memory — the credential is the browser's
             editingId: null,          // own HttpOnly session cookie now.
-            deleteId: null
+            deleteId: null,
+            editingExpiryField: null  // expiry field text Edit loaded ('' = none); null when not editing
         };
 
         // ─────────────────────────────────────────
@@ -837,7 +838,7 @@
                         content,
                         category,
                         priority,
-                        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null
+                        expiresAt: expiryForRequest(expiresAt)
                     })
                 });
 
@@ -922,8 +923,37 @@
             `).join('');
         }
 
+        // Notice ids are numbers when the column is SERIAL and strings when it is UUID, while
+        // data-notice-id is always a string, so ids are compared as strings.
+        function findNotice(id) {
+            return state.notices.find(n => String(n.id) === String(id));
+        }
+
+        // The API returns the expiry as an ISO instant (expires_at). A datetime-local field holds LOCAL
+        // wall-clock text ("YYYY-MM-DDTHH:mm"), so the instant is rendered with the local getters; the
+        // UTC clock text (toISOString) must not be copied into it.
+        function expiryToFieldValue(raw) {
+            if (raw == null || raw === '') return '';
+            const d = new Date(raw);
+            if (isNaN(d.getTime())) return '';
+            const p = n => String(n).padStart(2, '0');
+            return String(d.getFullYear()).padStart(4, '0') + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+                'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+        }
+
+        // What to send as expiresAt. undefined = leave the key out (the server then keeps the stored
+        // expiry, which is also exact to the second); null = clear it; a string = replace it.
+        //   editing, field exactly as Edit loaded it -> undefined (preserve)
+        //   editing, field changed to another value  -> that value as an ISO instant
+        //   editing, field emptied                   -> null (intentional clear)
+        //   creating                                 -> ISO instant, or null when left empty (as before)
+        function expiryForRequest(fieldValue) {
+            if (state.editingId && fieldValue === state.editingExpiryField) return undefined;
+            return fieldValue ? new Date(fieldValue).toISOString() : null;
+        }
+
         function editNotice(id) {
-            const notice = state.notices.find(n => n.id === id);
+            const notice = findNotice(id);
             if (!notice) return;
 
             state.editingId = id;
@@ -933,11 +963,10 @@
             document.getElementById('content').value = notice.content;
             document.getElementById('category').value = notice.category;
             document.getElementById('priority').value = notice.priority;
-            
-            if (notice.expiresAt) {
-                const date = new Date(notice.expiresAt);
-                document.getElementById('expiresAt').value = date.toISOString().slice(0, 16);
-            }
+
+            // Always set the field (also to ''), so a previous notice's expiry cannot carry over.
+            state.editingExpiryField = expiryToFieldValue(notice.expires_at);
+            document.getElementById('expiresAt').value = state.editingExpiryField;
 
             document.getElementById('submitBtn').textContent = 'Update Notice';
             document.getElementById('cancelBtn').style.display = 'inline-block';
@@ -948,6 +977,7 @@
 
         function resetForm() {
             state.editingId = null;
+            state.editingExpiryField = null;
             document.getElementById('noticeForm').reset();
             document.getElementById('formTitle').textContent = 'Create New Notice';
             document.getElementById('submitBtn').textContent = 'Create Notice';
@@ -984,7 +1014,8 @@
         }
 
         function openDeleteModal(id) {
-            const notice = state.notices.find(n => n.id === id);
+            const notice = findNotice(id);
+            if (!notice) return;   // unknown id: nothing to confirm (same guard as editNotice)
             state.deleteId = id;
             document.getElementById('deleteNoticeTitle').textContent = notice.title;
             document.getElementById('deleteModal').classList.add('show');
