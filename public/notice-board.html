@@ -224,6 +224,37 @@
             border-left-color: var(--secondary);
         }
 
+        /* ADVERTISEMENTS (4B.37C): visibly not an official notice, whatever category they are filed under */
+        .notice-card.notice-card-ad {
+            border-left-color: var(--secondary);
+        }
+
+        .badge-ad {
+            background: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fcd34d;
+        }
+
+        .ad-label {
+            font-size: 12px;
+            color: var(--text-light);
+            margin-bottom: 8px;
+        }
+
+        .ad-details {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 16px;
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+
+        .ad-phone {
+            color: var(--primary);
+            font-weight: 600;
+            text-decoration: none;
+        }
+
         .notice-header {
             display: flex;
             justify-content: space-between;
@@ -331,6 +362,12 @@
 
         .empty-state p {
             color: var(--text-light);
+        }
+
+        /* 4B.37C: the script toggles `hidden` on this panel, but the page had no rule for it
+           (only .status-message.hidden), so the panel stayed visible under the notices. */
+        .empty-state.hidden {
+            display: none;
         }
 
         /* PAGINATION */
@@ -504,6 +541,8 @@
                         <option value="business">🏪 Business</option>
                         <option value="event">🎉 Events</option>
                         <option value="public">📋 Public</option>
+                        <option value="service">🛠️ Service Updates</option>
+                        <option value="payment">💳 Payment Reminders</option>
                         <option value="jobs">💼 Jobs</option>
                         <option value="general">📝 General</option>
                     </select>
@@ -548,8 +587,8 @@
                 <!-- EMPTY STATE -->
                 <div id="emptyState" class="empty-state hidden">
                     <div class="empty-state-icon">📭</div>
-                    <h3>No Notices Found</h3>
-                    <p>Try adjusting your filters or check back later for updates</p>
+                    <h3 id="emptyTitle">No Notices Found</h3>
+                    <p id="emptyHint">Try adjusting your filters or check back later for updates</p>
                 </div>
 
                 <!-- PAGINATION -->
@@ -565,7 +604,8 @@
         // ─────────────────────────────────────────
 
         const state = {
-            notices: [],
+            notices: [],      // what is displayed: the server's notices after the client-side filters
+            allNotices: [],   // 4B.37C: exactly what the server returned for the current request
             page: 1,
             limit: 10,
             total: 0,
@@ -582,10 +622,16 @@
         // API CALLS
         // ─────────────────────────────────────────
 
+        // 4B.37C: only the newest request may update the page. Otherwise a slow response
+        // (e.g. the 30 s refresh) that started before a filter change could arrive after
+        // it and put the previous, differently filtered cards back.
+        let latestRequestId = 0;
+
         /**
          * Fetch notices from API with current filters
          */
         async function fetchNotices(pageNum = 1) {
+            const requestId = ++latestRequestId;
             try {
                 state.isLoading = true;
                 state.page = pageNum;
@@ -595,23 +641,22 @@
                 params.append('page', pageNum);
                 params.append('limit', state.limit);
 
+                // 4B.37C: GET /api/notices reads `cat` (routes/notices.js) and ignores `category`.
+                // It has no priority or search parameter, so those two are applied below, in the page.
                 if (state.filters.category !== 'all') {
-                    params.append('category', state.filters.category);
-                }
-                if (state.filters.priority !== 'all') {
-                    params.append('priority', state.filters.priority);
-                }
-                if (state.filters.search.trim()) {
-                    params.append('search', state.filters.search);
+                    params.append('cat', state.filters.category);
                 }
 
                 const response = await fetch(`/api/notices?${params}`);
                 const json = await response.json();
 
+                if (requestId !== latestRequestId) return;   // a newer request has taken over
+
                 if (!json.success) throw new Error(json.error);
 
                 // Server returns flat { success, notices:[] } with no data wrapper or pagination
-                state.notices = json.notices || [];
+                state.allNotices = json.notices || [];
+                state.notices = filterNotices(state.allNotices, state.filters);
                 state.total = state.notices.length;
                 state.totalPages = 1;
 
@@ -621,12 +666,76 @@
                 showStatus(`Loaded ${state.notices.length} notices`, 'success');
 
             } catch (error) {
+                if (requestId !== latestRequestId) return;
                 console.error('Error fetching notices:', error);
                 showStatus('Failed to load notices: ' + error.message, 'error');
                 renderEmptyState();
             } finally {
-                state.isLoading = false;
+                if (requestId === latestRequestId) state.isLoading = false;
             }
+        }
+
+        // ─────────────────────────────────────────
+        // CLIENT-SIDE FILTERS (4B.37C)
+        // ─────────────────────────────────────────
+
+        // Priority and search narrow the notices the server already returned (the feed is not
+        // paginated and the server has no such parameters). Category was applied by the server
+        // through `cat`. A notice is kept only if it satisfies every active filter.
+        function filterNotices(list, filters) {
+            const priority = filters.priority === 'all' ? '' : String(filters.priority).toLowerCase();
+            const term = String(filters.search == null ? '' : filters.search).trim().toLowerCase();
+            return list.filter(notice => {
+                if (priority && String(notice.priority == null ? '' : notice.priority).toLowerCase() !== priority) {
+                    return false;
+                }
+                if (term) {
+                    // Only text the card displays: title, content and, for an ad, the business name.
+                    const haystack = [
+                        notice.title,
+                        notice.content,
+                        isAdNotice(notice) ? notice.business_name : ''
+                    ].map(v => String(v == null ? '' : v).toLowerCase()).join('\n');
+                    if (!haystack.includes(term)) return false;
+                }
+                return true;
+            });
+        }
+
+        function filtersActive() {
+            const f = state.filters;
+            return f.category !== 'all' || f.priority !== 'all' || String(f.search == null ? '' : f.search).trim() !== '';
+        }
+
+        // ─────────────────────────────────────────
+        // ADVERTISEMENTS (4B.37C)
+        // ─────────────────────────────────────────
+
+        // GET /api/notices marks ads with is_ad = true (a SQL boolean literal, so JSON true) and
+        // notices with false. The string/number forms are accepted in case a proxy or a future
+        // serializer changes the representation; anything else is NOT an ad.
+        function isAdNotice(notice) {
+            const v = notice && notice.is_ad;
+            if (v === true || v === 1) return true;
+            return typeof v === 'string' && ['true', 't', '1'].includes(v.trim().toLowerCase());
+        }
+
+        // A business detail worth showing: a non-empty string/number, not the text "null"/"undefined".
+        function adText(value) {
+            if (typeof value !== 'string' && typeof value !== 'number') return '';
+            const s = String(value).trim();
+            return /^(null|undefined)$/i.test(s) ? '' : s;
+        }
+
+        // Same rule as safeTelHref() in js/community.js (not loaded on this page): an optional
+        // leading +, then digits only (7-15 of them). Anything else gives '' and no link is made.
+        // The result can only ever be tel:+?digits - never javascript:/data: or a quote or bracket.
+        function safeTelHref(raw) {
+            const s = String(raw == null ? '' : raw).trim();
+            if (!/^\+?[0-9\s().-]{7,20}$/.test(s)) return '';
+            const digits = s.replace(/[^0-9]/g, '');
+            if (digits.length < 7 || digits.length > 15) return '';
+            return 'tel:' + (s.charAt(0) === '+' ? '+' : '') + digits;
         }
 
         // ─────────────────────────────────────────
@@ -642,6 +751,7 @@
 
             if (state.notices.length === 0) {
                 container.innerHTML = '';
+                setEmptyMessage(filtersActive());
                 emptyState.classList.remove('hidden');
                 return;
             }
@@ -670,19 +780,39 @@
                 const pri = String(notice.priority == null ? '' : notice.priority);
                 const priLabel = pri ? pri.charAt(0).toUpperCase() + pri.slice(1) : '';
 
+                // 4B.37C: advertisements are marked and labelled; ordinary notices are unchanged.
+                // Business name and phone come from ad_requests (free text from an advertiser), so
+                // they are escaped like every other field. The only href is the tel: URL that
+                // safeTelHref() builds from digits - an invalid number shows no phone at all.
+                const isAd = isAdNotice(notice);
+                let adLabelHTML = '';
+                let adDetailsHTML = '';
+                if (isAd) {
+                    adLabelHTML = '<div class="ad-label">Advertisement &mdash; not an official notice</div>';
+                    const business = adText(notice.business_name);
+                    const phone = adText(notice.contact_phone);
+                    const tel = safeTelHref(phone);
+                    const parts = [];
+                    if (business) parts.push(`<span class="ad-business">🏪 ${escapeHTML(business)}</span>`);
+                    if (tel) parts.push(`<a class="ad-phone" href="${escapeHTML(tel)}">📞 ${escapeHTML(phone)}</a>`);
+                    if (parts.length) adDetailsHTML = `<div class="ad-details">${parts.join('')}</div>`;
+                }
+
                 return `
-                <div class="notice-card ${cssToken(cat)}">
+                <div class="notice-card ${cssToken(cat)}${isAd ? ' notice-card-ad' : ''}">
                     <div class="notice-header">
                         <h3 class="notice-title">${escapeHTML(notice.title)}</h3>
                         <div class="notice-badges">
+                            ${isAd ? '<span class="badge badge-ad">Ad</span>' : ''}
                             <span class="badge badge-category">${escapeHTML(cat)}</span>
                             <span class="badge badge-priority-${cssToken(pri)}">
                                 ${escapeHTML(priLabel)}
                             </span>
                         </div>
                     </div>
-
+                    ${adLabelHTML}
                     <p class="notice-content">${escapeHTML(notice.content)}</p>
+                    ${adDetailsHTML}
 
                     <div class="notice-footer">
                         <div class="notice-meta">
@@ -748,7 +878,17 @@
          */
         function renderEmptyState() {
             document.getElementById('noticesContainer').innerHTML = '';
+            setEmptyMessage(false);
             document.getElementById('emptyState').classList.remove('hidden');
+        }
+
+        // 4B.37C: with filters on, say so; otherwise keep the original wording.
+        function setEmptyMessage(filtered) {
+            document.getElementById('emptyTitle').textContent =
+                filtered ? 'No Notices Match Your Filters' : 'No Notices Found';
+            document.getElementById('emptyHint').textContent =
+                filtered ? 'Try changing or clearing the filters to see more notices.'
+                         : 'Try adjusting your filters or check back later for updates';
         }
 
         // ─────────────────────────────────────────

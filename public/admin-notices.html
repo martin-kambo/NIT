@@ -351,6 +351,12 @@
             text-transform: capitalize;
         }
 
+        .notice-expiry {
+            margin-top: 8px;
+            font-size: 13px;
+            color: var(--text);
+        }
+
         .notice-actions {
             display: flex;
             gap: 8px;
@@ -887,6 +893,10 @@
         // RENDERING
         // ─────────────────────────────────────────
 
+        // 4B.38B: GET /api/admin/notices is SELECT n.*, so a row carries the database column
+        // is_archived (snake_case) and never isArchived. The test is strict (=== true): null, a missing
+        // property and any non-boolean count as "not archived", as COALESCE(is_archived, false) does in
+        // the public feed. No expired/approaching status is calculated here (deferred).
         function renderNotices() {
             const container = document.getElementById('noticesContainer');
 
@@ -908,8 +918,9 @@
                         <div class="notice-badges">
                             <span class="badge">${escapeHTML(notice.category)}</span>
                             <span class="badge">${escapeHTML(notice.priority)}</span>
-                            ${notice.isArchived ? '<span class="badge" style="background: #fecaca; color: #991b1b;">Archived</span>' : ''}
+                            ${notice.is_archived === true ? '<span class="badge" style="background: #fecaca; color: #991b1b;">Archived</span>' : ''}
                         </div>
+                        ${expiryLineHTML(notice.expires_at)}
                     </div>
                     <div class="notice-actions">
                         <button class="btn btn-secondary btn-small" data-notice-action="edit" data-notice-id="${escapeHTML(notice.id)}">
@@ -939,6 +950,18 @@
             const p = n => String(n).padStart(2, '0');
             return String(d.getFullYear()).padStart(4, '0') + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
                 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+        }
+
+        // 4B.38B: the expiry line of a notice card, "Expires YYYY-MM-DD HH:mm", in the browser's LOCAL
+        // time: the same clock text the Edit form shows (expiryToFieldValue). Only a non-empty string
+        // that parses to a real date gives a line; null, a missing value, '', blank or unparseable text,
+        // numbers and objects give no line. It only displays the stored value; it compares nothing with
+        // the current time and calculates no status. The text is escaped like every other card value.
+        function expiryLineHTML(raw) {
+            if (typeof raw !== 'string') return '';
+            const field = expiryToFieldValue(raw);
+            if (!field) return '';
+            return '<div class="notice-expiry">' + escapeHTML('Expires ' + field.replace('T', ' ')) + '</div>';
         }
 
         // What to send as expiresAt. undefined = leave the key out (the server then keeps the stored
