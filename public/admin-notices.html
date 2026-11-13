@@ -357,6 +357,18 @@
             color: var(--text);
         }
 
+        .notice-scope {
+            margin-top: 8px;
+            font-size: 13px;
+            color: var(--text);
+        }
+
+        .scope-note {
+            color: var(--text-light);
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
         .notice-actions {
             display: flex;
             gap: 8px;
@@ -631,6 +643,36 @@
                             </div>
                         </div>
 
+                        <div class="form-section" id="scopeSection">
+                            <h3>Who should see this notice</h3>
+
+                            <div id="scopeControls">
+                                <div class="form-group">
+                                    <label for="scopeLevel">Scope <span style="color: var(--danger);">*</span></label>
+                                    <select id="scopeLevel" onchange="onScopeLevelChange()">
+                                        <option value="">Loading your options...</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group" id="scopeCountyGroup" style="display: none;">
+                                    <label for="scopeCounty">County</label>
+                                    <select id="scopeCounty" onchange="onScopeCountyChange()"></select>
+                                </div>
+
+                                <div class="form-group" id="scopeConstituencyGroup" style="display: none;">
+                                    <label for="scopeConstituency">Constituency</label>
+                                    <select id="scopeConstituency" onchange="onScopeConstituencyChange()"></select>
+                                </div>
+
+                                <div class="form-group" id="scopeWardGroup" style="display: none;">
+                                    <label for="scopeWard">Ward</label>
+                                    <select id="scopeWard"></select>
+                                </div>
+                            </div>
+
+                            <p class="scope-note" id="scopeNote"></p>
+                        </div>
+
                         <div class="form-section">
                             <h3>Expiration</h3>
 
@@ -720,7 +762,8 @@
             notices: [],              // memory — the credential is the browser's
             editingId: null,          // own HttpOnly session cookie now.
             deleteId: null,
-            editingExpiryField: null  // expiry field text Edit loaded ('' = none); null when not editing
+            editingExpiryField: null, // expiry field text Edit loaded ('' = none); null when not editing
+            scope: newScopeState()    // Phase 4B.42: what this administrator may publish (see NOTICE SCOPE below)
         };
 
         // ─────────────────────────────────────────
@@ -767,10 +810,12 @@
             document.getElementById('adminScreen').classList.add('active');
             loadNotices();
             loadAdRequests(); // ✅ load on login so pending badge shows
+            loadScopeOptions();
         }
         async function handleLogout() {
             state.isAuthenticated = false;
             state.editingId = null;
+            state.scope = newScopeState();
 
             try {
                 await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) });
@@ -827,6 +872,18 @@
                 return;
             }
 
+            // Phase 4B.42: a NEW notice names its scope. An existing notice keeps the scope it was
+            // published with (the server ignores scope fields on PUT), so nothing is sent for an edit.
+            let scopeFields = {};
+            if (!state.editingId) {
+                const chosen = readScopeSelection();
+                if (chosen.error) {
+                    showAlert('adminAlert', chosen.error, 'error');
+                    return;
+                }
+                scopeFields = chosen.fields;
+            }
+
             try {
                 const method = state.editingId ? 'PUT' : 'POST';
                 const url = state.editingId 
@@ -839,13 +896,13 @@
                         'Content-Type': 'application/json'
                     },
                     credentials: 'include',
-                    body: JSON.stringify({
+                    body: JSON.stringify(Object.assign({
                         title,
                         content,
                         category,
                         priority,
                         expiresAt: expiryForRequest(expiresAt)
-                    })
+                    }, scopeFields))
                 });
 
                 const json = await response.json();
@@ -920,6 +977,7 @@
                             <span class="badge">${escapeHTML(notice.priority)}</span>
                             ${notice.is_archived === true ? '<span class="badge" style="background: #fecaca; color: #991b1b;">Archived</span>' : ''}
                         </div>
+                        <div class="notice-scope">${escapeHTML(noticeScopeText(notice))}</div>
                         ${expiryLineHTML(notice.expires_at)}
                     </div>
                     <div class="notice-actions">
@@ -993,6 +1051,7 @@
 
             document.getElementById('submitBtn').textContent = 'Update Notice';
             document.getElementById('cancelBtn').style.display = 'inline-block';
+            showScopeReadOnly(notice);
 
             // Scroll to form
             document.querySelector('.form-panel').scrollIntoView({ behavior: 'smooth' });
@@ -1007,6 +1066,233 @@
             document.getElementById('cancelBtn').style.display = 'none';
             document.getElementById('titleCount').textContent = '0';
             document.getElementById('contentCount').textContent = '0';
+            showScopeEditable();
+            renderScopeControls();
+        }
+
+        // ─────────────────────────────────────────
+        // NOTICE SCOPE (Phase 4B.42)
+        // ─────────────────────────────────────────
+        // Who may see a new notice: everyone (PLATFORM), one county, one constituency or one ward.
+        // The choices below are a CONVENIENCE only. GET /api/admin/notice-scope-options says which
+        // levels this administrator may publish at and which area they administer; POST
+        // /api/admin/notices re-validates the geography against the real tables and re-checks the
+        // administrator's own assignment, so a request made by hand gets no further than the form.
+
+        const SCOPE_LEVEL_LABELS = {
+            PLATFORM: 'Platform-wide (everyone)',
+            COUNTY: 'A whole county',
+            CONSTITUENCY: 'A whole constituency',
+            WARD: 'One ward'
+        };
+        // Which geography selectors each level needs, parents first.
+        const SCOPE_KINDS = {
+            PLATFORM: [],
+            COUNTY: ['county'],
+            CONSTITUENCY: ['county', 'constituency'],
+            WARD: ['county', 'constituency', 'ward']
+        };
+        const SCOPE_KIND_ORDER = ['county', 'constituency', 'ward'];
+        const SCOPE_KIND_PLURAL = { county: 'counties', constituency: 'constituencies', ward: 'wards' };
+        const SCOPE_SELECT_ID = { county: 'scopeCounty', constituency: 'scopeConstituency', ward: 'scopeWard' };
+        const SCOPE_GROUP_ID = { county: 'scopeCountyGroup', constituency: 'scopeConstituencyGroup', ward: 'scopeWardGroup' };
+
+        // status: idle (not signed in yet) | loading | ready | error
+        function newScopeState() {
+            return { status: 'idle', role: null, levels: [], assignment: null, seq: 0 };
+        }
+
+        function scopeKindsFor(level) {
+            return Object.prototype.hasOwnProperty.call(SCOPE_KINDS, level) ? SCOPE_KINDS[level] : [];
+        }
+
+        // Replaces the options of a <select> (values and labels escaped) and selects `preferred` when it is
+        // one of them, otherwise the first option.
+        function setOptions(select, options, preferred) {
+            select.innerHTML = options.map(o => '<option value="' + escapeHTML(o.value) + '">' + escapeHTML(o.label) + '</option>').join('');
+            const wanted = preferred !== undefined && options.some(o => o.value === String(preferred))
+                ? String(preferred)
+                : (options.length ? options[0].value : '');
+            select.value = wanted;
+        }
+
+        function showScopeKinds(kinds) {
+            SCOPE_KIND_ORDER.forEach(kind => {
+                document.getElementById(SCOPE_GROUP_ID[kind]).style.display = kinds.includes(kind) ? 'block' : 'none';
+            });
+        }
+
+        // The administrator's own area, for every role except SUPER_ADMIN: that selector offers that one
+        // value and is locked.
+        function lockedGeography(kind) {
+            const s = state.scope;
+            if (s.role === 'SUPER_ADMIN') return null;
+            return (s.assignment && s.assignment[kind]) || null;
+        }
+
+        async function loadScopeOptions() {
+            const scope = newScopeState();
+            scope.status = 'loading';
+            state.scope = scope;
+            renderScopeControls();
+            try {
+                const response = await fetch('/api/admin/notice-scope-options', { credentials: 'include' });
+                const json = await response.json();
+                if (!response.ok || !json.success || !json.data || !Array.isArray(json.data.levels)) {
+                    throw new Error('unexpected response');
+                }
+                scope.role = json.data.role;
+                scope.levels = json.data.levels.filter(l => Object.prototype.hasOwnProperty.call(SCOPE_LEVEL_LABELS, l));
+                scope.assignment = json.data.assignment || { county: null, constituency: null, ward: null };
+                scope.status = 'ready';
+            } catch (error) {
+                scope.status = 'error';
+            }
+            if (state.scope !== scope) return; // signed out meanwhile
+            renderScopeControls();
+        }
+
+        function renderScopeControls() {
+            const s = state.scope;
+            if (s.status === 'idle') return;
+
+            const level = document.getElementById('scopeLevel');
+            const note = document.getElementById('scopeNote');
+            if (s.status === 'loading') {
+                setOptions(level, [{ value: '', label: 'Loading your options...' }]);
+                showScopeKinds([]);
+                return;
+            }
+            if (s.status === 'error') {
+                setOptions(level, [{ value: '', label: 'Unavailable' }]);
+                showScopeKinds([]);
+                note.textContent = 'Your publishing options could not be loaded. Reload the page and sign in again.';
+                return;
+            }
+            if (!s.levels.length) {
+                setOptions(level, [{ value: '', label: 'No scope available' }]);
+                showScopeKinds([]);
+                note.textContent = 'Your account is not allowed to publish notices.';
+                return;
+            }
+
+            const options = s.levels.length === 1 ? [] : [{ value: '', label: 'Select who should see this notice' }];
+            s.levels.forEach(l => options.push({ value: l, label: SCOPE_LEVEL_LABELS[l] }));
+            setOptions(level, options);
+            note.textContent = s.role === 'SUPER_ADMIN' ? '' : 'You can publish only within the area you administer.';
+            onScopeLevelChange();
+        }
+
+        function onScopeLevelChange() {
+            const kinds = scopeKindsFor(document.getElementById('scopeLevel').value);
+            showScopeKinds(kinds);
+            if (kinds.length) return refreshScopeGeography('county');
+        }
+        function onScopeCountyChange() { return refreshScopeGeography('constituency'); }
+        function onScopeConstituencyChange() { return refreshScopeGeography('ward'); }
+
+        async function fetchGeographyList(url, key) {
+            const response = await fetch(url, { credentials: 'include' });
+            const json = await response.json();
+            if (!response.ok || !json.success || !Array.isArray(json[key])) throw new Error('geography unavailable');
+            return json[key];
+        }
+
+        // Reloads the selector `from` and every one below it (county > constituency > ward) that the chosen
+        // level uses. A later call supersedes an earlier one that is still waiting for the network.
+        async function refreshScopeGeography(from) {
+            const s = state.scope;
+            const stamp = ++s.seq;
+            const kinds = scopeKindsFor(document.getElementById('scopeLevel').value);
+
+            for (const kind of SCOPE_KIND_ORDER.slice(SCOPE_KIND_ORDER.indexOf(from))) {
+                if (!kinds.includes(kind)) break;
+                const select = document.getElementById(SCOPE_SELECT_ID[kind]);
+                const locked = lockedGeography(kind);
+
+                if (locked) {
+                    setOptions(select, [{ value: String(locked.id), label: locked.name }]);
+                    select.disabled = true;
+                    continue;
+                }
+                select.disabled = false;
+
+                const parentKind = kind === 'county' ? null : SCOPE_KIND_ORDER[SCOPE_KIND_ORDER.indexOf(kind) - 1];
+                const parentId = parentKind ? document.getElementById(SCOPE_SELECT_ID[parentKind]).value : null;
+                if (parentKind && !parentId) {
+                    setOptions(select, [{ value: '', label: 'Select a ' + parentKind + ' first' }]);
+                    continue;
+                }
+
+                let list;
+                try {
+                    if (kind === 'county') list = await fetchGeographyList('/api/counties', 'counties');
+                    else if (kind === 'constituency') list = await fetchGeographyList('/api/constituencies?county_id=' + encodeURIComponent(parentId), 'constituencies');
+                    else list = await fetchGeographyList('/api/wards?constituency_id=' + encodeURIComponent(parentId), 'wards');
+                } catch (error) {
+                    if (stamp !== s.seq) return;
+                    setOptions(select, [{ value: '', label: 'Could not load' }]);
+                    showAlert('adminAlert', 'Could not load the list of ' + SCOPE_KIND_PLURAL[kind], 'error');
+                    return;
+                }
+                if (stamp !== s.seq) return; // superseded
+
+                setOptions(
+                    select,
+                    [{ value: '', label: 'Select a ' + kind }].concat(list.map(g => ({ value: String(g.id), label: g.name }))),
+                    select.value
+                );
+            }
+        }
+
+        // What to add to the create request. { fields } or { error }.
+        // idle = the options were never loaded (only possible before sign-in): nothing is added, and the
+        // server treats the request as it always did. After sign-in a scope is always required here.
+        function readScopeSelection() {
+            const s = state.scope;
+            if (s.status === 'idle') return { fields: {} };
+            if (s.status === 'loading') return { error: 'Your publishing options are still loading. Try again in a moment.' };
+            if (s.status === 'error') return { error: 'Your publishing options could not be loaded. Reload the page and sign in again.' };
+            if (!s.levels.length) return { error: 'Your account is not allowed to publish notices.' };
+
+            const level = document.getElementById('scopeLevel').value;
+            if (!level || !s.levels.includes(level)) return { error: 'Choose who should see this notice' };
+
+            const fields = { scopeLevel: level };
+            const idKey = { COUNTY: 'countyId', CONSTITUENCY: 'constituencyId', WARD: 'wardId' }[level];
+            if (idKey) {
+                const kind = level.toLowerCase();
+                const raw = document.getElementById(SCOPE_SELECT_ID[kind]).value;
+                const id = /^[1-9][0-9]{0,9}$/.test(String(raw)) ? Number(raw) : null;
+                if (id === null) return { error: 'Choose a ' + kind };
+                fields[idKey] = id;
+            }
+            return { fields };
+        }
+
+        // Edit mode: the scope a notice was published with is shown, not changed.
+        function showScopeReadOnly(notice) {
+            document.getElementById('scopeControls').style.display = 'none';
+            document.getElementById('scopeNote').textContent =
+                'Scope: ' + noticeScopeText(notice) + '. The scope of a published notice cannot be changed here.';
+        }
+        function showScopeEditable() {
+            document.getElementById('scopeControls').style.display = 'block';
+            document.getElementById('scopeNote').textContent = '';
+        }
+
+        // Plain-text description of where a notice is published. A notice created before scopes existed
+        // (scope_level null) belongs to the ward it was created for and is labelled as legacy.
+        function noticeScopeText(notice) {
+            const ward = notice.ward_name, constituency = notice.constituency_name, county = notice.county_name;
+            const inConstituency = constituency ? ' (' + constituency + ')' : '';
+            switch (notice.scope_level) {
+                case 'PLATFORM': return 'Platform-wide';
+                case 'COUNTY': return 'County: ' + (county || 'unknown');
+                case 'CONSTITUENCY': return 'Constituency: ' + (constituency || 'unknown') + (county ? ' (' + county + ')' : '');
+                case 'WARD': return 'Ward: ' + (ward || 'unknown') + inConstituency;
+                default: return 'Legacy notice' + (ward ? ' for ward ' + ward + inConstituency : '');
+            }
         }
 
         // ─────────────────────────────────────────

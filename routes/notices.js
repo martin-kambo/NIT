@@ -23,12 +23,14 @@ const { getFoundingWardId } = require('../lib/ward-cache');
 const {
   createNoticeWithDays,
   createNoticeWithExpiresAt,
-  getNoticeWard,
-  getNoticeWardAndCategory,
+  createNoticeWithScope,
+  getNoticeScope,
+  getNoticeScopeAndCategory,
   updateNotice,
   deleteNotice,
 } = require('../lib/notices');
 const NoticeValidation = require('../lib/notice-validation');
+const NoticeScope = require('../lib/notice-scope');
 
 const router = express.Router();
 
@@ -52,9 +54,21 @@ router.get('/api/notices', async (req, res) => {
       noticeParams.push(filterCat);
       noticeWhere += ` AND category = $${noticeParams.length}`;
     }
+    // Phase 4B.42: geographic scope. req.wardId is the VIEWER'S ward as the session
+    // middleware derived it (users.ward_id, or the founding ward for a visitor with no
+    // session) -- nothing the client sends takes part. The predicate (lib/notice-scope.js)
+    // admits a notice whose scope contains that ward: PLATFORM always; COUNTY /
+    // CONSTITUENCY when the viewer's county / constituency (derived from the ward) matches;
+    // WARD and LEGACY (scope_level NULL) when the ward matches. Expiry, archive and category
+    // filters above are unchanged and still apply. When no ward is known at all
+    // (req.wardId null: no usable session AND the founding ward unresolved) there is still no
+    // ward filter on LEGACY notices, exactly as before, but a geographic scope cannot be matched
+    // to an unlocated viewer, so only PLATFORM notices are added to them.
     if (req.wardId != null) {
       noticeParams.push(req.wardId);
-      noticeWhere += ` AND ward_id = $${noticeParams.length}`;
+      noticeWhere += ` AND ${NoticeScope.publicScopeClause(noticeParams.length)}`;
+    } else {
+      noticeWhere += ` AND ${NoticeScope.UNLOCATED_VIEWER_CLAUSE}`;
     }
     const noticesQ = pool.query(
       `SELECT id, title, content, category, priority, created_at, expires_at,
@@ -133,16 +147,23 @@ router.get('/api/notices', async (req, res) => {
 router.get('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     const scope = RBAC.resolveReadScope(req.user);
+    // Phase 4B.42: a COUNTY / CONSTITUENCY / PLATFORM notice has no ward, so the effective
+    // constituency and county of a row are taken from the ward chain OR from the notice's own
+    // scope columns (lib/notice-scope.js ADMIN_READ_COLUMNS). The read scope is still decided
+    // by RBAC.resolveReadScope()/buildScopeFilter(); only the column references changed. The
+    // three *_name columns are for display only.
     const { clause: scopeClause, params } = RBAC.buildScopeFilter(
       scope,
-      { ward: 'n.ward_id', constituency: 'w.constituency_id', county: 'con.county_id' },
+      NoticeScope.ADMIN_READ_COLUMNS,
       []
     );
     const whereSql = scopeClause ? `WHERE ${scopeClause}` : '';
     const result = await pool.query(
-      `SELECT n.* FROM notices n
+      `SELECT n.*, w.name AS ward_name, con.name AS constituency_name, cty.name AS county_name
+         FROM notices n
          LEFT JOIN wards w ON w.id = n.ward_id
-         LEFT JOIN constituencies con ON con.id = w.constituency_id
+         LEFT JOIN constituencies con ON con.id = COALESCE(w.constituency_id, n.constituency_id)
+         LEFT JOIN counties cty ON cty.id = COALESCE(con.county_id, n.county_id)
        ${whereSql}
        ORDER BY n.created_at DESC`,
       params
@@ -151,6 +172,62 @@ router.get('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), asyn
   } catch (err) {
     console.error('GET /api/admin/notices error:', err.message);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Phase 4B.42: what the admin notice form may offer THIS caller. Read-only and informational:
+// it exposes nothing that is not already in the caller's own users row (role and assignment,
+// resolved to names), and it is NOT an authorization control -- POST /api/admin/notices
+// re-checks everything. `levels` comes from lib/notice-scope.js allowedScopeLevels(), which is
+// derived from the same RBAC check the create route runs, so the form cannot offer a scope the
+// server would refuse. SUPER_ADMIN gets all four levels and no fixed assignment (it picks any
+// county / constituency / ward from the public geography endpoints); a county, constituency or
+// ward administrator gets their own level and the entity it is fixed to; a MODERATOR gets none.
+router.get('/api/admin/notice-scope-options', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
+  try {
+    const user = req.user;
+    const levels = NoticeScope.allowedScopeLevels(req);
+    const assignment = { county: null, constituency: null, ward: null };
+
+    if (user.role !== RBAC.ROLES.SUPER_ADMIN) {
+      if (levels.includes(NoticeScope.SCOPE_LEVELS.WARD)) {
+        const r = await pool.query(
+          `SELECT w.id, w.name, c.id AS constituency_id, c.name AS constituency_name, k.id AS county_id, k.name AS county_name
+             FROM wards w
+             JOIN constituencies c ON c.id = w.constituency_id
+             JOIN counties k ON k.id = c.county_id
+            WHERE w.id = $1`,
+          [user.adminWardId]
+        );
+        if (r.rows.length) {
+          const row = r.rows[0];
+          assignment.ward = { id: row.id, name: row.name };
+          assignment.constituency = { id: row.constituency_id, name: row.constituency_name };
+          assignment.county = { id: row.county_id, name: row.county_name };
+        }
+      } else if (levels.includes(NoticeScope.SCOPE_LEVELS.CONSTITUENCY)) {
+        const r = await pool.query(
+          `SELECT c.id, c.name, k.id AS county_id, k.name AS county_name
+             FROM constituencies c
+             JOIN counties k ON k.id = c.county_id
+            WHERE c.id = $1`,
+          [user.adminConstituencyId]
+        );
+        if (r.rows.length) {
+          const row = r.rows[0];
+          assignment.constituency = { id: row.id, name: row.name };
+          assignment.county = { id: row.county_id, name: row.county_name };
+        }
+      } else if (levels.includes(NoticeScope.SCOPE_LEVELS.COUNTY)) {
+        const r = await pool.query('SELECT id, name FROM counties WHERE id = $1', [user.adminCountyId]);
+        if (r.rows.length) assignment.county = { id: r.rows[0].id, name: r.rows[0].name };
+      }
+    }
+
+    res.json({ success: true, data: { role: user.role, levels, assignment } });
+  } catch (err) {
+    console.error('GET /api/admin/notice-scope-options error:', err.message);
+    sendServerError(res);
   }
 });
 
@@ -218,6 +295,32 @@ function authorizeExistingNotice(req, res, currentWard) {
   return requirePermission(req, res, { wardId: currentWard });
 }
 
+// Phase 4B.42: the same decision for a stored notice that may now carry a geographic scope.
+// `record` is { wardId, scopeLevel, countyId, constituencyId } (lib/notices.js).
+//   LEGACY row (scopeLevel null)  -> authorizeExistingNotice(), byte-for-byte the old rule
+//                                    (exact ward; a ward-less row is SUPER_ADMIN-only).
+//   scoped row                    -> the permission for THAT scope (lib/notice-scope.js
+//                                    permissionFor), through the same requirePermission().
+//                                    PLATFORM is SUPER_ADMIN-only; COUNTY / CONSTITUENCY /
+//                                    WARD need an administrator assigned to exactly that entity.
+// An unrecognised scope level (impossible under notices_scope_check) is refused.
+function authorizeNoticeRecord(req, res, record) {
+  if (record.scopeLevel === null || record.scopeLevel === undefined) {
+    return authorizeExistingNotice(req, res, record.wardId);
+  }
+  const opts = NoticeScope.permissionFor({
+    level: record.scopeLevel,
+    countyId: record.countyId,
+    constituencyId: record.constituencyId,
+    wardId: record.wardId,
+  });
+  if (!opts) {
+    res.status(403).json({ success: false, error: 'Forbidden' });
+    return false;
+  }
+  return requirePermission(req, res, opts);
+}
+
 // SG2 + SG3 for the two create routes. Returns
 //   { wardId, supplied }   the ward to create the notice in, or
 //   null                   a response (400 / 503) has already been sent.
@@ -277,8 +380,9 @@ router.post('/api/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (re
 router.delete('/api/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/deleteNotice().
-    const currentWard = await getNoticeWard(pool, req.params.id);
-    if (currentWard !== undefined && !authorizeExistingNotice(req, res, currentWard)) return;
+    // Phase 4B.42: the scope (not just the ward) decides who may delete; see authorizeNoticeRecord().
+    const current = await getNoticeScope(pool, req.params.id);
+    if (current !== undefined && !authorizeNoticeRecord(req, res, current)) return;
 
     await deleteNotice(pool, req.params.id);
     res.json({ success: true });
@@ -297,6 +401,28 @@ router.post('/api/admin/notices', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), asy
     const input = NoticeValidation.validateNoticeCreate(req.body, { expiry: 'expiresAt' });
     if (!input.ok) return sendBadRequest(res, input.error);
     const { title, content, category, priority, expiresAt } = input.value;
+
+    // Phase 4B.42: an explicit geographic scope (scopeLevel). Order of checks, and nothing is
+    // written until all of them pass:
+    //   1. the scope fields are well-formed and not contradictory         -> 400
+    //   2. the named county / constituency / ward exist and every ancestor the caller named
+    //      really is the parent (real table relationships, never names)  -> 400
+    //   3. the caller's role and CURRENT assignment (req.user, attached by the session
+    //      middleware from the users row) permit exactly that scope, via the
+    //      canonical requirePermission() -> hasPermission()               -> 403
+    //   4. the INSERT. The scope is never taken from the client alone: step 3 compares the
+    //      requested entity with the caller's own assignment, and a wider request is refused,
+    //      never narrowed. A request with no scopeLevel takes the legacy path below, unchanged.
+    const scopeInput = NoticeScope.parseScopeInput(req.body);
+    if (!scopeInput.ok) return sendBadRequest(res, scopeInput.error);
+    if (scopeInput.supplied) {
+      const target = await NoticeScope.resolveScopeTarget(pool, scopeInput.scope);
+      if (!target.ok) return sendBadRequest(res, target.error);
+      if (!requirePermission(req, res, NoticeScope.permissionFor(target.scope))) return;
+
+      const notice = await createNoticeWithScope(pool, { title, content, category, priority, expiresAt, scope: target.scope });
+      return res.json({ success: true, notice });
+    }
 
     // Phase 3A Task 9: wardId is read from the body. Phase 4B.36: no more
     // silent fallback for a bad value, and never a NULL ward (SG2/SG3).
@@ -334,9 +460,12 @@ router.put('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), 
   const { title, content, categoryInput, priority, expiresAt } = input.value;
   try {
     // Phase 4B.2C/4B.36: SQL in lib/notices.js getNoticeWardAndCategory()/updateNotice().
-    const existing = await getNoticeWardAndCategory(pool, req.params.id);
+    // Phase 4B.42: the same single statement now also returns the scope columns, and the
+    // scope (not just the ward) decides who may edit. The scope itself is never editable:
+    // this route reads only title, content, category, priority and expiresAt from the body.
+    const existing = await getNoticeScopeAndCategory(pool, req.params.id);
     if (existing === undefined) return res.status(404).json({ success: false, error: 'Notice not found' });
-    if (!authorizeExistingNotice(req, res, existing.wardId)) return;
+    if (!authorizeNoticeRecord(req, res, existing)) return;
 
     const resolved = NoticeValidation.resolveUpdateCategory(categoryInput, existing.category);
     if (!resolved.ok) return sendBadRequest(res, resolved.error);
@@ -357,8 +486,9 @@ router.put('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), 
 router.delete('/api/admin/notices/:id', RBAC.requireMinRole(RBAC.ROLES.MODERATOR), async (req, res) => {
   try {
     // Phase 4B.2C: SQL moved to lib/notices.js getNoticeWard()/deleteNotice().
-    const currentWard = await getNoticeWard(pool, req.params.id);
-    if (currentWard !== undefined && !authorizeExistingNotice(req, res, currentWard)) return;
+    // Phase 4B.42: the scope (not just the ward) decides who may delete; see authorizeNoticeRecord().
+    const current = await getNoticeScope(pool, req.params.id);
+    if (current !== undefined && !authorizeNoticeRecord(req, res, current)) return;
 
     await deleteNotice(pool, req.params.id);
     res.json({ success: true });

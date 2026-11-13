@@ -181,8 +181,8 @@ app.use(async (req, res, next) => {
 // The sequence, every log line, the 30s interval, and the SIGTERM handler
 // are all unchanged — see bootstrap/startup.js.
 const migrations = require('./bootstrap/migrations');
-const { startServer } = require('./bootstrap/startup');
-startServer({
+const { startServerOrExit } = require('./bootstrap/startup'); // Phase 4B.44: logs a failed startup gate and exits non-zero (no unhandled rejection)
+startServerOrExit({
   app,
   PORT,
   pool,

@@ -11,6 +11,12 @@
 const { pool } = require('./database');
 const { transitionPeriod } = require('../lib/period-engine');
 const { setFoundingWardId } = require('../lib/ward-cache'); // Phase 4B.28C: ensurePhase2Migrations moved here
+const {
+  STATES: NOTICE_SCOPE_STATES,
+  NoticeScopeNotReadyError,
+  NOTICE_SCOPE_INSTALL_LOCK,
+  inspectNoticeScopeSchema,
+} = require('./notice-scope-readiness'); // Phase 4B.44
 const votingRouterModule = require('../routes/voting');
 const broadcastVoteUpdate = votingRouterModule.broadcastVoteUpdate || function () {};
 
@@ -294,6 +300,19 @@ async function ensureNoticesTable() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_priority  ON notices(priority)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notices_created   ON notices(created_at DESC)`);
 
+    // Phase 4B.42: geographic scope columns. Phase 4B.44: installed in ONE transaction, and a
+    // schema that is only partly installed or invalid (NoticeScopeNotReadyError) is NOT swallowed:
+    // it escapes this function so start-up stops (bootstrap/startup.js also verifies the result
+    // right after this function returns). Any other installer failure was rolled back and is logged
+    // here; the ad_requests / seed / forum steps below still run, and the start-up verification then
+    // refuses to continue because the scope schema is not installed.
+    try {
+      await ensureNoticeScopeColumns();
+    } catch (scopeErr) {
+      if (scopeErr && scopeErr.code === 'NOTICE_SCOPE_NOT_READY') throw scopeErr;
+      console.error('❌ ensureNoticeScopeColumns error (rolled back; start-up verification will stop the server):', scopeErr && scopeErr.message);
+    }
+
     // ✅ Ensure ad_requests table exists with the correct UUID default (no uuid-ossp dependency)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS ad_requests (
@@ -413,7 +432,186 @@ async function ensureNoticesTable() {
       console.warn('\u26a0\ufe0f  profile_photo migration skipped:', migErr.message);
     }
   } catch (err) {
+    // Phase 4B.44: a partly installed / invalid notice-scope schema must stop start-up, not be logged and skipped.
+    if (err && err.code === 'NOTICE_SCOPE_NOT_READY') throw err;
     console.error('❌ ensureNoticesTable error:', err.message);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// PHASE 4B.42: NOTICE GEOGRAPHIC SCOPE
+// Forward-only, additive and idempotent (runs on every start-up, like the
+// other ensure* functions in this file; this repository has no separate
+// migration-tracking table).
+//
+//   scope_level      NULL | PLATFORM | COUNTY | CONSTITUENCY | WARD
+//   county_id        the county, for a COUNTY notice only
+//   constituency_id  the constituency, for a CONSTITUENCY notice only
+//   ward_id          (already exists, Phase 2) the ward, for a WARD notice
+//
+// NULL scope_level is the explicit LEGACY state: a row created before this
+// phase (or through a route that does not name a scope). Such a row keeps its
+// existing meaning -- it belongs to the ward in ward_id -- and is read by the
+// old rule. No existing row is read, rewritten or assigned a scope here:
+// ADD COLUMN without a default only changes the catalog, and the CHECK below
+// is satisfied by every existing row (scope_level, county_id and
+// constituency_id are all NULL on them).
+//
+// The CHECK makes contradictory rows impossible: a valid level, exactly the
+// id that level needs, no id on PLATFORM, and no scope ids on a legacy row.
+// (It is wrapped in COALESCE(..., false): with scope_level NULL several branches
+// evaluate to NULL, and PostgreSQL accepts a row whose CHECK evaluates to NULL --
+// found by the real-database run, where a NULL level with a county_id slipped
+// through the unwrapped version.)
+// The foreign keys point at the real geography tables, so a scope cannot name
+// an entity that does not exist.
+//
+// One trigger (notices_keep_scoped_ward_null) protects the existing Phase 2
+// start-up backfill ("UPDATE notices SET ward_id = <founding ward> WHERE ward_id
+// IS NULL", which runs on every start) from ward-less scoped notices; see the
+// comment at the trigger. ensurePhase2Migrations() itself is not modified.
+// ═════════════════════════════════════════════════════════════════════
+async function ensureNoticeScopeColumns() {
+  // Phase 4B.44: atomic, verified, never repairs.
+  //   * ONE dedicated client from the existing pool (no second pool), ONE transaction:
+  //     BEGIN -> advisory lock -> inspect -> (install) -> inspect again -> COMMIT.
+  //   * Only a NOT_INSTALLED schema is installed. INSTALLED is left alone (no DDL).
+  //     PARTIAL and INVALID are never repaired: NoticeScopeNotReadyError is thrown and the
+  //     transaction rolled back.
+  //   * Any failure ROLLs BACK (nothing half-installed is ever committed), the client is released on
+  //     every path, and the ORIGINAL error is rethrown.
+  //   * pg_advisory_xact_lock serialises two instances starting at the same time: the second waits for
+  //     the first to commit, then finds the schema INSTALLED and runs no DDL.
+  // The DDL below is the Phase 4B.42 DDL, unchanged apart from running on the client.
+  const client = await pool.connect();
+  let destroyClient = false;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock($1, $2)', [NOTICE_SCOPE_INSTALL_LOCK.key1, NOTICE_SCOPE_INSTALL_LOCK.key2]);
+
+    const before = await inspectNoticeScopeSchema(client);
+    if (before.state === NOTICE_SCOPE_STATES.INSTALLED) {
+      await client.query('COMMIT');
+      console.log('✅ notices geographic scope columns ready');
+      return;
+    }
+    if (before.state !== NOTICE_SCOPE_STATES.NOT_INSTALLED) {
+      throw new NoticeScopeNotReadyError({
+        phase: 'before notice-scope installation',
+        state: before.state,
+        problems: before.missing
+          .map((object) => ({ object, requirement: 'must exist', reason: 'it is missing' }))
+          .concat(before.invalid),
+        diagnostics: before.diagnostics,
+        reason: 'the installer only installs a schema that is entirely absent and never repairs a partial or invalid one. Nothing was changed.',
+      });
+    }
+
+    // Phase 2 normally adds ward_id first; repeated here only so this function
+    // does not depend on that order. A no-op when the column already exists.
+    await client.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS ward_id INT`);
+    await client.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS scope_level VARCHAR(20)`);
+    await client.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS county_id INT`);
+    await client.query(`ALTER TABLE notices ADD COLUMN IF NOT EXISTS constituency_id INT`);
+
+    // Idempotent constraints: a repeated ADD CONSTRAINT raises duplicate_object,
+    // which is swallowed (same pattern as ensurePhase2Migrations).
+    await client.query(`
+      DO $$
+      BEGIN
+        ALTER TABLE notices
+          ADD CONSTRAINT notices_county_id_fk FOREIGN KEY (county_id) REFERENCES counties(id);
+      EXCEPTION WHEN duplicate_object THEN
+        NULL;
+      END $$
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        ALTER TABLE notices
+          ADD CONSTRAINT notices_constituency_id_fk FOREIGN KEY (constituency_id) REFERENCES constituencies(id);
+      EXCEPTION WHEN duplicate_object THEN
+        NULL;
+      END $$
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        ALTER TABLE notices
+          ADD CONSTRAINT notices_scope_check CHECK (COALESCE(
+               (scope_level IS NULL           AND county_id IS NULL     AND constituency_id IS NULL)
+            OR (scope_level = 'PLATFORM'      AND county_id IS NULL     AND constituency_id IS NULL     AND ward_id IS NULL)
+            OR (scope_level = 'COUNTY'        AND county_id IS NOT NULL AND constituency_id IS NULL     AND ward_id IS NULL)
+            OR (scope_level = 'CONSTITUENCY'  AND county_id IS NULL     AND constituency_id IS NOT NULL AND ward_id IS NULL)
+            OR (scope_level = 'WARD'          AND county_id IS NULL     AND constituency_id IS NULL     AND ward_id IS NOT NULL)
+          , false));
+      EXCEPTION WHEN duplicate_object THEN
+        NULL;
+      END $$
+    `);
+
+    // Guard for the Phase 2 start-up backfill. ensurePhase2Migrations() (above, untouched) runs
+    //   UPDATE notices SET ward_id = <founding ward> WHERE ward_id IS NULL
+    // on EVERY start-up. A PLATFORM / COUNTY / CONSTITUENCY notice has no ward by definition, so
+    // without this guard that statement would either stamp the founding ward onto it or, because
+    // of notices_scope_check, fail and abort the rest of the Phase 2 backfill. The trigger below
+    // makes that one statement skip such a row (RETURN NULL = "leave this row as it is"; it is
+    // not counted as updated, so no log line and no write). It fires only for an UPDATE that sets
+    // ward_id on a row whose ward_id is NULL and whose scope_level is one of those three, so legacy
+    // rows (scope_level NULL), WARD notices and every other statement are unaffected.
+    await client.query(`
+      CREATE OR REPLACE FUNCTION notices_keep_scoped_ward_null() RETURNS trigger AS $fn$
+      BEGIN
+        IF OLD.scope_level IN ('PLATFORM', 'COUNTY', 'CONSTITUENCY') THEN
+          RETURN NULL;
+        END IF;
+        RETURN NEW;
+      END
+      $fn$ LANGUAGE plpgsql
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_trigger
+           WHERE tgname = 'notices_keep_scoped_ward_null' AND tgrelid = 'notices'::regclass AND NOT tgisinternal
+        ) THEN
+          CREATE TRIGGER notices_keep_scoped_ward_null
+            BEFORE UPDATE OF ward_id ON notices
+            FOR EACH ROW
+            WHEN (OLD.ward_id IS NULL AND NEW.ward_id IS NOT NULL)
+            EXECUTE PROCEDURE notices_keep_scoped_ward_null();
+        END IF;
+      END $$
+    `);
+
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_notices_scope_level ON notices(scope_level)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_notices_county_id ON notices(county_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_notices_constituency_id ON notices(constituency_id)`);
+
+    const after = await inspectNoticeScopeSchema(client);
+    if (after.state !== NOTICE_SCOPE_STATES.INSTALLED) {
+      throw new NoticeScopeNotReadyError({
+        phase: 'after notice-scope installation (inside the install transaction)',
+        state: after.state,
+        problems: after.missing.map((object) => ({ object, requirement: 'must exist', reason: 'it is missing' })).concat(after.invalid),
+        diagnostics: null,
+        reason: 'the installed schema did not verify, so the transaction was rolled back and nothing was committed.',
+      });
+    }
+
+    await client.query('COMMIT');
+    console.log('✅ notices geographic scope columns ready');
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_rollbackErr) {
+      // The connection itself is unusable: do not return it to the pool.
+      destroyClient = true;
+    }
+    throw err; // the original failure, unchanged
+  } finally {
+    client.release(destroyClient ? true : undefined);
   }
 }
 
@@ -998,6 +1196,7 @@ async function ensurePhase2Migrations() {
 module.exports = {
   initDB,
   ensureNoticesTable,
+  ensureNoticeScopeColumns,   // Phase 4B.42: notice geographic scope (also run from ensureNoticesTable)
   ensureVotingPeriodsTable,
   ensureActivePeriod,
   ensureCandidatesTable,

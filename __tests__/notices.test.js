@@ -134,10 +134,14 @@ function createFakeDb() {
 const SQL = {
   listNotices: /^SELECT id, title, content, category, priority, created_at, expires_at, NULL AS contact_phone, NULL AS business_name, false AS is_ad FROM notices WHERE /,
   listAds: /^SELECT id, business_name AS title, ad_content AS content, .* FROM ad_requests WHERE status = 'approved'/,
-  adminList: /^SELECT n\.\* FROM notices n LEFT JOIN wards w ON w\.id = n\.ward_id LEFT JOIN constituencies con ON con\.id = w\.constituency_id /,
-  wardOf: /^SELECT ward_id FROM notices WHERE id = \$1$/,
+  // Phase 4B.42: the admin list also joins the notice's own constituency / county (scoped
+  // notices have no ward) and selects three display names.
+  adminList: /^SELECT n\.\*, w\.name AS ward_name, con\.name AS constituency_name, cty\.name AS county_name FROM notices n LEFT JOIN wards w ON w\.id = n\.ward_id LEFT JOIN constituencies con ON con\.id = COALESCE\(w\.constituency_id, n\.constituency_id\) LEFT JOIN counties cty ON cty\.id = COALESCE\(con\.county_id, n\.county_id\) /,
+  // Phase 4B.42: DELETE's lookup now returns the scope columns too (was: SELECT ward_id ...).
+  wardOf: /^SELECT ward_id, scope_level, county_id, constituency_id FROM notices WHERE id = \$1$/,
   // Phase 4B.36: PUT loads ward AND category in one statement.
-  noticeScope: /^SELECT ward_id, category FROM notices WHERE id = \$1$/,
+  // Phase 4B.42: the same statement also returns the scope columns.
+  noticeScope: /^SELECT ward_id, category, scope_level, county_id, constituency_id FROM notices WHERE id = \$1$/,
   insertWithExpiry: /^INSERT INTO notices \(title,content,category,priority,expires_at,created_by,ward_id\) VALUES \(\$1,\$2,\$3,\$4,\$5,\$6,\$7\) RETURNING \*$/,
   insertWithDays: /^INSERT INTO notices \(title, content, category, priority, expires_at, created_by, ward_id\) VALUES \(\$1, \$2, \$3, \$4, NOW\(\) \+ \(\$5 \|\| ' days'\)::INTERVAL, 'admin', \$6\) RETURNING \*$/,
   // Phase 4B.36: params are [title, content, category, priority, expires_at,
@@ -276,8 +280,10 @@ function stubNoticeWards(wards) {
   db.on(SQL.wardOf, (_sql, params) => {
     const id = String(params[0]);
     pgIntegerIdOrThrow(id);
+    // Phase 4B.42: the lookup also returns the scope columns; a plain ward map is a LEGACY
+    // row (scope_level NULL), which is what every test in this file has always meant.
     return Object.prototype.hasOwnProperty.call(wards, id)
-      ? rows({ ward_id: wards[id] })
+      ? rows({ ward_id: wards[id], scope_level: null, county_id: null, constituency_id: null })
       : rows();
   });
 }
@@ -299,8 +305,17 @@ function stubNoticeScopes(scopes) {
   db.on(SQL.noticeScope, (_sql, params) => {
     const id = String(params[0]);
     pgIntegerIdOrThrow(id);
+    // Phase 4B.42: the scope columns default to a LEGACY row (scope_level NULL), which is what
+    // every test in this file has always meant; a test may pass them to describe a scoped row.
+    const s = scopes[id];
     return Object.prototype.hasOwnProperty.call(scopes, id)
-      ? rows({ ward_id: scopes[id].ward_id, category: scopes[id].category })
+      ? rows({
+        ward_id: s.ward_id,
+        category: s.category,
+        scope_level: s.scope_level === undefined ? null : s.scope_level,
+        county_id: s.county_id === undefined ? null : s.county_id,
+        constituency_id: s.constituency_id === undefined ? null : s.constituency_id,
+      })
       : rows();
   });
 }
@@ -917,7 +932,7 @@ describe('DELETE /api/admin/notices/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ success: true });
     expect(db.calls.map((c) => c.sql)).toEqual([
-      'SELECT ward_id FROM notices WHERE id = $1',
+      'SELECT ward_id, scope_level, county_id, constituency_id FROM notices WHERE id = $1',
       'DELETE FROM notices WHERE id = $1',
     ]);
     expect(db.calls[1].params).toEqual(['5']);
@@ -1214,7 +1229,7 @@ const APPROVED_CATEGORIES = ['general', 'public', 'service', 'payment', 'event',
 const APPROVED_PRIORITIES = ['normal', 'high', 'low'];
 const ADMIN_PERSONAS = ['superAdmin', 'wardAdmin1', 'wardAdmin2', 'moderator', 'countyAdmin', 'constituencyAdmin'];
 const BASE_TEXT = { title: 'A valid notice title', content: 'A valid notice body text.' };
-const LOOKUP_SQL = 'SELECT ward_id, category FROM notices WHERE id = $1';
+const LOOKUP_SQL = 'SELECT ward_id, category, scope_level, county_id, constituency_id FROM notices WHERE id = $1';
 
 // The three routes that take a notice body. `prepare()` registers the fakes a
 // SUCCESSFUL call needs. For POST routes the persisted statement is the
